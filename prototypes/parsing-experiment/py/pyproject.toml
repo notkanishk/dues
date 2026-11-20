@@ -1,0 +1,28 @@
+# PROTOTYPE, throwaway
+[project]
+name = "parsing-experiment-py"
+version = "0.0.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "pypdfium2==5.15.2",
+  "rapidocr==3.10.0",
+  "onnxruntime==1.32.0",
+  "docling==2.151.1",
+  "dateparser==1.5.1",
+  "price-parser==0.5.1",
+  "pillow",
+  # CPU-only torch for docling: the default Linux wheels pull multi-GB CUDA libs (filled the LXC disk)
+  "torch",
+  "torchvision",
+]
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]

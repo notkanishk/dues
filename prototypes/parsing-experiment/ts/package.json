@@ -1,0 +1,11 @@
+{
+  "name": "parsing-experiment-ts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "unpdf": "2.2.1",
+    "tesseract.js": "7.0.0",
+    "chrono-node": "2.10.3",
+    "@gutenye/ocr-node": "1.4.9"
+  }
+}

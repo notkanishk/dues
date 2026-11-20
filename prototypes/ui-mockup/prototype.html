@@ -1,0 +1,567 @@
+<!-- PROTOTYPE — throwaway. Three structurally different variants of the reimbursement tracker, switchable via ?variant=A|B|C. -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reimbursement Tracker prototype</title>
+<style>
+:root{--bg:#FAFAF8;--sf:#FFFFFF;--bd:#E4E4E0;--tx:#1A1A1A;--mu:#6B6B6B;--ac:#1F4FD8;--on:#fff;--cl:#F1F1EE;--grf:#6B6B6B;--grb:#EEEEEC;--amf:#8A5A00;--amb:#FFF1CC;--rdf:#A8201A;--rdb:#FDE3E1;--gnf:#1B6B3A;--gnb:#DDF3E4;--blf:#1F4FD8;--blb:#E1E9FD}
+@media(prefers-color-scheme:dark){:root:not([data-t=light]){--bg:#141414;--sf:#1E1E1E;--bd:#2E2E2E;--tx:#EDEDED;--mu:#9A9A9A;--ac:#7CA2FF;--on:#141414;--cl:#191919;--grf:#B0B0B0;--grb:#2A2A2A;--amf:#FFCF66;--amb:#3A2E0A;--rdf:#FF8A80;--rdb:#3D1512;--gnf:#7DD99B;--gnb:#12301C;--blf:#7CA2FF;--blb:#14234A}}
+:root[data-t=dark]{--bg:#141414;--sf:#1E1E1E;--bd:#2E2E2E;--tx:#EDEDED;--mu:#9A9A9A;--ac:#7CA2FF;--on:#141414;--cl:#191919;--grf:#B0B0B0;--grb:#2A2A2A;--amf:#FFCF66;--amb:#3A2E0A;--rdf:#FF8A80;--rdb:#3D1512;--gnf:#7DD99B;--gnb:#12301C;--blf:#7CA2FF;--blb:#14234A}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums;overflow-x:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--ac);cursor:pointer}
+.mu{color:var(--mu)}.grow{flex:1}.full{width:100%}
+.btn{border:1px solid var(--bd);background:var(--sf);border-radius:6px;padding:6px 12px;min-height:34px;cursor:pointer;white-space:nowrap}
+.btn.pri{background:var(--ac);color:var(--on);border-color:var(--ac)}
+.btn.sm{min-height:28px;padding:2px 9px;font-size:12px}
+.btn.link{border:0;background:none;color:var(--ac);padding:2px 6px;min-height:0}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+label.btn{display:inline-flex;align-items:center}
+.lnk{color:var(--ac);cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400}
+.bdg{display:inline-block;font-size:12px;padding:1px 8px;border-radius:99px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.k-g{color:var(--grf);background:var(--grb)}.k-a{color:var(--amf);background:var(--amb)}.k-r{color:var(--rdf);background:var(--rdb)}.k-n{color:var(--gnf);background:var(--gnb)}.k-b{color:var(--blf);background:var(--blb)}
+.k-u{color:var(--mu);border:1px solid var(--bd)}.mt{opacity:.7}
+.chip{border:1px solid var(--bd);background:var(--sf);border-radius:99px;padding:4px 12px;min-height:30px;cursor:pointer;font-size:13px}
+.chip.on{background:var(--ac);color:var(--on);border-color:var(--ac)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}
+.via{font-size:12px}.via i{font-style:normal;border:1px solid var(--bd);border-radius:4px;padding:0 5px}
+input[type=text],input[type=search],input[type=date],input:not([type]),select,textarea{background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:7px 10px;min-height:34px;max-width:100%}
+.dot{background:var(--rdf);color:var(--on);border-radius:99px;font-size:11px;padding:0 6px;margin-left:6px}
+.empty{padding:14px;color:var(--mu)}
+.hl{animation:hl 1.6s}@keyframes hl{from{background:var(--amb)}}
+/* rows (A) */
+.r1{display:grid;grid-template-columns:28px 52px minmax(180px,1fr) minmax(0,110px) minmax(0,96px) 52px 84px 36px minmax(0,140px) auto;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--bd);background:var(--sf);min-height:40px;cursor:pointer}
+.r1.rh{background:none;color:var(--mu);font-size:11px;text-transform:uppercase;letter-spacing:.05em;cursor:default;min-height:0;padding:4px 12px}
+.r1 .what{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;font-size:15px}
+.r1 .vend,.r1 .ref{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.amt{text-align:right;white-space:nowrap}
+.r1 .st{display:flex;flex-wrap:wrap;gap:4px}.r1 .act{display:flex;gap:4px;justify-content:flex-end}
+.r1 .meta{display:none}
+.r2{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--bd);background:var(--sf);flex-wrap:wrap}
+.sh{display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--mu);padding:8px 12px;cursor:pointer}
+.grp{margin-top:24px}.sum{font-size:20px;font-weight:600;padding:8px 12px}.sum small{font-size:14px;font-weight:400;color:var(--mu);cursor:pointer;margin-left:8px}
+.wrapb{border:1px solid var(--bd);border-radius:6px;overflow:hidden}
+/* shell A */
+.A{display:flex;min-height:100vh}
+.side{width:200px;flex:none;border-right:1px solid var(--bd);padding:16px 12px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px}
+.brand{font-weight:700;font-size:18px;padding:4px 12px 12px}.sp{flex:1}
+.nv{display:flex;justify-content:space-between;padding:9px 12px;border-radius:6px;cursor:pointer;min-height:40px;align-items:center}.nv.on{background:var(--grb);font-weight:600}
+.main{flex:1;min-width:0;padding:16px 20px 150px;max-width:1100px}
+.top{display:flex;gap:8px;margin-bottom:8px}.top input{flex:1}
+.tabs{display:none}
+.tray{position:sticky;bottom:60px;background:var(--sf);border:1px solid var(--ac);border-radius:6px;padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px;z-index:5}
+.stick{position:sticky;bottom:64px;background:var(--sf);border:1px solid var(--ac);border-radius:6px;padding:10px 12px;display:flex;gap:10px;align-items:center;margin-top:12px;z-index:5;flex-wrap:wrap}
+/* panels & modals */
+.pbg{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:55}
+.panel{position:fixed;top:0;right:0;bottom:0;width:440px;max-width:100%;background:var(--sf);border-left:1px solid var(--bd);z-index:60;overflow:auto;padding:16px}
+.panel.mid{top:5vh;bottom:5vh;right:50%;transform:translateX(50%);width:680px;border:1px solid var(--bd);border-radius:10px}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:70;display:flex;align-items:center;justify-content:center}
+.dlg{background:var(--sf);border:1px solid var(--bd);border-radius:10px;width:min(440px,calc(100vw - 24px));max-height:92vh;overflow:auto;padding:16px}
+.dlg.w{width:min(640px,calc(100vw - 24px))}
+.mh{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.big{display:flex;align-items:center;gap:6px;font-size:32px;font-weight:600;margin:4px 0}.big input{font-size:32px;font-weight:600;border:0;border-bottom:1px solid var(--bd);border-radius:0;width:100%;padding:0}
+.fi{width:100%;margin:4px 0}.lbl{font-size:12px;color:var(--mu);margin-top:8px}
+.warn{background:var(--amb);color:var(--amf);padding:10px;border-radius:6px;margin:10px 0 6px}
+.row2{display:flex;gap:8px}.row2 .btn{flex:1}
+.tg{display:flex;gap:8px;align-items:center;margin:6px 0}
+textarea.ht{width:100%;font:12px/1.4 ui-monospace,Menlo,monospace;min-height:220px}
+.toast{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);background:#111;color:#fff;border-radius:8px;padding:8px 8px 8px 14px;z-index:90;display:flex;gap:10px;align-items:center;max-width:calc(100vw - 24px)}
+.toast .btn{background:#333;color:#fff;border-color:#555;min-height:28px}
+.sw{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:40;background:#000;color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:99px;display:flex;align-items:center;box-shadow:0 4px 18px rgba(0,0,0,.45);font-weight:600;white-space:nowrap}
+.sw button{background:none;border:0;color:#fff;font-size:20px;width:40px;height:36px;cursor:pointer}.sw span{padding:0 6px;min-width:120px;text-align:center;font-size:13px}
+/* detail */
+.dh{display:flex;gap:8px;align-items:flex-start}.dh input.inl{font-size:17px;font-weight:600;width:100%;border-color:transparent;padding:2px 4px}
+.dt h4{margin:18px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mu)}
+.tl{list-style:none;padding:0;margin:8px 0;display:flex;gap:6px}
+.tl li{flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--mu);border-top:3px solid var(--bd);padding-top:6px}
+.tl li.done{border-color:var(--gnf);color:var(--tx)}.tl li.cur{border-color:var(--ac);color:var(--tx);font-weight:600}
+.tl i{font-style:normal}
+.fld{display:grid;grid-template-columns:96px 1fr;gap:8px;align-items:center;margin:4px 0}.fld span{color:var(--mu);font-size:12px}.fld input,.fld select{width:100%}
+.dup{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0}.dc{border:1px solid var(--bd);border-radius:6px;padding:8px;font-size:12px}.dc div{display:flex;justify-content:space-between;gap:6px}.dc div span:last-child{text-align:right}
+.doc{display:flex;gap:8px;align-items:center;margin:4px 0;font-size:13px}.th{width:32px;height:32px;background:var(--grb);display:flex;align-items:center;justify-content:center;border-radius:4px;flex:none;color:var(--mu)}.dn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fb{display:flex;gap:6px;flex-wrap:wrap;margin-top:18px}
+/* import */
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:12px 0}
+.ac{border:1px solid var(--bd);background:var(--sf);border-radius:6px;padding:10px;display:flex;gap:10px;cursor:pointer;position:relative}
+.ac.on{outline:2px solid var(--ac)}.ac.dim{opacity:.6}.ac.trk{outline:2px solid var(--gnf)}
+.ac .t{width:64px;height:64px;background:var(--grb);display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--mu);flex:none;border-radius:4px}
+.ac .n{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-weight:500}
+.ac .ck{position:absolute;right:10px;top:10px}.ac input{width:20px;height:20px}
+.divd{grid-column:1/-1;color:var(--mu);font-size:12px;border-top:1px solid var(--bd);padding-top:8px}
+.sbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
+.drop{border:1px dashed var(--bd);border-radius:6px;padding:12px;color:var(--mu);text-align:center;cursor:pointer;margin:8px 0}
+.sr{display:grid;grid-template-columns:56px 60px minmax(0,1fr) 90px 90px 300px;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--bd);background:var(--sf)}
+.sr .nr{font:12px ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mu)}
+.sr .res{display:flex;gap:4px;align-items:center;flex-wrap:wrap}.sr.pers{opacity:.5}
+.rd{width:8px;height:8px;border-radius:99px;background:var(--rdf);display:inline-block}
+.phonenote{display:none;color:var(--mu);font-size:12px;padding:4px 0}
+/* batches */
+.br{display:grid;grid-template-columns:minmax(0,1.4fr) 100px 90px 60px 110px 50px auto;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--bd);background:var(--sf);cursor:pointer}
+.br .act{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.bx{background:var(--bg);padding:8px 12px;border-bottom:1px solid var(--bd);overflow-x:auto}
+table{border-collapse:collapse;width:100%}th,td{padding:5px 10px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mu);font-weight:600}
+td.n,th.n{text-align:right}
+/* B */
+.tb{display:flex;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--bd);background:var(--sf);position:sticky;top:0;z-index:10;flex-wrap:wrap}
+.tb input{flex:1;min-width:140px;max-width:320px}
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:12px;padding:16px 16px 150px;overflow-x:auto;align-items:start}
+.col{background:var(--cl);border:1px solid var(--bd);border-radius:6px;min-width:0}
+.ch{padding:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;position:sticky;top:0}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:8px 10px;margin:8px;cursor:pointer}
+.card.cr{border-left:3px solid var(--rdf)}.card.ca{border-left:3px solid var(--amf)}
+.ct{display:flex;gap:6px;justify-content:space-between;align-items:flex-start}.cw{font-weight:500;min-width:0;word-break:break-word}
+.cm{font-size:12px;margin:2px 0}.cbd{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}.cf{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.ln{display:flex;justify-content:space-between;gap:6px;font-size:12px;padding:2px 0}
+.seg{display:none}
+.ovp{position:fixed;inset:0;background:var(--bg);z-index:35;overflow:auto;padding:0 16px 150px}
+.ovp>.in{max-width:1100px;margin:0 auto}
+.ovh{display:flex;gap:8px;align-items:center;padding:12px 0;position:sticky;top:0;background:var(--bg);z-index:3}
+/* C */
+.cwrap{display:flex;align-items:flex-start}.cwrap .tw{flex:1;min-width:0;overflow-x:auto}
+.cp{width:430px;flex:none;border-left:1px solid var(--bd);position:sticky;top:0;max-height:100vh;overflow:auto;background:var(--sf);padding:16px}
+.C{padding:12px 16px 150px}.C table{font-size:13px}.C td,.C th{padding:4px 8px}
+.C tr.cr{cursor:pointer}.C tr.cr:hover td{background:var(--grb)}.C tr.sel td{background:var(--blb)}.C tr.cur td{outline:0;box-shadow:inset 0 -2px 0 var(--ac)}
+.C tr.fil td{color:var(--mu)}.C td.wh{max-width:340px;overflow:hidden;text-overflow:ellipsis}.C .pm{display:none}
+.C th[data-a]{cursor:pointer}
+.cwrap.p .hp{display:none}
+@media(max-width:719px){
+ .btn{min-height:44px}.btn.sm{min-height:40px}.chip{min-height:38px}
+ .side{display:none}
+ .main{padding:12px 0 150px}.top{padding:0 12px}
+ .tabs{display:grid;grid-template-columns:1fr 1fr 64px 1fr 56px;position:fixed;bottom:0;left:0;right:0;height:56px;background:var(--sf);border-top:1px solid var(--bd);z-index:30;align-items:center;text-align:center}
+ .tabs a{color:var(--tx);padding:14px 0;font-size:13px}.tabs a.on{font-weight:700}.tabs .plus{background:var(--ac);color:var(--on);border-radius:99px;width:48px;height:48px;font-size:26px;margin:-18px auto 0;border:0;cursor:pointer}
+ .tray{display:none}
+ .r1{grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"w a x" "m m x";padding:12px 16px;min-height:64px;gap:2px 10px}
+ .r1 .ck,.r1 .paid,.r1 .vend,.r1 .ref,.r1 .via,.r1 .docs,.r1 .st,.rh{display:none}
+ .r1 .what{grid-area:w}.r1 .amt{grid-area:a}.r1 .act{grid-area:x}.r1 .meta{grid-area:m;display:block;font-size:12px;color:var(--mu)}
+ .cards{grid-template-columns:1fr}
+ .sr{grid-template-columns:1fr auto;gap:4px}.sr .nr,.sr .res{grid-column:1/-1}
+ .br{grid-template-columns:minmax(0,1fr) auto;gap:4px}.br .act{grid-column:1/-1;justify-content:flex-start}
+ .phonenote{display:block}
+ .ov{align-items:flex-end}.dlg,.dlg.w{width:100%;border-radius:12px 12px 0 0}
+ .panel,.panel.mid{width:100%;top:0;bottom:0;right:0;transform:none;border-radius:0;border:0}
+ .tl{flex-direction:column}.tl li{border-top:0;border-left:3px solid var(--bd);padding:0 0 0 8px}.tl li.done{border-color:var(--gnf)}.tl li.cur{border-color:var(--ac)}
+ .dup{grid-template-columns:1fr}
+ .sw{bottom:68px}.toast{bottom:130px}.stick{bottom:134px}
+ .tb input{max-width:none}
+ .board{display:block;padding:8px 8px 150px}.col{display:none}.col.on{display:block}
+ .seg{display:flex;gap:6px;overflow-x:auto;padding:8px;background:var(--sf);border-bottom:1px solid var(--bd)}
+ .ovp{padding:0 8px 150px}
+ .C{padding:8px 8px 150px}.C .hm{display:none}.C .pm{display:block;color:var(--mu);font-size:11px}.C td.wh{max-width:120px}.C th:nth-child(2){display:none}.C td.pd{display:none}.C td,.C th{padding:4px 5px}
+ .cp{position:fixed;left:0;right:0;bottom:0;width:100%;max-height:80vh;z-index:60;border:0;border-top:2px solid var(--ac);border-radius:12px 12px 0 0}
+ .cwrap{display:block}
+}
+</style></head>
+<body>
+<div id="app"></div><div id="modal"></div><div id="toast"></div><div id="sw"></div>
+<script>
+/* ===== helpers ===== */
+const TODAY='2026-11-20',MON='Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
+const $=s=>document.querySelector(s);
+const D=s=>Date.UTC(+s.slice(0,4),+s.slice(5,7)-1,+s.slice(8,10));
+const days=(a,b=TODAY)=>Math.round((D(b)-D(a))/864e5);
+const fd=d=>{const[y,m,x]=d.split('-');return +x+' '+MON[m-1]+(y!=='2026'?' '+y:'')};
+const dmy=d=>{const[y,m,x]=d.split('-');return x+'/'+m+'/'+y.slice(2)};
+const inr=n=>'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const inr0=n=>'₹'+Number(n).toLocaleString('en-IN',{maximumFractionDigits:0});
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sum=a=>Math.round(a.reduce((s,x)=>s+x,0)*100)/100;
+const bdg=(t,c,x='')=>`<span class="bdg k-${c} ${x}">${esc(t)}</span>`;
+const btn=(t,a,id,c='',x='')=>`<button class="btn sm ${c}" data-a="${a}" data-id="${esc(id)}" ${x}>${t}</button>`;
+const OPEN=['await','refund','inv','ready','draft'];
+const STG={await:['Awaiting delivery','g'],refund:['Refund pending','a'],inv:['Needs invoice','a'],ready:['Ready','n'],draft:['In draft batch','g'],claimed:['Claimed','b'],reimb:['Reimbursed','n','mt'],closed:['Closed','g','mt']};
+const stBadge=i=>bdg(STG[i.stage][0],STG[i.stage][1],STG[i.stage][2]||'');
+
+/* ===== data (in memory only) ===== */
+const mk=(id,paid,what,vendor,kind,ref,via,amount,stage,since,docs,o={})=>({id,paidOn:paid,what,vendor,kind,orderRef:ref[0],billNo:ref[1],paidVia:via,amount,stage,stageSince:since,docs:docs.map(d=>({t:d[0],ty:d[1]})),remarks:'',purpose:'',batch:'',track:kind==='online'?'deliv':'direct',notDup:[],closedWhy:'',hist:{},...o});
+const S={seq:100,last:'Savings',
+items:[
+mk(1,'2026-11-18','Solder wire 60/40 500 g ×2','Robu.in','online',['RB-482917',''],'Card',1180,'await','2026-11-18',[]),
+mk(2,'2026-11-09','MDF sheets 12 mm ×4','Amazon','online',['408-5512094-7731526',''],'Savings',3240,'await','2026-11-09',[]),
+mk(3,'2026-11-05','PLA filament 1 kg ×3','Robu.in','online',['RB-481120',''],'Card',2697,'refund','2026-11-07',[],{track:'cancel',hist:{cancel:'2026-11-07'}}),
+mk(4,'2026-11-11','Plywood 18 mm ×2 + flexible ply','New Era Plywood','shop',['',''],'Savings',6450,'inv','2026-11-11',[['UPI screenshot','proof']],{purpose:'Workbench build'}),
+mk(5,'2026-11-14','Cab to hardware market (return)','City Cabs','service',['',''],'Savings',1800,'inv','2026-11-14',[]),
+mk(6,'2026-11-19','Spray paint matte black ×6','Blinkit','online',['BLK-90417733',''],'Card',1314,'inv','2026-11-19',[],{hist:{delivered:'2026-11-19'}}),
+mk(7,'2026-11-17','Expo flyers A5 ×500','QuickPrint Copy Centre','service',['','2291'],'Savings',2360,'ready','2026-11-17',[['Expo Flyers Invoice.pdf','invoice']],{purpose:'Expo'}),
+mk(8,'2026-11-03','AWS invoice — October','Amazon Web Services','service',['','2026-OCT-1193'],'Card',1042.37,'ready','2026-11-03',[['AWS Invoice.pdf','invoice']]),
+mk(9,'2026-10-31','Basement spare keys ×2','Corner Key Maker','shop',['','-'],'Savings',300,'ready','2026-10-31',[['Scan (handwritten)','invoice']],{remarks:'Informal/raw bill attached'}),
+mk(10,'2026-10-23','Metal fabrication — CNC table frame','Apex Steel Works','service',['','147'],'Savings',8500,'ready','2026-10-23',[['Metal Fabrication Invoice.pdf','invoice']],{purpose:'CNC table'}),
+mk(11,'2026-10-20','Electronics components (ESP32 ×5, sensors, jumpers)','Robu.in','online',['RB-478203','IN-20871'],'Card',4286.5,'ready','2026-10-20',[['Electronics Components 1 Invoice.pdf','invoice']],{hist:{delivered:'2026-10-25'}}),
+mk(12,'2026-09-28','O-week tent rental','Festive Tent House','service',['','612'],'Other',12000,'ready','2026-09-28',[['O-week Tent Invoice.pdf','invoice']],{purpose:'O-week'}),
+mk(13,'2025-12-29','Spray paint','Rainbow Paints & Hardware','shop',['','7731045'],'Savings',250,'ready','2025-12-29',[['Spray Paint Invoice.pdf','invoice']]),
+mk(14,'2026-10-21','Acrylic sheet 3 mm ×2','Amazon','online',['',''],'Savings',1150,'closed','2026-11-02',[],{track:'cancel',closedWhy:'refunded',hist:{cancel:'2026-10-24',refunded:'2026-11-02'}}),
+],
+ledger:[
+{id:'L1',date:'2025-12-29',bill:'7731045',desc:'Spray Paint',amt:250,batch:'January1',status:'reimbursed',vendor:'Rainbow Paints & Hardware'},
+{id:'L2',date:'2026-08-12',bill:'IN-5120',desc:'Soldering tips T18 ×3 (Amazon)',amt:1600,batch:'September1',status:'reimbursed',vendor:'Amazon',order:'404-7781203-3392511'},
+{id:'L3',date:'2026-10-21',bill:'-',desc:'Metal fabrication — CNC table frame advance',amt:8500,batch:'November1',status:'claimed',vendor:'Apex Steel Works'},
+{id:'L4',date:'2026-08-18',bill:'5207',desc:'City Cabs 3',amt:2400,batch:'September1',status:'reimbursed'},
+{id:'L5',date:'2026-08-22',bill:'41',desc:'Lamp Kit MDF Laser Cut',amt:4500,batch:'September1',status:'reimbursed'},
+{id:'L6',date:'2026-08-25',bill:'612',desc:'O-Week Banner Stand PVC',amt:2100,batch:'September1',status:'reimbursed'},
+{id:'L7',date:'2026-08-27',bill:'904',desc:'Badge Workshop Vinyl',amt:2250,batch:'September1',status:'reimbursed'},
+{id:'L8',date:'2025-12-15',bill:'30418',desc:'Robu Order (Workshop Prep)',amt:12000,batch:'January1',status:'reimbursed',vendor:'Robu.in'},
+{id:'L9',date:'2026-08-30',bill:'207731',desc:'Sensor Board PCB',amt:1800,batch:'September1',status:'reimbursed'},
+{id:'L10',date:'2026-10-26',bill:'5521',desc:'Metro Hardware — fasteners & brackets',amt:2210,batch:'November1',status:'claimed'},
+{id:'L11',date:'2026-10-27',bill:'-',desc:'Cab to market (Oct)',amt:1650,batch:'November1',status:'claimed'},
+{id:'L12',date:'2026-10-28',bill:'77',desc:'Acrylic cement and solvent',amt:900,batch:'November1',status:'claimed'},
+{id:'L13',date:'2026-10-29',bill:'4410',desc:'Masking tape rolls',amt:576,batch:'November1',status:'claimed'},
+{id:'L14',date:'2026-10-30',bill:'-',desc:'Sandpaper assorted',amt:400,batch:'November1',status:'claimed'},
+],
+batches:[
+{name:'November1',status:'submitted',sub:'2026-11-12',count:6,total:14236},
+{name:'Conference trip',status:'submitted',sub:'2026-06-30',count:11,total:58250},
+{name:'September1',status:'reimbursed',sub:'2026-09-04',count:14,total:31420},
+{name:'January1',status:'reimbursed',sub:'2026-01-03',count:9,total:11874},
+],
+amz:[
+{id:'A1',name:'HEPA H13 replacement filter for air purifier',qty:2,date:'2026-07-22',total:1896.2,ship:'University Makerspace',pay:'BHIM UPI',order:'404-3321870-1190277',delivered:true},
+{id:'A2',name:'MDF board 12 mm, 2×4 ft',qty:4,date:'2026-11-09',total:3240,ship:'University Makerspace',pay:'BHIM UPI',order:'408-5512094-7731526',delivered:false},
+{id:'A3',name:'Kapton tape + heat-shrink tubing kit',qty:1,date:'2026-11-02',total:649,ship:'University Makerspace',pay:'BHIM UPI',order:'408-9902215-4478130',delivered:true},
+{id:'A4',name:'Bosch jigsaw blades T101B (pack of 5)',qty:2,date:'2026-10-28',total:1098,ship:'University Makerspace',pay:'Visa credit card ending 4417',order:'408-1127730-9954321',delivered:true},
+{id:'A5',name:'Safety goggles, anti-fog (pack of 10)',qty:1,date:'2026-10-15',total:2450,ship:'University Makerspace',pay:'Mastercard credit card ending 9021',order:'408-6620011-2284776',delivered:true},
+{id:'A6',name:'Soldering iron tips T18 series ×3',qty:1,date:'2026-08-12',total:1600,ship:'University Makerspace',pay:'BHIM UPI',order:'404-7781203-3392511',delivered:true},
+],
+stmt:[
+{id:'S1',date:'2026-11-09',acct:'Savings',narr:'UPI/631344120987/AMAZON PAY/amazonpay@apl',debit:3240,credit:0,res:'matched',item:2},
+{id:'S2',date:'2026-11-11',acct:'Savings',narr:'UPI/631567009812/NEW ERA PLY/paytmqr28…@paytm',debit:6450,credit:0,res:'matched',item:4},
+{id:'S3',date:'2026-11-12',acct:'Savings',narr:'UPI/631690443310/SWIGGY/swiggy@upi',debit:486,credit:0,res:'unsorted'},
+{id:'S4',date:'2026-11-14',acct:'Savings',narr:'UPI/631877650021/CITY CABS/98xxxxxx00@ybl',debit:1800,credit:0,res:'matched',item:5},
+{id:'S5',date:'2026-11-16',acct:'Savings',narr:'UPI/632045118876/METRO HARDWARE/bharatpe…@fbpe',debit:740,credit:0,res:'unsorted'},
+{id:'S6',date:'2026-11-17',acct:'Savings',narr:'UPI/632190332254/QUICKPRINT/quickprint@okaxis',debit:2360,credit:0,res:'matched',item:7},
+{id:'S7',date:'2026-11-18',acct:'Card',narr:'UPI-ROBU IN MACFOS LTD-PUNE',debit:1180,credit:0,res:'matched',item:1},
+{id:'S8',date:'2026-11-13',acct:'Card',narr:'REFUND-ROBU IN MACFOS LTD',debit:0,credit:2697,res:'suggested',item:3},
+]};
+const U={page:'open',imp:'amz',q:'',bq:'',open:null,lopen:null,col:'await',coll:{},sel:new Set(),menu:null,showClosed:false,hl:null,bexp:{},amzSel:new Set(),amzAll:false,acct:'All',ov:null,ovt:'amz',cv:'items',f:{stage:'all',attn:false,src:'all',month:'all'},sort:{k:'',d:-1},tname:''};
+let M=null,V,TO,undoFn=null;
+const NAMES={A:'Inbox',B:'Board',C:'Ledger'};
+
+/* ===== lookups, flags, attention ===== */
+const it=id=>S.items.find(i=>i.id==id), st=id=>S.stmt.find(s=>s.id===id), bt=n=>S.batches.find(b=>b.name===n);
+const bItems=b=>b.items?b.items.map(it):[], bTotal=b=>b.items?sum(bItems(b).map(i=>i.amount)):b.total, bCount=b=>b.items?b.items.length:b.count;
+function dupFind(c){ // hard: bill+amount or order ref. soft: ±₹1 & ±3 d, or same vendor+amount ≤30 d. ledger only (ponytail: open-item duplicates only checked on Add)
+ const hasB=c.billNo&&c.billNo!=='-';let soft=null;
+ for(const l of S.ledger){if((c.notDup||[]).includes(l.id))continue;
+  if((hasB&&l.bill===c.billNo&&l.amt===c.amount)||(c.orderRef&&l.order===c.orderRef))return{hard:1,row:l};
+  const dd=Math.abs(days(l.date,c.paidOn));
+  if(!soft&&((Math.abs(l.amt-c.amount)<=1&&dd<=3)||(c.vendor&&l.vendor===c.vendor&&l.amt===c.amount&&dd<=30)))soft={row:l}}
+ return soft}
+const openDup=c=>{const x=S.items.find(x=>OPEN.includes(x.stage)&&Math.abs(x.amount-c.amount)<=1&&Math.abs(days(x.paidOn,c.paidOn))<=3);return x&&{row:{desc:x.what,amt:x.amount,batch:'open item'}}};
+function flagsOf(i){const f=[],a=days(i.stageSince);
+ if(i.stage==='await'&&a>7)f.push({t:`Not delivered · ${a} d`,c:'r',age:a,k:'late'});
+ if(i.stage==='inv'&&a>3)f.push({t:`No invoice · ${a} d`,c:'r',age:a,k:'late'});
+ if(i.stage==='refund'&&a>10)f.push({t:`Refund pending · ${a} d`,c:'r',age:a,k:'late'});
+ if(['await','refund','inv','ready'].includes(i.stage)){const d=dupFind(i);if(d)f.push(d.hard?{t:'Already filed in '+d.row.batch,c:'r',age:0,k:'dup',d}:{t:'Possible duplicate',c:'a',age:0,k:'dup',d})}
+ if(i.remarks.includes('Informal'))f.push({t:'Handwritten bill',c:'u'});
+ if(OPEN.includes(i.stage)&&i.paidVia==='Other')f.push({t:'Payment not matched',c:'u'});
+ if(i.kind==='online'&&i.stage==='inv')f.push({t:'Invoice on site',c:'u'});
+ return f}
+const attF=i=>flagsOf(i).filter(f=>f.c!=='u'), hardDup=i=>flagsOf(i).some(f=>f.k==='dup'&&f.c==='r'), anyDup=i=>flagsOf(i).some(f=>f.k==='dup');
+function attn(){const L=[];
+ S.items.forEach(i=>{const f=attF(i);if(f.length)L.push({k:'item',i,sev:f.some(x=>x.c==='r')?'r':'a',age:Math.max(...f.map(x=>x.age))})});
+ const n=S.stmt.filter(s=>s.res==='unsorted'||s.res==='suggested').length;
+ if(n)L.push({k:'stmt',sev:'a',age:0,t:`${n} statement line${n>1?'s':''} to sort · Nov`});
+ S.batches.forEach(b=>{if(b.status==='submitted'&&days(b.sub)>45)L.push({k:'batch',sev:'a',age:days(b.sub),b,t:`${b.name} unpaid · ${days(b.sub)} d`});
+  if(b.status==='draft'&&days(b.created)>3)L.push({k:'batch',sev:'a',age:days(b.created),b,t:`${b.name} drafted, not submitted`})});
+ return L.sort((x,y)=>(x.sev===y.sev?0:x.sev==='r'?-1:1)||y.age-x.age)}
+const nextName=()=>{let n=1;while(bt('November'+n))n++;return'November'+n};
+const srcOf=v=>/^amazon$/i.test(v)?'Amazon':/robu/i.test(v)?'Robu.in':/blinkit/i.test(v)?'Blinkit':'Other';
+const refOf=i=>i.orderRef||(i.billNo&&i.billNo!=='-'?'Bill '+i.billNo:'');
+const via=v=>v?`<span class=via><i>${esc(v)}</i></span>`:'';
+const qn=q=>q.trim().toLowerCase().replace(/[₹,]/g,'');
+const plain=n=>inr(n).replace(/[₹,]/g,'');
+const hitI=(i,q)=>[i.what,i.vendor,i.billNo,i.orderRef,i.purpose,plain(i.amount)].join('|').toLowerCase().includes(q);
+const hitL=(l,q)=>[l.desc,l.vendor,l.bill,l.order,l.batch,plain(l.amt)].join('|').toLowerCase().includes(q);
+
+/* ===== mutations (all with Undo) ===== */
+const snap=()=>JSON.stringify({i:S.items,b:S.batches,s:S.stmt,l:S.ledger,q:S.seq});
+const restore=s=>{const o=JSON.parse(s);S.items=o.i;S.batches=o.b;S.stmt=o.s;S.ledger=o.l;S.seq=o.q;U.sel.clear()};
+function toast(msg,undo){undoFn=undo;clearTimeout(TO);$('#toast').innerHTML=`<div class=toast>${esc(msg)}${undo?` <button class=btn data-a=undo>Undo</button>`:''}</div>`;TO=setTimeout(()=>$('#toast').innerHTML='',5000)}
+function mut(msg,fn){const s=snap();fn();toast(msg,()=>{restore(s);render()});render()}
+const go=(i,s)=>{i.stage=s;i.stageSince=TODAY;U.sel.delete(i.id)};
+function newItem(o){const i=mk(++S.seq,TODAY,'','','shop',['',''],'Savings',0,'inv',TODAY,[],o);return i}
+function attach(id,name,ty){const i=it(id);mut('Attached '+name+(['inv','await'].includes(i.stage)?' · Ready':''),()=>{i.docs.push({t:name,ty});if(ty==='proof'&&!i.remarks)i.remarks='UPI payment proof';if(['inv','await'].includes(i.stage))go(i,'ready')})}
+function claim(name){const ids=[...U.sel];if(!ids.length)return;const b={name,status:'draft',created:TODAY,items:ids};
+ mut('Batch '+name+' drafted',()=>{S.batches.unshift(b);ids.forEach(id=>{const i=it(id);go(i,'draft');i.batch=name});U.sel.clear()});showHand('Hand to Claude · '+name,claimText(b))}
+function claimText(b){const L=bItems(b),tot=sum(L.map(i=>i.amount)),P={};L.forEach(i=>{if(i.purpose)(P[i.purpose]=P[i.purpose]||[]).push(i.what)});
+ return `Build the reimbursement claim "${b.name}" from Tracker (draft batch). Make the form, the PDF and an email draft.\n\n`+
+ 'S.No | Date | Bill No | Description | Amount | Receipt | Remarks\n'+L.map((i,k)=>[k+1,dmy(i.paidOn),i.billNo||'-',i.what,i.amount.toFixed(2),i.docs.map(d=>d.t).join('; ')||'-',i.remarks||'-'].join(' | ')).join('\n')+
+ `\n\nTotal: ${inr(tot)}\nForm total (rounded up): ${inr0(Math.ceil(tot))}\n\nDocuments in row order:\n`+L.map((i,k)=>(k+1)+'. '+(i.docs.map(d=>d.t).join(', ')||'-')).join('\n')+
+ (Object.keys(P).length?'\n\nGroup the email breakdown by purpose:\n'+Object.entries(P).map(([k,v])=>'- '+k+': '+v.join('; ')).join('\n'):'')}
+function brows(b){return b.items?bItems(b).map(i=>({date:i.paidOn,bill:i.billNo||'-',desc:i.what,amt:i.amount,rec:i.docs.map(d=>d.t).join(', '),rem:i.remarks})):S.ledger.filter(l=>l.batch===b.name).map(l=>({date:l.date,bill:l.bill,desc:l.desc,amt:l.amt,rec:'',rem:''}))}
+
+/* ===== modals ===== */
+const closeM=()=>{M=null;$('#modal').innerHTML=''};
+function renderModal(){const a=document.activeElement,id=a&&a.id,ss=a&&a.selectionStart;
+ $('#modal').innerHTML=!M?'':({add:addHTML,hand:handHTML,confirm:confHTML,claim:claimHTML,match:matchHTML})[M.k]();
+ if(M&&M.fresh){M.fresh=0;const f=$('#f_amount');if(f)f.focus()}else if(id){const n=document.getElementById(id);if(n){n.focus();try{n.setSelectionRange(ss,ss)}catch{}}}}
+function showAdd(pre={}){M={k:'add',fresh:1,f:{amount:'',what:'',kind:'shop',vendor:'',vsel:'Amazon',order:'',inhand:true,via:S.last,att:null,attTy:'proof',more:0,paidOn:TODAY,bill:'',purpose:'',remarks:'',warn:null,...pre}};renderModal()}
+function showHand(title,text){M={k:'hand',title,text};renderModal()}
+function showConfirm(text,fn){M={k:'confirm',text,fn};renderModal()}
+function showClaim(){if(!U.sel.size)return;M={k:'claim',name:nextName()};renderModal()}
+const mdlg=(t,b,w)=>`<div class=ov data-a=mbg><div class="dlg ${w||''}"><div class=mh><b>${t}</b><button class="btn link" data-a=mclose>✕</button></div>${b}</div></div>`;
+function addHTML(){const f=M.f,ch=(k,v,l)=>`<button class="chip ${f[k]===v?'on':''}" data-a=mset data-k=${k} data-v="${v}">${l}</button>`;
+ const ok=parseFloat(String(f.amount).replace(/,/g,''))>0&&f.what.trim(),w=f.warn;
+ const vs=[...new Set(S.items.map(i=>i.vendor))].map(v=>`<option value="${esc(v)}">`).join('');
+ return mdlg('Add payment',`
+ <label class=big>₹<input id=f_amount data-m=amount inputmode=decimal placeholder="0" value="${esc(f.amount)}"></label>
+ <input id=f_what class=fi data-m=what placeholder="Plywood, cab to market…" value="${esc(f.what)}">
+ <div class=chips>${ch('kind','online','Online order')}${ch('kind','shop','Shop')}${ch('kind','service','Service / no delivery')}</div>
+ ${f.kind==='online'?`<div class=chips>${['Amazon','Robu.in','Blinkit','Other…'].map(v=>ch('vsel',v,v)).join('')}</div>${f.vsel==='Other…'?`<input class=fi data-m=vendor placeholder=Vendor value="${esc(f.vendor)}">`:''}<input class=fi data-m=order placeholder="Order no. (optional)" value="${esc(f.order)}">`:`<input class=fi data-m=vendor list=vl placeholder="Vendor (optional)" value="${esc(f.vendor)}"><datalist id=vl>${vs}</datalist>`}
+ ${f.kind==='shop'?`<label class=tg><input type=checkbox data-m=inhand ${f.inhand?'checked':''}> Got it with me</label>`:''}
+ <div class=lbl>Paid from</div><div class=chips>${ch('via','Savings','Savings')}${ch('via','Card','Card')}</div>
+ <div class=lbl>Attach (optional)</div><div class=chips><label class="btn sm">Photo<input type=file hidden accept="image/*" capture data-i=mfile></label><label class="btn sm">File<input type=file hidden data-i=mfile></label>${f.att?`<span>📎 ${esc(f.att)}</span>`:''}</div>
+ ${f.att?`<div class=chips><span class=mu>This is:</span>${ch('attTy','invoice','Invoice')}${ch('attTy','proof','Payment proof')}</div>`:''}
+ ${f.more?`<div class=lbl>Paid on</div><input type=date class=fi data-m=paidOn value="${f.paidOn}"><input class=fi data-m=bill placeholder="Bill no" value="${esc(f.bill)}"><input class=fi data-m=purpose placeholder="Purpose (O-week, Air purifier…)" value="${esc(f.purpose)}"><input class=fi data-m=remarks placeholder="Remarks" value="${esc(f.remarks)}">`:`<button class="btn link" data-a=mset data-k=more data-v=1>More…</button>`}
+ ${w?`<div class=warn>Looks like <b>${esc(w.row.desc)} ${inr(w.row.amt)}, ${w.row.batch==='open item'?'already open':'filed in '+esc(w.row.batch)}</b></div><div class=row2><button class=btn data-a=savef>Save anyway</button><button class="btn pri" data-a=mclose>Discard</button></div>`:`<button id=save class="btn pri full" style="margin-top:10px" data-a=save ${ok?'':'disabled'}>Save</button>`}
+ <p class="mu" style="font-size:12px">Tip: share a payment screenshot to Tracker to start here.</p>`)}
+function saveAdd(force){const f=M.f,amount=Math.round(parseFloat(String(f.amount).replace(/,/g,''))*100)/100;
+ const vendor=f.kind==='online'?(f.vsel==='Other…'?f.vendor:f.vsel):f.vendor.trim();
+ const c={amount,billNo:f.bill,orderRef:f.kind==='online'?f.order:'',vendor,paidOn:f.paidOn,notDup:[]};
+ if(!force){const d=dupFind(c)||openDup(c);if(d){f.warn=d;renderModal();return}}
+ const stage=f.att?'ready':f.kind==='online'?'await':f.kind==='shop'?(f.inhand?'inv':'await'):'inv';
+ const i=newItem({what:f.what.trim(),amount,paidOn:f.paidOn,vendor:vendor||'—',kind:f.kind,orderRef:c.orderRef,billNo:f.bill,paidVia:f.via,stage,stageSince:TODAY,purpose:f.purpose,remarks:f.remarks||(f.att&&f.attTy==='proof'?'UPI payment proof':''),
+  docs:f.att?[{t:f.att,ty:f.attTy}]:[],track:f.kind==='online'||(f.kind==='shop'&&!f.inhand)?'deliv':'direct'});
+ S.last=f.via;
+ mut('Saved · '+STG[stage][0],()=>{S.items.push(i);if(f.stmt){const s=st(f.stmt);s.res='matched';s.item=i.id}U.hl=i.id;setTimeout(()=>U.hl=null,1700)});closeM()}
+function handHTML(){return mdlg(esc(M.title),`<textarea class=ht id=htext readonly rows=12>${esc(M.text)}</textarea><div class=row2 style="margin-top:8px"><button class="btn pri" data-a=copy>Copy</button></div><p class=mu style="font-size:12px">Paste this to Claude on your Mac.</p>`,'w')}
+const confHTML=()=>mdlg('Confirm',`<p>${esc(M.text)}</p><div class=row2><button class=btn data-a=mclose>No</button><button class="btn pri" data-a=confyes>Yes</button></div>`);
+function claimHTML(){const L=[...U.sel].map(it),t=sum(L.map(i=>i.amount));return mdlg('Claim selected',`<p>${L.length} items · ${inr(t)} · form total ${inr0(Math.ceil(t))}</p><div class=lbl>Batch name</div><input class=fi id=cname data-m=cname value="${esc(M.name)}"><button class="btn pri full" style="margin-top:10px" data-a=claimgo>Hand to Claude</button>`)}
+function matchHTML(){const s=st(M.sid),amt=s.debit||s.credit,L=S.items.filter(i=>OPEN.includes(i.stage)).sort((a,b)=>(Math.abs(a.amount-amt)<=1?0:1)-(Math.abs(b.amount-amt)<=1?0:1));
+ return mdlg('Match '+inr(amt)+' to…',L.map(i=>`<div class=r2 data-a=matchto data-id=${i.id} style="cursor:pointer"><span class=grow>${esc(i.what)}</span>${Math.abs(i.amount-amt)<=1?bdg('Same amount','n'):''}<b>${inr(i.amount)}</b></div>`).join(''))}
+function copyText(t){if(navigator.clipboard)navigator.clipboard.writeText(t).catch(()=>{});else{const x=$('#htext');x.select();document.execCommand('copy')}}
+
+/* ===== shared sections ===== */
+function actions(i,ctx){const id=i.id,rv=anyDup(i)?btn('Review','review',id,'pri'):'';
+ if(ctx==='attn'&&rv)return rv;
+ const a={await:()=>btn('Delivered','deliver',id)+btn('⋯','menu',id)+(U.menu===id?btn('Cancelled','cancel',id):''),refund:()=>btn('Refunded','refund',id),inv:()=>`<label class="btn sm" data-a=noop>Attach<input type=file hidden data-i=attach data-id=${id}></label>`,draft:()=>`<span class=mu>${esc(i.batch)} (draft)</span>`}[i.stage];
+ return (ctx==='card'||ctx==='cell'?rv:'')+(a?a():'')}
+function stepBtn(i){return{await:btn('Mark delivered','deliver',i.id,'pri'),inv:`<label class="btn sm pri" data-a=noop>Attach invoice<input type=file hidden data-i=attach data-id=${i.id}></label>`,refund:btn('Mark refunded','refund',i.id,'pri')}[i.stage]||''}
+const TR={deliv:['Paid','Delivered','Invoice','Claimed','Reimbursed'],direct:['Paid','Invoice','Claimed','Reimbursed'],cancel:['Paid','Cancelled','Refunded']};
+function detailHTML(i){
+ const ro=i.stage==='claimed'||i.stage==='reimb',fl=flagsOf(i),dup=fl.find(f=>f.k==='dup'),steps=TR[i.track],o=i.track==='deliv'?1:0;
+ const cur=i.track==='cancel'?({await:1,refund:2}[i.stage]??3):({await:1,inv:1+o,ready:2+o,draft:2+o,claimed:3+o,reimb:4+o}[i.stage]??steps.length);
+ const H={Delivered:i.hist.delivered,Cancelled:i.hist.cancel,Refunded:i.hist.refunded};
+ const ed=(f,l,t='text')=>`<label class=fld><span>${l}</span>${ro&&f!=='remarks'?`<b>${esc(i[f])||'—'}</b>`:`<input type=${t} data-i=edit data-id=${i.id} data-f=${f} value="${esc(i[f])}">`}</label>`;
+ const sl=(f,l,o)=>`<label class=fld><span>${l}</span>${ro?`<b>${esc(i[f])}</b>`:`<select data-i=edit data-id=${i.id} data-f=${f}>${o.map(x=>`<option value="${x[0]}" ${i[f]===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select>`}</label>`;
+ const kv=(k,v)=>`<div><span class=mu>${k}</span><span>${esc(v)}</span></div>`;
+ const sm=stmtOf(i),r=dup&&dup.d.row;
+ return `<div class=dt>
+ <div class=dh><div class=grow>${ro?`<b style="font-size:17px">${esc(i.what)}</b>`:`<input class=inl data-i=edit data-id=${i.id} data-f=what value="${esc(i.what)}">`}</div><b style="font-size:17px;white-space:nowrap">${inr(i.amount)}</b></div>
+ <div class=chips>${stBadge(i)}${fl.map(f=>bdg(f.t,f.c)).join('')}</div>
+ ${ro?`<div>In batch <a data-a=gobatch data-n="${esc(i.batch)}">${esc(i.batch)}</a></div>`:''}
+ ${i.stage==='closed'&&i.closedWhy!=='refunded'?`<p class=mu>Closed · ${esc(i.closedWhy)}</p>`:`<ol class=tl>${steps.map((s,k)=>`<li class="${k<cur?'done':k===cur?'cur':''}"><i>${k<cur?'✓':k+1}</i><span>${s}</span><small>${(k===0?i.paidOn:H[s])?fd(k===0?i.paidOn:H[s]):''}</small>${k===cur?stepBtn(i):''}</li>`).join('')}</ol>`}
+ ${dup?`<h4>Possible duplicate</h4><div class=dup><div class=dc><b>This item</b>${kv('Date',fd(i.paidOn))}${kv('Bill no',i.billNo||'—')}${kv('Description',i.what)}${kv('Amount',inr(i.amount))}${kv('Batch',i.batch||'—')}${kv('Status',STG[i.stage][0])}</div><div class=dc><b>Filed row</b>${kv('Date',fd(r.date))}${kv('Bill no',r.bill)}${kv('Description',r.desc)}${kv('Amount',inr(r.amt))}${kv('Batch',r.batch)}${kv('Status',r.status)}</div></div><div class=row2><button class=btn data-a=notdup data-id=${i.id}>Not a duplicate</button><button class=btn data-a=discard data-id=${i.id}>Discard this item</button></div>`:''}
+ <h4>Details</h4>${ed('vendor','Vendor')}${sl('kind','Kind',[['online','Online order'],['shop','Shop'],['service','Service']])}${ed('orderRef','Order no')}${ed('paidOn','Paid on','date')}${sl('paidVia','Paid via',[['Savings','Savings'],['Card','Card'],['Other','Other']])}${ed('billNo','Bill no')}${ed('purpose','Purpose')}${ed('remarks','Remarks')}
+ <h4>Documents</h4>${i.docs.map(d=>`<div class=doc><span class=th>${esc(d.t[0])}</span><span class=dn>${esc(d.t)}</span>${bdg(d.ty==='invoice'?'Invoice':'Payment proof','u')}<a data-a=noop href=#>Open in paperless</a></div>`).join('')||'<div class=mu>No documents yet</div>'}
+ ${ro?'':`<div class=chips><label class="btn sm">Attach file<input type=file hidden data-i=attach data-ty=invoice data-id=${i.id}></label><label class="btn sm">Payment proof<input type=file hidden data-i=attach data-ty=proof data-id=${i.id}></label>${i.kind==='online'?btn('Ask Claude to fetch invoice','fetchinv',i.id):''}</div>`}
+ <h4>Statement match</h4><div>${sm?`Matched to ${sm.acct} · ${fd(sm.date)} · ${esc(sm.narr.split('/').slice(2,3).join('')||sm.narr)} · ${inr(sm.debit||sm.credit)}`:'<span class=mu>Not matched yet</span>'}</div>
+ ${ro?'':`<div class=fb>${i.stage==='await'?btn('Cancelled / refund expected','cancel',i.id):''}${btn('Mark as personal (close)','personal',i.id)}${btn('Delete','del',i.id)}</div>`}</div>`}
+const stmtOf=i=>S.stmt.find(s=>s.res==='matched'&&s.item===i.id);
+
+/* Amazon */
+function amzState(a){const l=S.ledger.find(l=>l.order&&l.order===a.order);if(l)return{k:'filed',l};const t=S.items.find(i=>i.orderRef&&i.orderRef===a.order);if(t)return{k:'trk',i:t};return{k:/card/i.test(a.pay)?'card':'cand'}}
+const amzAdd=()=>{const ids=[...U.amzSel].filter(id=>amzState(S.amz.find(a=>a.id===id)).k!=='filed'&&amzState(S.amz.find(a=>a.id===id)).k!=='trk');if(!ids.length)return;
+ mut(ids.length+' item'+(ids.length>1?'s':'')+' added',()=>{ids.forEach(id=>{const a=S.amz.find(x=>x.id===id);S.items.push(newItem({what:a.name,amount:a.total,paidOn:a.date,vendor:'Amazon',kind:'online',orderRef:a.order,paidVia:'Savings',stage:a.delivered?'inv':'await',track:'deliv',stageSince:TODAY}))});U.amzSel.clear()})};
+const amzSelTotal=()=>sum([...U.amzSel].map(id=>S.amz.find(a=>a.id===id).total));
+function amzHead(){return `<div class=sbar><b>Fetched by Claude · 20 Nov, 10:14</b><button class=btn data-a=amzrefresh>Refresh from Amazon</button><button class="chip ${U.amzAll?'':'on'}" data-a=amzmode data-v=0>Likely mine (UPI)</button><button class="chip ${U.amzAll?'on':''}" data-a=amzmode data-v=1>All orders</button></div>`}
+const amzList=()=>S.amz.filter(a=>U.amzAll||!/card/i.test(a.pay));
+function amzFoot(){const n=U.amzSel.size;return `<div class=stick><b>${n} selected · ${inr(amzSelTotal())}</b><button class="btn pri" data-a=amzadd ${n?'':'disabled'}>Add as items</button></div>`}
+function amzCard(a){const s=amzState(a),on=U.amzSel.has(a.id);
+ return `<div class="ac ${on?'on':''} ${s.k==='card'?'dim':''} ${s.k==='trk'?'trk':''}" data-a=amz data-id=${a.id}><div class=t>${esc(a.name[0])}</div><div style="min-width:0"><div class=n>${esc(a.name)}</div><div class=mu>Qty ${a.qty} · ${fd(a.date)}</div><div><b>${inr(a.total)}</b></div><div class=mu style="font-size:12px">${esc(a.ship)}<br>${esc(a.pay)}</div>${s.k==='filed'?`${bdg('Already filed in '+s.l.batch,'r')} <a data-a=vfiled data-q="${esc(s.l.bill)}">View filed row</a>`:s.k==='trk'?`${bdg('Already tracked','n')} <a data-a=open data-id=${s.i.id}>View item</a>`:''}</div><span class=ck><input type=checkbox ${on||s.k==='trk'?'checked':''} ${s.k==='filed'||s.k==='trk'?'disabled':''}></span></div>`}
+function amzHTML(){const L=amzList(),m=L.filter(a=>!/card/i.test(a.pay)),c=L.filter(a=>/card/i.test(a.pay));
+ return amzHead()+(S.amz.length?`<div class=cards>${m.map(amzCard).join('')}${c.length?`<div class=divd>Paid by card — probably not yours (${c.length})</div>`+c.map(amzCard).join(''):''}</div>`+amzFoot():'<div class=empty>No Amazon orders loaded. Ask Claude to read the lab account.</div>')}
+
+/* Statement */
+function resHTML(s){
+ if(s.res==='matched')return `<span class="bdg k-n" style="max-width:240px">Matched → ${esc(it(s.item).what)}</span><button class="btn link sm" data-a=unmatch data-id=${s.id} title=Unmatch>×</button>`;
+ if(s.res==='suggested')return `<span class="bdg k-a" style="max-width:220px">Suggested → ${esc(it(s.item).what)} refund</span>${btn('Confirm','sconfirm',s.id,'pri')}`;
+ if(s.res==='personal')return `Personal <button class="btn link sm" data-a=unmatch data-id=${s.id}>×</button>`;
+ return `<span class=rd title=Unsorted></span>${btn('Personal','spers',s.id)}${btn('Lab — new item','slab',s.id)}${btn('Match…','smatch',s.id)}`}
+const stmtL=()=>S.stmt.filter(s=>U.acct==='All'||s.acct===U.acct), stmtDone=()=>S.stmt.filter(s=>s.res==='matched'||s.res==='personal').length;
+const noDebit=()=>S.items.filter(i=>['await','inv','ready'].includes(i.stage)&&i.paidOn.startsWith('2026-11')&&i.paidVia!=='Other'&&!stmtOf(i));
+const acctChips=()=>['All','Savings','Card'].map(a=>`<button class="chip ${U.acct===a?'on':''}" data-a=acct data-v=${a}>${a}</button>`).join('');
+const noDebitHTML=()=>{const L=noDebit();return `<h4 class="mu" style="margin:20px 0 6px;font-size:12px;text-transform:uppercase">Items with no debit this month</h4>`+(L.map(i=>`<div class=r2 data-a=open data-id=${i.id} style="cursor:pointer"><span class=grow>${esc(i.what)} · ${esc(i.vendor)} · ${fd(i.paidOn)} · ${i.paidVia}</span><b>${inr(i.amount)}</b></div>`).join('')||'<div class=empty>None</div>')};
+function stmtHTML(){const n=S.stmt.length,d=stmtDone();
+ return `<div class=sbar><b>Savings + Card · Nov 2026 · ${n} lines</b><span class=mu>${d} of ${n} sorted${d===n?' ✓':''}</span>${acctChips()}</div>
+ <div class=drop data-a=handstmt>Drop the bank .xls or card .pdf (or upload from phone) — parsing is a hand-off to Claude</div>
+ <div class=wrapb>${stmtL().map(s=>`<div class="sr ${s.res==='personal'?'pers':''}"><span>${fd(s.date)}</span><span>${s.acct}</span><span class=nr title="${esc(s.narr)}">${esc(s.narr)}</span><span class=amt>${s.debit?inr(s.debit):''}</span><span class=amt>${s.credit?inr(s.credit):''}</span><span class=res>${resHTML(s)}</span></div>`).join('')}</div>`+noDebitHTML()}
+
+/* Batches + search */
+function lsearch(q){q=qn(q);return q?S.ledger.filter(l=>hitL(l,q)):[]}
+const ledTable=L=>`<div style="overflow-x:auto"><table><tr><th>Date</th><th>Bill no</th><th>Description</th><th class=n>Amount</th><th>Batch</th><th>Status</th></tr>${L.map(l=>`<tr><td>${fd(l.date)}</td><td>${esc(l.bill)}</td><td>${esc(l.desc)}</td><td class=n>${inr(l.amt)}</td><td>${esc(l.batch)}</td><td>${l.status}</td></tr>`).join('')||'<tr><td colspan=6 class=mu>No filed rows match</td></tr>'}</table></div>`;
+function batchRowsHTML(b){const R=brows(b),t=sum(R.map(r=>r.amt));
+ return `<div class=bx><table><tr><th>S.No</th><th>Date</th><th>Bill No</th><th>Description</th><th class=n>Amount</th><th>Receipt</th><th>Remarks</th></tr>${R.map((r,k)=>`<tr><td>${k+1}</td><td>${dmy(r.date)}</td><td>${esc(r.bill)}</td><td>${esc(r.desc)}</td><td class=n>${inr(r.amt)}</td><td>${esc(r.rec)||'—'}</td><td>${esc(r.rem)}</td></tr>`).join('')}</table><div style="margin-top:6px"><b>Total ${inr(t)} · Form total ${inr0(Math.ceil(t))}</b>${R.length<bCount(b)?` <span class=mu>(prototype has ${R.length} of ${bCount(b)} rows)</span>`:''}</div></div>`}
+function batchActs(b){const n=esc(b.name);return b.status==='draft'?btn('Mark submitted','bsub',n,'pri')+btn('Copy hand-off again','brehand',n)+btn('Discard draft','bdisc',n):b.status==='submitted'?btn('Mark reimbursed','breimb',n,'pri'):''}
+function batchesHTML(ns){const q=ns?U.q:U.bq,R=lsearch(q);
+ return (ns?'':`<input id=bq data-u=bq type=search class=fi placeholder="Search filed ledger: amount, bill no, words…" value="${esc(U.bq)}">`)+(q.trim()?`<h4 class=mu style="font-size:12px;text-transform:uppercase">Filed ledger</h4>`+ledTable(R):'')+
+ `<div class=wrapb style="margin-top:12px">${S.batches.length?S.batches.map(b=>{const age=b.status==='submitted'?days(b.sub)+' d':b.status==='draft'?days(b.created)+' d':'';
+  return `<div class=br data-a=bx data-n="${esc(b.name)}"><b>${esc(b.name)}</b>${bdg({draft:'Draft',submitted:'Submitted',reimbursed:'Reimbursed'}[b.status],{draft:'g',submitted:'b',reimbursed:'n'}[b.status],b.status==='reimbursed'?'mt':'')}<span>${b.sub?fd(b.sub):'—'}</span><span>${bCount(b)} items</span><b class=amt>${inr(bTotal(b))}</b><span class=mu>${age}</span><span class=act>${batchActs(b)}</span></div>${U.bexp[b.name]?batchRowsHTML(b):''}`}).join(''):'<div class=empty>No batches yet. Select Ready items on the Open screen to start one.</div>'}</div>`}
+function searchHTML(){const q=qn(U.q),I=S.items.filter(i=>hitI(i,q)),L=S.ledger.filter(l=>hitL(l,q));
+ return `<h4 class=mu style="font-size:12px;text-transform:uppercase">Open items (${I.length})</h4><div class=wrapb>${I.map(i=>`<div class=r2 data-a=open data-id=${i.id} style="cursor:pointer"><span class=grow>${esc(i.what)} <span class=mu>· ${esc(i.vendor)} · ${fd(i.paidOn)}</span></span>${stBadge(i)}<b>${inr(i.amount)}</b></div>`).join('')||'<div class=empty>None</div>'}</div><h4 class=mu style="font-size:12px;text-transform:uppercase;margin-top:20px">Already filed (${L.length})</h4>${ledTable(L)}`}
+
+/* ===== VARIANT A — Inbox ===== */
+function rowA(i,ctx){const fl=flagsOf(i),bad=fl.map(f=>bdg(f.t,f.c)).join(' ');
+ const ck=i.stage==='ready'&&ctx!=='attn'?`<input type=checkbox data-a=tick data-id=${i.id} ${U.sel.has(i.id)?'checked':''} ${hardDup(i)?'disabled title="Resolve duplicate first"':''}>`:'';
+ return `<div class="r1 ${U.hl==i.id?'hl':''}" data-a=open data-id=${i.id}><span class=ck>${ck}</span><span class=paid>${fd(i.paidOn)}</span><span class=what>${esc(i.what)}</span><span class=vend>${esc(i.vendor)}</span><span class=ref>${esc(refOf(i))}</span><span>${via(i.paidVia)}</span><span class=amt>${inr(i.amount)}</span><span class=docs>${i.docs.length?'📎'+i.docs.length:'—'}</span><span class=st>${ctx==='attn'?bad:stBadge(i)+' '+bad}</span><span class=act>${actions(i,ctx)}</span><span class=meta>${esc(i.vendor)} · ${fd(i.paidOn)} · ${i.paidVia} ${bad}</span></div>`}
+const rhA=`<div class="r1 rh"><span></span><span>Paid</span><span>What</span><span>Vendor</span><span>Order / Bill</span><span>Via</span><span class=amt>Amount</span><span>Docs</span><span>Status</span><span></span></div>`;
+function grpA(key,title,L,extra=''){const o=!U.coll[key];return `<section class=grp><div class=sh data-a=tg data-k=${key}><span>${o?'▾':'▸'}</span><span>${title} · ${L.length} · ${inr(sum(L.map(i=>i.amount)))}</span><span class=grow></span>${extra}</div>${o?L.map(i=>rowA(i)).join(''):''}</section>`}
+function openA(){
+ const att=attn(),flagged=new Set(att.filter(e=>e.k==='item').map(e=>e.i.id)),open=S.items.filter(i=>OPEN.includes(i.stage)),g=s=>open.filter(i=>i.stage===s&&!flagged.has(i.id));
+ const cl=sum(S.batches.filter(b=>b.status==='submitted').map(bTotal));
+ if(!open.length)return `<div class=empty>Nothing open. Everything you've paid for is claimed or closed.<p><button class="btn pri" data-a=add>Add</button></p></div>`;
+ const closed=S.items.filter(i=>i.stage==='closed'||i.stage==='reimb');
+ return `<div class=sum>Out of pocket ${inr(sum(open.map(i=>i.amount)))} · ${open.length} open <small data-a=page data-p=batches>Claimed, awaiting ${inr(cl)}</small></div>
+ ${att.length?`<section class=grp><div class=sh style="cursor:default"><span>Needs attention · ${att.length}</span></div>${rhA}${att.map(e=>e.k==='item'?rowA(e.i,'attn'):`<div class=r2>${bdg(e.t,'a')}<span class=grow></span><button class="btn sm" data-a=${e.k==='stmt'?'gostmt':'gobatches'}>${e.k==='stmt'?'Sort':'View'}</button></div>`).join('')}</section>`:''}
+ ${grpA('await','Awaiting delivery',g('await'))}${grpA('refund','Refund pending',g('refund'))}${grpA('inv','Needs invoice',g('inv'))}${grpA('ready','Ready to claim',g('ready'),`<span class="lnk phide" data-a=selclean>Select all clean</span>`)}
+ ${open.some(i=>i.stage==='draft')?grpA('draft','In draft batch',open.filter(i=>i.stage==='draft')):''}
+ <p><a data-a=tclosed>${U.showClosed?'Hide':'Show'} closed &amp; reimbursed</a></p>${U.showClosed?`<div class=wrapb style="opacity:.75">${closed.map(i=>rowA(i)).join('')||'<div class=empty>None</div>'}<div class=empty>Claimed and reimbursed items live in their batches.</div></div>`:''}`}
+function vA(){const att=attn(),red=att.filter(e=>e.sev==='r').length,P=U.page;
+ const nv=(p,l,d)=>`<a class="nv ${P===p?'on':''}" data-a=page data-p=${p}>${l}${d?`<span class=dot>${d}</span>`:''}</a>`;
+ const body=U.q.trim()?searchHTML():P==='open'?openA():P==='import'?`<div class=chips><button class="chip ${U.imp==='amz'?'on':''}" data-a=imp data-v=amz>Amazon</button><button class="chip ${U.imp==='stmt'?'on':''}" data-a=imp data-v=stmt>Statement</button></div><div class=phonenote>Best on laptop — read-only on phone.</div>${U.imp==='amz'?amzHTML():stmtHTML()}`:batchesHTML();
+ const sel=[...U.sel].map(it),tot=sum(sel.map(i=>i.amount));
+ return `<div class=A><nav class=side><div class=brand>Tracker</div>${nv('open','Open',red)}${nv('import','Import')}${nv('batches','Batches')}<div class=sp></div><button class="btn pri" data-a=add>+ Add (n)</button><button class=btn data-a=theme>Light / dark</button></nav>
+ <main class=main><div class=top><input id=q data-u=q type=search placeholder="Search open items and filed ledger  ( / )" value="${esc(U.q)}"></div>${body}
+ ${sel.length?`<div class=tray><b>${sel.length} selected · ${inr(tot)}</b><span class=mu>Batch name</span><input id=tname data-u=tname data-nr=1 value="${esc(U.tname||nextName())}" style="width:150px"><button class="btn pri" data-a=trayclaim>Hand to Claude</button></div>`:''}</main>
+ <nav class=tabs><a class="${P==='open'?'on':''}" data-a=page data-p=open>Open${red?`<span class=dot>${red}</span>`:''}</a><a class="${P==='import'?'on':''}" data-a=page data-p=import>Import</a><button class=plus data-a=add>+</button><a class="${P==='batches'?'on':''}" data-a=page data-p=batches>Batches</a><a data-a=theme>◐</a></nav></div>
+ ${U.open?`<div class=pbg data-a=close></div><aside class=panel><div class=mh><span class=mu>Item detail</span><button class="btn link" data-a=close>✕ Close</button></div>${detailHTML(it(U.open))}</aside>`:''}`}
+
+/* ===== VARIANT B — Board ===== */
+const COLS=[['await','Awaiting delivery'],['refund','Refund pending'],['inv','Needs invoice'],['ready','Ready'],['claimed','Claimed'],['reimb','Reimbursed']];
+function cardI(i){const fl=flagsOf(i),red=fl.some(f=>f.c==='r'),att=fl.some(f=>f.c==='a');
+ return `<div class="card ${red?'cr':att?'ca':''} ${U.hl==i.id?'hl':''}" data-a=open data-id=${i.id}><div class=ct>${i.stage==='ready'?`<input type=checkbox data-a=tick data-id=${i.id} ${U.sel.has(i.id)?'checked':''} ${hardDup(i)?'disabled title="Resolve duplicate first"':''}>`:''}<span class=cw>${esc(i.what)}</span><b>${inr(i.amount)}</b></div><div class="cm mu">${esc(i.vendor)} · ${fd(i.paidOn)} ${via(i.paidVia)}</div><div class=cbd>${fl.map(f=>bdg((f.c==='u'?'':'⚑ ')+f.t,f.c)).join('')}</div><div class=cf>${actions(i,'card')}</div></div>`}
+function cardB(b){const un=b.status==='submitted'&&days(b.sub)>45,age=b.sub?days(b.sub):days(b.created);
+ return `<div class="card ${un?'ca':''}" data-a=bx data-n="${esc(b.name)}"><div class=ct><span class=cw>${esc(b.name)}</span><b>${inr(bTotal(b))}</b></div><div class="cm mu">${bCount(b)} items · ${b.sub?'submitted '+fd(b.sub):b.status==='draft'?'draft':'paid'} ${b.status==='reimbursed'?'':'· '+age+' d'}</div><div class=cbd>${bdg({draft:'Draft',submitted:'Submitted',reimbursed:'Reimbursed'}[b.status],{draft:'g',submitted:'b',reimbursed:'n'}[b.status])}${un?bdg('⚑ unpaid · '+age+' d','a'):''}</div>${U.bexp[b.name]?brows(b).map(r=>`<div class=ln><span>${esc(r.desc)}</span><span>${inr(r.amt)}</span></div>`).join(''):''}<div class=cf>${batchActs(b)}</div></div>`}
+function colB(k,name){let body,n,tot,red=0,x='';
+ if(k==='claimed'||k==='reimb'){const bs=S.batches.filter(b=>(k==='claimed'?['draft','submitted']:['reimbursed']).includes(b.status));n=bs.length;tot=sum(bs.map(bTotal));body=bs.map(cardB).join('')}
+ else{const L=S.items.filter(i=>i.stage===k).sort((a,b)=>Math.max(0,...attF(b).map(f=>f.age+1))-Math.max(0,...attF(a).map(f=>f.age+1)));n=L.length;tot=sum(L.map(i=>i.amount));red=L.filter(i=>flagsOf(i).some(f=>f.c==='r')).length;body=L.map(cardI).join('');
+  if(k==='ready')x=`<span class=lnk data-a=selclean>Select clean</span>${U.sel.size?btn('Claim '+U.sel.size+' · '+inr(sum([...U.sel].map(id=>it(id).amount))),'claimmodal','','pri'):''}`}
+ return `<section class="col ${U.col===k?'on':''}"><div class=ch><b>${name}</b><span class=mu>${n} · ${inr(tot)}</span>${red?bdg('⚑ '+red,'r'):''}${x}</div>${body||'<div class=empty>Empty</div>'}</section>`}
+function vB(){const att=attn(),open=S.items.filter(i=>OPEN.includes(i.stage)),sc=S.stmt.filter(s=>s.res==='unsorted'||s.res==='suggested').length,cl=S.items.filter(i=>i.stage==='closed');
+ const redOf=k=>S.items.filter(i=>i.stage===k&&flagsOf(i).some(f=>f.c==='r')).length;
+ const cols=COLS.map(([k,n])=>colB(k,n)).join('')+(U.showClosed?`<section class="col"><div class=ch><b>Closed</b><span class=mu>${cl.length}</span></div>${cl.map(cardI).join('')}</section>`:'');
+ let ov='';
+ if(U.ov==='import')ov=`<div class=ovp><div class=in><div class=ovh><b>Import</b><button class="chip ${U.imp==='amz'?'on':''}" data-a=imp data-v=amz>Amazon</button><button class="chip ${U.imp==='stmt'?'on':''}" data-a=imp data-v=stmt>Statement</button><span class=grow></span><button class=btn data-a=ovclose>✕ Close</button></div><div class=phonenote>Best on laptop — read-only on phone.</div>${U.imp==='amz'?amzHTML():stmtHTML()}</div></div>`;
+ if(U.ov==='batches')ov=`<div class=ovp><div class=in><div class=ovh><b>Batches &amp; filed ledger</b><span class=grow></span><button class=btn data-a=ovclose>✕ Close</button></div>${batchesHTML()}</div></div>`;
+ return `<div class=B><div class=tb><b>Board</b><span class=mu>Out of pocket ${inr(sum(open.map(i=>i.amount)))} · ${open.length}</span><input id=q data-u=q type=search placeholder="Search ( / )" value="${esc(U.q)}"><span class=grow></span><button class=btn data-a=ovopen data-v=import>Import${sc?` <span class=dot>${sc}</span>`:''}</button><button class=btn data-a=ovopen data-v=batches>Batches</button><button class=btn data-a=tclosed>${U.showClosed?'Hide':'Closed'} (${cl.length})</button><button class=btn data-a=theme>◐</button><button class="btn pri" data-a=add>+ Add</button></div>
+ ${U.q.trim()?`<div style="padding:16px">${searchHTML()}</div>`:`<div class=seg>${COLS.map(([k,n])=>`<button class="chip ${U.col===k?'on':''}" data-a=col data-v=${k}>${n.split(' ')[0]} ${k==='claimed'?S.batches.filter(b=>b.status!=='reimbursed').length:k==='reimb'?S.batches.filter(b=>b.status==='reimbursed').length:S.items.filter(i=>i.stage===k).length}${redOf(k)?' ⚑':''}</button>`).join('')}</div><div class=board>${cols}</div>`}
+ ${ov}${U.open?`<div class=pbg data-a=close></div><aside class="panel mid"><div class=mh><span class=mu>Item detail</span><button class="btn link" data-a=close>✕ Close</button></div>${detailHTML(it(U.open))}</aside>`:''}</div>`}
+
+/* ===== VARIANT C — Ledger table ===== */
+const SRANK={await:0,refund:1,inv:2,ready:3,draft:4,claimed:5,reimb:6,closed:7},skey=s=>s==='draft'?'claimed':s;
+function cRows(){const q=qn(U.q);
+ let R=S.items.map(i=>({k:'i',key:i.id,i,date:i.paidOn,what:i.what,vendor:i.vendor,ref:refOf(i),via:i.paidVia,amt:i.amount,st:i.stage}))
+  .concat(S.ledger.map(l=>({k:'l',key:l.id,l,date:l.date,what:l.desc,vendor:l.vendor||'',ref:l.bill,via:'',amt:l.amt,st:l.status==='claimed'?'claimed':'reimb',batch:l.batch})));
+ const f=U.f;
+ R=R.filter(r=>(f.stage==='all'||skey(r.st)===f.stage)&&(!f.attn||(r.i&&attF(r.i).length))&&(f.src==='all'||srcOf(r.vendor)===f.src)&&(f.month==='all'||r.date.startsWith(f.month))&&(!q||(r.i?hitI(r.i,q):hitL(r.l,q))));
+ const s=U.sort;R.sort((a,b)=>s.k?(s.k==='amt'?a.amt-b.amt:s.k==='what'?a.what.localeCompare(b.what):D(a.date)-D(b.date))*s.d:(SRANK[a.st]-SRANK[b.st])||D(b.date)-D(a.date));return R}
+function rowC(r){const i=r.i,fl=i?flagsOf(i):[],sel=i&&U.sel.has(i.id),cur=i?U.open===i.id:U.lopen===r.key;
+ const ck=i&&i.stage==='ready'&&!hardDup(i)?`<input type=checkbox data-a=tick data-id=${i.id} ${sel?'checked':''}>`:'';
+ return `<tr class="cr ${sel?'sel':''} ${cur?'cur':''} ${i?'':'fil'} ${i&&U.hl==i.id?'hl':''}" data-a=${i?'open':'lopen'} data-id=${r.key}><td>${ck}</td><td class=pd>${fd(r.date)}</td><td class=wh>${esc(r.what)}<span class=pm>${fd(r.date)}</span></td><td class="hm hp">${esc(r.vendor)}</td><td class="hm hp">${esc(r.ref)}</td><td class="hm hp">${r.via}</td><td class=n>${inr(r.amt)}</td><td>${i?stBadge(i):bdg(r.st==='claimed'?'Claimed · '+r.batch:'Filed · '+r.batch,r.st==='claimed'?'b':'n','mt')} ${fl.map(f=>bdg(f.t,f.c)).join(' ')}</td><td class="hm hp n">${i&&OPEN.includes(i.stage)?days(i.stageSince)+' d':''}</td><td class="hm hp">${i&&i.docs.length?'📎'+i.docs.length:''}</td><td class=hm><span style="display:flex;gap:4px">${i?actions(i,'cell'):''}</span></td></tr>`}
+function cItems(){const R=cRows(),f=U.f,chip=(g,v,l)=>`<button class="chip ${f[g]===v?'on':''}" data-a=cf data-g=${g} data-v="${v}">${l}</button>`;
+ const months=[...new Set(S.items.map(i=>i.paidOn.slice(0,7)).concat(S.ledger.map(l=>l.date.slice(0,7))))].sort().reverse();
+ const sel=[...U.sel].map(it),selT=sum(sel.map(i=>i.amount)),na=S.items.filter(i=>attF(i).length).length;
+ const th=(l,k,c='')=>`<th class="${c}" data-a=csort data-k=${k}>${l}${U.sort.k===k?(U.sort.d>0?' ▲':' ▼'):''}</th>`;
+ const cleanVis=R.filter(r=>r.i&&r.i.stage==='ready'&&!anyDup(r.i));
+ return `<div class=chips>${chip('stage','all','All stages')}${COLS.map(([k,n])=>chip('stage',k,n)).join('')}${chip('stage','closed','Closed')}</div>
+ <div class=chips><button class="chip ${f.attn?'on':''}" data-a=cattn>Needs attention (${na})</button><span class=mu>Source</span>${['all','Amazon','Robu.in','Blinkit','Other'].map(v=>chip('src',v,v==='all'?'Any':v)).join('')}<select data-i=cmonth><option value=all>All months</option>${months.map(m=>`<option value=${m} ${f.month===m?'selected':''}>${MON[+m.slice(5)-1]} ${m.slice(0,4)}</option>`).join('')}</select></div>
+ <div class="cwrap ${U.open||U.lopen?'p':''}"><div class=tw><table><tr><th><input type=checkbox data-a=selclean title="Select all clean Ready rows" ${cleanVis.length&&cleanVis.every(r=>U.sel.has(r.i.id))?'checked':''}></th>${th('Paid','date','pd')}${th('What','what')}<th class="hm hp">Vendor</th><th class="hm hp">Order / Bill</th><th class="hm hp">Via</th>${th('Amount','amt','n')}<th>Stage</th><th class="hm hp n">Age</th><th class="hm hp">Docs</th><th class=hm>Next</th></tr>${R.map(rowC).join('')||'<tr><td colspan=11 class=mu>No rows match</td></tr>'}</table><div class=mu style="padding:8px">${R.length} rows · ${inr(sum(R.map(r=>r.amt)))}</div></div>
+ ${U.open?`<aside class=cp><div class=mh><span class=mu>Item detail</span><button class="btn link" data-a=close>✕</button></div>${detailHTML(it(U.open))}</aside>`:U.lopen?lpanel(S.ledger.find(l=>l.id===U.lopen)):''}</div>
+ ${sel.length?`<div class=stick><b>${sel.length} selected · ${inr(selT)}</b><button class="btn pri" data-a=claimmodal>Claim selected</button><button class=btn data-a=selclear>Clear</button></div>`:''}`}
+const lpanel=l=>`<aside class=cp><div class=mh><span class=mu>Filed row (read-only)</span><button class="btn link" data-a=close>✕</button></div><b>${esc(l.desc)}</b><div class=chips>${bdg(l.status,l.status==='claimed'?'b':'n')}</div>${[['Date',fd(l.date)],['Bill no',l.bill],['Amount',inr(l.amt)],['Batch',l.batch],['Vendor',l.vendor||'—'],['Order ref',l.order||'—']].map(x=>`<div class=fld><span>${x[0]}</span><b>${esc(x[1])}</b></div>`).join('')}</aside>`;
+function cAmz(){const L=amzList(),n=U.amzSel.size;
+ return amzHead()+`<div class=tw><table><tr><th></th><th>Order date</th><th>Item</th><th class=n>Qty</th><th class=n>Total</th><th class=hm>Ship to</th><th class=hm>Payment</th><th>State</th></tr>${L.map(a=>{const s=amzState(a),on=U.amzSel.has(a.id);return `<tr class="cr ${on?'sel':''} ${s.k==='card'?'fil':''}" data-a=amz data-id=${a.id}><td><input type=checkbox ${on||s.k==='trk'?'checked':''} ${s.k==='filed'||s.k==='trk'?'disabled':''}></td><td>${fd(a.date)}</td><td class=wh>${esc(a.name)}</td><td class=n>${a.qty}</td><td class=n>${inr(a.total)}</td><td class=hm>${esc(a.ship)}</td><td class=hm>${esc(a.pay)}</td><td>${s.k==='filed'?bdg('Already filed in '+s.l.batch,'r')+` <a data-a=vfiled data-q="${esc(s.l.bill)}">View filed row</a>`:s.k==='trk'?bdg('Already tracked','n')+` <a data-a=open data-id=${s.i.id}>View item</a>`:s.k==='card'?'Card — probably not yours':'Candidate'}</td></tr>`}).join('')}</table></div><div class=stick><b>${n} selected · ${inr(amzSelTotal())}</b><button class="btn pri" data-a=amzadd ${n?'':'disabled'}>Add as items</button></div>`}
+function cStmt(){const n=S.stmt.length,d=stmtDone();
+ return `<div class=sbar><b>Savings + Card · Nov 2026</b><span class=mu>${d} of ${n} sorted${d===n?' ✓':''}</span>${acctChips()}<span class="lnk" data-a=handstmt>Upload statement…</span></div><div class=tw><table><tr><th>Date</th><th>Account</th><th>Narration</th><th class=n>Debit</th><th class=n>Credit</th><th>Result</th></tr>${stmtL().map(s=>`<tr class="${s.res==='personal'?'fil':''}"><td>${fd(s.date)}</td><td>${s.acct}</td><td style="font:12px ui-monospace,Menlo,monospace;max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(s.narr)}</td><td class=n>${s.debit?inr(s.debit):''}</td><td class=n>${s.credit?inr(s.credit):''}</td><td style="white-space:normal"><span style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${resHTML(s)}</span></td></tr>`).join('')}</table></div>`+noDebitHTML()}
+function vC(){const tabs=[['items','All items'],['amz','Amazon orders'],['stmt','Statement lines'],['bat','Batches']],open=S.items.filter(i=>OPEN.includes(i.stage));
+ return `<div class=C><div class=chips style="margin-top:0"><b style="font-size:16px">Ledger</b><span class=mu>Out of pocket ${inr(sum(open.map(i=>i.amount)))} · ${open.length} open</span><span class=grow></span><button class=btn data-a=theme>◐</button><button class="btn pri" data-a=add>+ Add (n)</button></div>
+ <input id=q data-u=q type=search class=fi placeholder="Search items and filed ledger — description, vendor, bill no, order ref, amount  ( / )" value="${esc(U.q)}">
+ <div class=chips>${tabs.map(([k,n])=>`<button class="chip ${U.cv===k?'on':''}" data-a=cv data-v=${k}>${n}</button>`).join('')}</div>
+ ${U.cv==='items'?cItems():U.cv==='amz'?cAmz():U.cv==='stmt'?cStmt():batchesHTML(true)}</div>
+ ${U.open&&U.cv!=='items'?`<div class=pbg data-a=close></div><aside class="panel"><div class=mh><span class=mu>Item detail</span><button class="btn link" data-a=close>✕</button></div>${detailHTML(it(U.open))}</aside>`:''}`}
+
+/* ===== render + events ===== */
+function render(){const a=document.activeElement,id=a&&a.id,ss=a&&a.selectionStart,se=a&&a.selectionEnd,y=scrollY;
+ if(U.open&&!it(U.open))U.open=null;
+ $('#app').innerHTML={A:vA,B:vB,C:vC}[V]();
+ if(id){const n=document.getElementById(id);if(n&&n!==document.activeElement){n.focus();try{n.setSelectionRange(ss,se)}catch{}}}
+ scrollTo(0,y)}
+function renderSw(){$('#sw').innerHTML=`<div class=sw><button data-a=vprev title="Previous variant (←)">‹</button><span>${V} (${NAMES[V]})</span><button data-a=vnext title="Next variant (→)">›</button></div>`}
+function setV(v){V=v;try{history.replaceState(null,'',location.pathname+'?variant='+v)}catch{}U.open=U.lopen=U.ov=null;U.sel.clear();U.q='';render();renderSw()}
+const cyc=d=>setV('ABC'[('ABC'.indexOf(V)+d+3)%3]);
+const ACT={
+ noop(){},
+ vprev(){cyc(-1)},vnext(){cyc(1)},
+ theme(){const r=document.documentElement,cur=r.dataset.t||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');r.dataset.t=cur==='dark'?'light':'dark'},
+ undo(){undoFn&&undoFn();$('#toast').innerHTML=''},
+ add(){showAdd()},
+ page(d){U.page=d.p;U.q='';U.open=null;render();scrollTo(0,0)},
+ imp(d){U.imp=d.v;render()},
+ gostmt(){U.page='import';U.imp='stmt';U.q='';render()},
+ gobatches(){U.page='batches';U.q='';render()},
+ gobatch(d){U.open=null;U.bexp[d.n]=1;if(V==='A')U.page='batches';else if(V==='B')U.ov='batches';else U.cv='bat';render()},
+ open(d){U.open=+d.id;U.lopen=null;U.menu=null;U.ov=V==='B'&&U.ov&&U.ov!=='x'?U.ov:null;if(V==='B')U.ovKeep=0;render()},
+ lopen(d){U.lopen=d.id;U.open=null;render()},
+ close(){U.open=U.lopen=null;render()},
+ review(d){U.open=+d.id;render()},
+ ovopen(d){U.ov=d.v;render();scrollTo(0,0)},ovclose(){U.ov=null;render()},
+ tg(d){U.coll[d.k]=!U.coll[d.k];render()},
+ tclosed(){U.showClosed=!U.showClosed;render()},
+ col(d){U.col=d.v;render()},
+ deliver(d){const i=it(d.id);mut('Delivered · Needs invoice',()=>{i.hist.delivered=TODAY;go(i,'inv')})},
+ cancel(d){const i=it(d.id);U.menu=null;mut('Cancelled · Refund pending',()=>{i.track='cancel';i.hist.cancel=TODAY;go(i,'refund')})},
+ refund(d){const i=it(d.id);mut('Refunded · Closed',()=>{i.hist.refunded=TODAY;i.closedWhy='refunded';go(i,'closed')})},
+ menu(d){U.menu=U.menu==d.id?null:+d.id;render()},
+ personal(d){const i=it(d.id);mut('Closed as personal',()=>{i.closedWhy='personal';go(i,'closed')});U.open=null;render()},
+ discard(d){const i=it(d.id);mut('Discarded duplicate',()=>{i.closedWhy='duplicate';go(i,'closed')});U.open=null;render()},
+ del(d){mut('Deleted',()=>{S.items=S.items.filter(i=>i.id!=d.id);U.open=null})},
+ notdup(d){const i=it(d.id),r=flagsOf(i).find(f=>f.k==='dup').d.row;mut('Marked not a duplicate',()=>i.notDup.push(r.id))},
+ fetchinv(d){const i=it(d.id);showHand('Hand to Claude · fetch invoice',`Download the invoice for ${i.vendor} order #${i.orderRef||'(no order no.)'} and attach it to Tracker item ${i.id}`)},
+ tick(d){const id=+d.id;U.sel.has(id)?U.sel.delete(id):U.sel.add(id);render()},
+ selclean(){const clean=(V==='C'?cRows().map(r=>r.i).filter(Boolean):S.items).filter(i=>i.stage==='ready'&&!anyDup(i)&&!(attF(i).length));const all=clean.length&&clean.every(i=>U.sel.has(i.id));clean.forEach(i=>all?U.sel.delete(i.id):U.sel.add(i.id));render()},
+ selclear(){U.sel.clear();render()},
+ trayclaim(){claim(U.tname||nextName());U.tname=''},
+ claimmodal(){showClaim()},claimgo(){const n=M.f&&M.f.cname||M.name;closeM();claim(n)},
+ mbg(d,t,e){if(e.target===t)closeM()},mclose(){closeM()},
+ mset(d){M.f[d.k]=d.v;M.f.warn=null;renderModal()},
+ save(){saveAdd(false)},savef(){saveAdd(true)},
+ copy(d,t){copyText(M.text);t.textContent='Copied'},
+ confyes(){const f=M.fn;closeM();f()},
+ amz(d){const a=S.amz.find(x=>x.id===d.id),s=amzState(a);if(s.k==='filed'||s.k==='trk')return;U.amzSel.has(a.id)?U.amzSel.delete(a.id):U.amzSel.add(a.id);render()},
+ amzmode(d){U.amzAll=d.v==='1';render()},amzadd(){amzAdd()},
+ amzrefresh(){showHand('Hand to Claude · Amazon','Read the last 60 days of orders from the lab Amazon account in Chrome and send them to Tracker')},
+ vfiled(d){U.q=d.q;if(V==='A'){U.page='open'}if(V==='B')U.ov=null;if(V==='C')U.cv='items';render()},
+ acct(d){U.acct=d.v;render()},
+ handstmt(){showHand('Hand to Claude · statement','Parse this statement into Tracker lines (bank .xls / card .pdf, stored in paperless) and send them to Tracker')},
+ unmatch(d){const s=st(d.id);mut('Unmatched',()=>{s.res='unsorted';delete s.item})},
+ spers(d){const s=st(d.id);mut('Marked personal',()=>{s.res='personal'})},
+ sconfirm(d){const s=st(d.id),i=it(s.item);mut('Refund confirmed · '+i.what+' closed',()=>{s.res='matched';i.hist.refunded=s.date;i.closedWhy='refunded';go(i,'closed')})},
+ slab(d){const s=st(d.id);showAdd({amount:String(s.debit),paidOn:s.date,via:s.acct,vendor:(s.narr.split('/')[2]||'').toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase()),stmt:s.id})},
+ smatch(d){M={k:'match',sid:d.id};renderModal()},
+ matchto(d){const s=st(M.sid);closeM();mut('Matched',()=>{s.res='matched';s.item=+d.id})},
+ bx(d){U.bexp[d.n]=!U.bexp[d.n];render()},
+ bsub(d){const b=bt(d.id);mut(b.name+' submitted',()=>{b.status='submitted';b.sub=TODAY;bItems(b).forEach(i=>go(i,'claimed'))})},
+ bdisc(d){const b=bt(d.id);mut('Draft discarded',()=>{bItems(b).forEach(i=>{go(i,'ready');i.batch=''});S.batches=S.batches.filter(x=>x!==b)})},
+ brehand(d){showHand('Hand to Claude · '+d.id,claimText(bt(d.id)))},
+ breimb(d){const b=bt(d.id);showConfirm(`Mark ${bCount(b)} items in ${b.name} as reimbursed?`,()=>{mut(b.name+' reimbursed',()=>{b.status='reimbursed';bItems(b).forEach(i=>go(i,'reimb'))});showHand('Hand to Claude · file folder',`Move the ${b.name} folder to Filed/2026`)})},
+ cv(d){U.cv=d.v;U.open=U.lopen=null;render()},
+ cf(d){U.f[d.g]=d.v;render()},cattn(){U.f.attn=!U.f.attn;render()},
+ csort(d){U.sort=U.sort.k===d.k?{k:d.k,d:-U.sort.d}:{k:d.k,d:d.k==='date'||d.k==='amt'?-1:1};render()},
+};
+document.addEventListener('click',e=>{const t=e.target.closest('[data-a]');if(t&&ACT[t.dataset.a])ACT[t.dataset.a](t.dataset,t,e)});
+document.addEventListener('input',e=>{const t=e.target,d=t.dataset;
+ if(d.m){M.f?M.f[d.m]=t.type==='checkbox'?t.checked:t.value:0;if(d.m==='cname'){M.f=M.f||{};M.f.cname=t.value}
+  if(M.k==='add'){const f=M.f,s=$('#save');if(s)s.disabled=!(parseFloat(String(f.amount).replace(/,/g,''))>0&&f.what.trim())}}
+ else if(d.u){U[d.u]=t.value;if(!d.nr)render()}});
+document.addEventListener('change',e=>{const t=e.target,d=t.dataset;
+ if(d.i==='attach'&&t.files[0])attach(+d.id,t.files[0].name,d.ty||'invoice');
+ else if(d.i==='mfile'&&t.files[0]){M.f.att=t.files[0].name;renderModal()}
+ else if(d.i==='edit'){const i=it(d.id);i[d.f]=d.f==='amount'?parseFloat(t.value)||i.amount:t.value;render()}
+ else if(d.i==='cmonth'){U.f.month=t.value;render()}});
+addEventListener('keydown',e=>{const t=e.target,ed=/INPUT|TEXTAREA|SELECT/.test(t.tagName)||t.isContentEditable;
+ if(e.key==='Escape'){if(M)closeM();else if(U.open||U.lopen){U.open=U.lopen=null;render()}else if(U.ov){U.ov=null;render()}return}
+ if(ed||e.metaKey||e.ctrlKey||e.altKey||M)return;
+ if(e.key==='ArrowLeft')cyc(-1);else if(e.key==='ArrowRight')cyc(1);
+ else if(e.key==='n'){e.preventDefault();showAdd()}else if(e.key==='/'){e.preventDefault();const q=$('#q');q&&q.focus()}});
+{const p=(new URLSearchParams(location.search).get('variant')||'A').toUpperCase();V='ABC'.includes(p)&&p.length===1?p:'A';render();renderSw()}
+</script></body></html>

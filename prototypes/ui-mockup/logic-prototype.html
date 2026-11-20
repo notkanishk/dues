@@ -1,0 +1,1127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reimbursement tracker: logic prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--ink:#1d2433;--mute:#667085;--line:#e3e6ec;--bg:#f6f7f9;--card:#fff;--accent:#1f5fbf;--accent-bg:#e8f0fb;--bad:#b42318;--bad-bg:#fdecea}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{padding:20px 28px 12px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{margin:0 0 6px;font-size:20px}
+h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:22px 0 8px}
+h3{font-size:14px;margin:0}
+.question{margin:6px 0 10px;padding:10px 14px;border-left:3px solid var(--accent);background:var(--accent-bg);font-size:15px}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.layout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:20px;padding:16px 28px}
+.col-right{position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;padding-bottom:30px}
+@media(max-width:1000px){.layout{grid-template-columns:1fr}.col-right{position:static;max-height:none}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:10px}
+.banner{position:sticky;top:0;z-index:5;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:10px 14px;margin-bottom:12px}
+.banner.rej{border-left-color:var(--bad);background:var(--bad-bg);color:var(--bad)}
+.banner ul{margin:4px 0 0;padding-left:18px}
+.banner .head{font-weight:600}
+.muted{color:var(--mute)}
+.small{font-size:12px}
+.chip{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;background:#eceef2;color:#444;white-space:nowrap}
+.chip.acc{background:var(--accent-bg);color:var(--accent)}
+.chip.bad{background:var(--bad-bg);color:var(--bad)}
+.row{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:3px 0}
+.bills{margin:6px 0 0 14px;padding-left:10px;border-left:2px solid var(--line)}
+.ex{padding:8px 0;border-top:1px solid var(--line)}
+.ex:first-of-type{border-top:0}
+.amt{font-variant-numeric:tabular-nums;font-weight:600}
+table{border-collapse:collapse;width:100%}
+td,th{padding:3px 6px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+th{color:var(--mute);font-weight:500;font-size:12px}
+td.r,th.r{text-align:right}
+button{font:inherit;padding:4px 10px;border:1px solid var(--accent);background:var(--card);color:var(--accent);border-radius:6px;cursor:pointer}
+button:hover:not(:disabled){background:var(--accent-bg)}
+button.solid{background:var(--accent);color:#fff}
+button.solid:hover:not(:disabled){background:#194d9a}
+button:disabled{border-color:var(--line);color:#a0a6b2;cursor:not-allowed;background:#fafafa}
+button.ghost{border-color:var(--line);color:var(--mute)}
+input,select{font:inherit;padding:3px 6px;border:1px solid #cfd4dd;border-radius:6px;background:#fff}
+input[type=number]{width:90px}
+input.w{width:130px}
+.acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0}
+.why{font-size:11.5px;color:var(--mute);margin:2px 0 4px}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.tabs button{border-color:var(--line);color:var(--ink)}
+.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+ol.steps{padding-left:0;list-style:none;margin:8px 0}
+ol.steps li{display:flex;gap:8px;align-items:center;padding:4px 0;border-top:1px solid var(--line)}
+ol.steps .n{width:20px;color:var(--mute);text-align:right;font-size:12px}
+ol.steps .state{font-size:12px;min-width:90px}
+.ok{color:var(--accent)}.no{color:var(--bad)}
+.attn{padding:5px 0;border-top:1px solid var(--line)}
+.attn:first-child{border-top:0}
+form.f{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center}
+form.f label{color:var(--mute);font-size:12px}
+.openq li{margin-bottom:8px}
+footer{padding:0 28px 40px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Reimbursement tracker: does the model hold up?</h1>
+  <div class="question" id="question">Does the revised model hold up? Payments and bills are shared from the phone and logged at once, matched to each other in either order; online orders start as one expected Bill and are split by invoices; returns, Paybacks, corrections and closing all have somewhere to land; and nothing ever requires a payment record to claim.</div>
+  <div class="bar">
+    <span>Today: <b id="today"></b></span>
+    <button data-adv="1">+1 day</button>
+    <button data-adv="7">+7 days</button>
+    <button class="ghost" id="resetAll">Reset to starting state</button>
+    <span class="muted small">Throwaway prototype. Nothing is saved; reload = reset. Amounts in rupees.</span>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="col-left">
+    <div id="banner"></div>
+    <h2 style="margin-top:0">Current state</h2>
+    <div id="state"></div>
+  </div>
+  <div class="col-right">
+    <h2 style="margin-top:0">Guided walkthroughs</h2>
+    <div class="card"><div class="tabs" id="tabs"></div><div id="wt"></div></div>
+    <h2>Free play</h2>
+    <div class="card">
+      <h3>Share payment confirmation</h3>
+      <form class="f" onsubmit="return false">
+        <label>Claimant</label><select id="pc"></select>
+        <label>Amount (&#8377;)</label><span><input type="number" id="pa" step="0.01" min="0" value="1850"> <label><input type="checkbox" id="pu"> unreadable</label></span>
+        <label>Payee</label><input id="pp" class="w" value="Anand Hardware">
+        <label>Date</label><input type="date" id="pd">
+        <label>Reference</label><input id="pr" class="w" placeholder="UPI ref / UTR">
+        <label>Payment app</label><input id="pg" class="w" value="GPay">
+        <label>Card / bank hint</label><input id="ph" class="w" value="Acme Bank xx1234">
+        <span></span><button class="solid" id="bPay">Share payment confirmation</button>
+      </form>
+    </div>
+    <div class="card">
+      <h3>Share a bill</h3>
+      <form class="f" onsubmit="return false">
+        <label>Claimant</label><select id="bc"></select>
+        <label>Kind</label><select id="bk"><option value="invoice">Invoice</option><option value="informal">Informal bill</option></select>
+        <label>Vendor</label><input id="bv" class="w" value="Anand Hardware">
+        <label>Bill no.</label><input id="bn" class="w" placeholder="invoices only">
+        <label>Order no.</label><input id="bo" class="w" placeholder="optional">
+        <label>Bill date</label><input type="date" id="bd">
+        <label>Total (&#8377;)</label><input type="number" id="bt" step="0.01" min="0" value="1850">
+        <span></span><button class="solid" id="bBill">Share bill</button>
+      </form>
+    </div>
+    <div class="card">
+      <h3>Quick-add payment (nothing to share) or draft</h3>
+      <form class="f" id="fLog" onsubmit="return false">
+        <label>Claimant</label><select id="lc"></select>
+        <label>Amount (&#8377;)</label><input type="number" id="la" step="0.01" min="0" value="1000">
+        <label>Payee</label><input id="lp" class="w" value="Amazon">
+        <label>Vendor</label><input id="lv" class="w" placeholder="only for a Payback: the shop">
+        <label>What for</label><input id="lw" class="w" placeholder="e.g. Spray paint">
+        <label>Kind</label><select id="lk"><option>online</option><option>shop</option><option>service</option></select>
+        <label>Payment method</label><select id="lm"></select>
+        <label>Orderer</label><input id="lo" class="w" list="people">
+        <label>Options</label><span><label><input type="checkbox" id="lb"> Payback to a colleague</label> <label><input type="checkbox" id="ld"> draft (Amazon pick / back-fill)</label></span>
+        <span></span><button class="solid" id="bLog">Add payment</button>
+      </form>
+      <datalist id="people"></datalist>
+    </div>
+    <div class="card">
+      <h3>Payment methods and Claims</h3>
+      <div class="acts"><select id="mc"></select><input id="mn" class="w" placeholder="new method name"><input id="mh" class="w" placeholder="match hints, comma separated"><button id="bMeth">Add payment method</button></div>
+      <div class="acts"><select id="sc"></select><button id="bClaim">Start claim</button></div>
+    </div>
+    <div id="free"></div>
+  </div>
+</div>
+
+<footer>
+  <h2>Open questions this exposes</h2>
+  <div class="card"><ol class="openq" id="openq"></ol></div>
+</footer>
+
+<script id="logic">
+// ===== PURE LOGIC MODULE (no DOM). Money is integer paise. Dates are ISO strings. =====
+const Logic = (() => {
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const nf0 = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
+  const nf2 = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const rupees = p => { const v = Math.abs(p) / 100; return (p < 0 ? '-' : '') + '₹' + (Number.isInteger(v) ? nf0.format(v) : nf2.format(v)); };
+  const addDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+  const fmtDate = iso => { const d = new Date(iso + 'T00:00:00Z'); return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()].slice(0, 3) + ' ' + d.getUTCFullYear(); };
+  const validDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && !isNaN(Date.parse(d));
+  const norm = x => (x || '').trim().toUpperCase();
+  const NOTREC = 'not recorded';
+
+  // Vendor similarity: crude on purpose (shared meaningful word, or one name inside the other).
+  const STOP = new Set(['shop', 'store', 'hardware', 'traders', 'trading', 'pvt', 'ltd', 'and', 'the', 'enterprises', 'online']);
+  const words = x => (x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter(w => w.length >= 3 && !STOP.has(w));
+  const similar = (x, y) => { const a = words(x), b = words(y); return !!(a.length && b.length && (a.join(' ').includes(b.join(' ')) || b.join(' ').includes(a.join(' ')) || a.some(w => b.includes(w)))); };
+  const guessKind = payee => /amazon|robu|blinkit|flipkart|zepto|swiggy/i.test(payee) ? 'online' : 'shop';
+
+  const seed = () => ({
+    today: '2026-11-20',
+    seq: { E: 0, B: 0, R: 0, C: 0 },
+    claimants: {
+      Rohan: { methods: [{ label: 'Savings account', hints: ['acme bank'] }, { label: 'Credit card', hints: ['nova card', '9876'] }] },
+      Arjun: { methods: [{ label: 'Credit card', hints: ['zeta', '7730'] }, { label: 'GPay UPI', hints: ['@okaxis'] }] },
+    },
+    expenses: [], bills: [], refunds: [], claims: [], audit: [],
+    ledger: [
+      { bill_no: '7731045', amount: 25000, desc: 'Spray paint', vendor: 'Paint shop', date: '2026-01-12', claimant: 'Rohan', claim: '2026/January1' },
+      { bill_no: 'INV-5531', amount: 184000, desc: 'Soldering station', vendor: 'Robu', date: '2026-01-20', claimant: 'Arjun', claim: '2026/January1' },
+    ],
+  });
+
+  const exp = (s, id) => s.expenses.find(e => e.id === id);
+  const bill = (s, id) => s.bills.find(b => b.id === id);
+  const clm = (s, id) => s.claims.find(c => c.id === id);
+  const rfd = (s, id) => s.refunds.find(r => r.id === id);
+  const billsOf = (s, e) => s.bills.filter(b => b.expense_id === e.id);
+  const refundsOf = (s, e) => s.refunds.filter(r => r.expense_id === e.id);
+  const ownerOf = (s, b) => exp(s, b.expense_id).claimant;
+  const vendorOf = e => e.vendor || e.payee;
+  const descOf = (s, b) => exp(s, b.expense_id).what || exp(s, b.expense_id).payee;
+  const claimLabel = c => c.name || `Draft (${c.id})`;
+  const methodLabels = c => c.methods.map(m => m.label);
+  const matchMethod = (c, text) => { const t = (text || '').toLowerCase(); const m = c.methods.find(m => m.hints.some(h => h && t.includes(h.toLowerCase()))); return m ? m.label : NOTREC; };
+  const recalc = b => { if (['claimed', 'reimbursed', 'cancelled'].includes(b.status)) return; b.status = !b.fulfilled ? 'expected' : b.doc ? 'ready' : 'fulfilled'; };
+  const sum = xs => xs.reduce((t, x) => t + x, 0);
+
+  // A Bill counts toward the Payment unless it is cancelled or was returned after claiming (its Refund counts instead).
+  const counts = b => b.status !== 'cancelled' && !b.returned;
+  const openAmount = (e, s) => e.amount == null ? 0 : e.amount - sum(billsOf(s, e).filter(counts).map(b => b.amount)) - sum(refundsOf(s, e).map(r => r.amount));
+  // Bills with no document yet that a document can still attach to (expected, or fulfilled but missing its paper).
+  const docless = (e, s) => billsOf(s, e).filter(b => counts(b) && !b.doc && !b.claim_id && ['expected', 'fulfilled'].includes(b.status));
+  const capacity = (e, s) => sum(docless(e, s).map(b => b.amount)) + Math.max(openAmount(e, s), 0);
+  const submittedBill = (s, b) => b.claim_id && clm(s, b.claim_id).status !== 'draft';
+  const owedOf = (s, e) => refundsOf(s, e).filter(r => r.postClaim && !r.resolved);
+
+  const expenseStatus = (e, s) => {
+    if (e.status === 'closed' || e.status === 'draft') return e.status;
+    if (e.amount == null) return 'open';
+    const live = billsOf(s, e).filter(b => b.status !== 'cancelled');
+    const settled = openAmount(e, s) === 0 && live.every(b => b.status === 'reimbursed') && refundsOf(s, e).every(r => r.status !== 'expected') && !owedOf(s, e).length;
+    return settled ? 'settled' : 'open';
+  };
+
+  function whyOpen(e, s) {
+    const st = expenseStatus(e, s);
+    if (st === 'draft') return ['draft: not confirmed yet'];
+    if (st === 'closed') return ['closed (' + (e.closed_reason || 'no reason') + ')'];
+    if (st === 'settled') return ['settled'];
+    if (e.amount == null) return ["couldn't read the amount"];
+    const bs = billsOf(s, e), why = [], open = openAmount(e, s);
+    if (bs.some(b => b.status === 'expected')) why.push('awaiting goods');
+    const owed = sum(refundsOf(s, e).filter(r => r.status === 'expected').map(r => r.amount));
+    if (owed) why.push('refund owed ' + rupees(owed));
+    if (bs.some(b => b.status === 'fulfilled')) why.push('bill missing');
+    if (open > 0) why.push('unaccounted ' + rupees(open));
+    if (open < 0) why.push('over-covered ' + rupees(-open));
+    const ow = sum(owedOf(s, e).map(r => r.amount));
+    if (ow) why.push('owed to university ' + rupees(ow));
+    if (bs.some(b => b.status === 'claimed')) why.push('in claim');
+    return why.length ? why : ['in claim'];
+  }
+
+  // Section 7. Block = cannot be claimed. Warn = shown, not blocking.
+  function duplicates(b, s) {
+    const out = [], no = norm(b.bill_no), e = exp(s, b.expense_id), bd = b.bill_date || e.paid_on, v = vendorOf(e);
+    if (no) {
+      for (const l of s.ledger)
+        if (l.bill_id !== b.id && norm(l.bill_no) === no && l.amount === b.amount)
+          out.push({ level: 'block', other: 'ledger:' + l.bill_no, msg: `Ledger already has bill ${l.bill_no} ${rupees(l.amount)} (claimed by ${l.claimant} in ${l.claim})` });
+      for (const o of s.bills) {
+        if (o.id === b.id || o.status === 'cancelled' || o.status === 'reimbursed') continue;
+        const oe = exp(s, o.expense_id); if (oe.status === 'closed') continue;
+        if (norm(o.bill_no) === no && o.amount === b.amount) {
+          if (o.claim_id) out.push({ level: 'block', other: o.id, msg: `Bill ${o.id} (${oe.claimant}) has the same number and amount and is already on claim ${claimLabel(clm(s, o.claim_id))}` });
+          else out.push({ level: 'warn', other: o.id, msg: `Bill ${o.id} (${oe.claimant}, ${oe.id}) has the same number and amount but is not on a claim yet` });
+        }
+      }
+    }
+    // Fuzzy: same amount, within 7 days, similar vendor, and at least one side has no number. Open Bills AND the Ledger.
+    for (const o of s.bills) {
+      if (o.id === b.id || o.status === 'cancelled' || o.expense_id === b.expense_id) continue;
+      const oe = exp(s, o.expense_id); if (oe.status === 'closed') continue;
+      if (no && norm(o.bill_no)) continue;
+      if (o.amount === b.amount && Math.abs(daysBetween(o.bill_date || oe.paid_on, bd)) <= 7 && similar(vendorOf(oe), v))
+        out.push({ level: 'warn', other: o.id, msg: `Bill ${o.id} (${oe.claimant}) has the same amount, a similar vendor, within 7 days, and no bill number to compare` });
+    }
+    for (const l of s.ledger) {
+      if (l.bill_id === b.id || (no && norm(l.bill_no))) continue;
+      if (l.amount === b.amount && Math.abs(daysBetween(l.date, bd)) <= 7 && similar(l.vendor, v))
+        out.push({ level: 'warn', other: 'ledger:' + (l.bill_no || l.desc), msg: `Ledger has ${rupees(l.amount)} from ${l.vendor} on ${fmtDate(l.date)} (${l.claimant}, ${l.claim}): same amount, similar vendor, within 7 days` });
+    }
+    return out;
+  }
+
+  function canClaim(b, s) {
+    if (b.status === 'cancelled') return { ok: false, reason: `Bill ${b.id} is cancelled${b.returned ? ' (returned)' : ''} and can never be claimed` };
+    if (b.returned) return { ok: false, reason: `Bill ${b.id} was returned and can never be claimed again` };
+    if (b.status === 'reimbursed') return { ok: false, reason: `Bill ${b.id} is already reimbursed` };
+    if (b.claim_id) return { ok: false, reason: `Bill ${b.id} is already on claim ${claimLabel(clm(s, b.claim_id))}` };
+    if (!b.fulfilled) return { ok: false, reason: `Bill ${b.id} is not fulfilled yet (goods have not all arrived)` };
+    if (!b.doc) return { ok: false, reason: `Bill ${b.id} has no document attached` };
+    const e = exp(s, b.expense_id);
+    if (e.status !== 'open') return { ok: false, reason: `Expense ${e.id} is not open` };
+    const blk = duplicates(b, s).find(d => d.level === 'block');
+    if (blk) return { ok: false, reason: 'Blocked as duplicate: ' + blk.msg };
+    if (!e.what) return { ok: false, reason: `Expense ${e.id} has no description yet (what was it for?)` };
+    return { ok: true, reason: '' };
+  }
+
+  const claimSum = (c, s) => sum(c.lines.map(id => bill(s, id).amount));
+  const claimTotal = (c, s) => Math.ceil(claimSum(c, s) / 100) * 100; // rounds UP to whole rupees
+  // Name assigned at submission: submission month + sequence among THIS Claimant's Claims that month.
+  const nameClaim = (s, c) => {
+    const [y, m] = s.today.split('-'), prefix = y + '/' + MONTHS[+m - 1];
+    const used = new Set([...s.claims.filter(x => x.claimant === c.claimant && x.name).map(x => x.name), ...s.ledger.filter(l => l.claimant === c.claimant).map(l => l.claim)]);
+    let n = 1; while (used.has(prefix + n)) n++;
+    return prefix + n;
+  };
+
+  // ---- building blocks shared by several actions ----
+  const newBill = (s, e, amount, bill_no, fulfilled) => {
+    const b = { id: 'B' + (++s.seq.B), expense_id: e.id, bill_no: (bill_no || '').trim(), amount, fulfilled, fulfilled_on: fulfilled ? s.today : null, doc: null, bill_date: null, status: 'expected', claim_id: null, returned: false, alt: [], docinfo: null };
+    recalc(b); s.bills.push(b); return b;
+  };
+  const newRefund = (s, e, amount, reason, bill_id, postClaim) => { const r = { id: 'R' + (++s.seq.R), expense_id: e.id, amount, status: 'expected', reason, bill_id, created_on: s.today, postClaim: !!postClaim, resolved: false }; s.refunds.push(r); return r; };
+  // online -> ONE expected Bill for the full Payment; shop/service -> one fulfilled Bill (paper still missing)
+  const initBills = (s, e) => { if (e.amount != null) newBill(s, e, e.amount, '', e.kind !== 'online'); };
+  const mkExpense = (s, o) => {
+    const e = { id: 'E' + (++s.seq.E), claimant: o.claimant, amount: o.amount, payee: o.payee, vendor: o.vendor || '', what: o.what || '', kind: o.kind, method: o.method, orderer: o.orderer || o.claimant, payback: !!o.payback, paid_on: o.paid_on, created_on: s.today, last_change_on: s.today, status: o.status || 'open', proof: o.proof || [], ref: o.ref || '', order_ref: o.order_ref || '', source: o.source || 'manual' };
+    s.expenses.push(e); if (e.status === 'open') initBills(s, e); return e;
+  };
+  // Put a document onto an Expense: use a document-less Bill (exact size first), split a bigger one, or take unaccounted money.
+  function attachTo(s, e, info) {
+    const total = info.total, d = docless(e, s);
+    let b = d.find(x => x.amount === total);
+    if (!b) { const big = d.filter(x => x.amount > total).sort((x, y) => x.amount - y.amount)[0]; if (big) { big.amount -= total; b = newBill(s, e, total, '', true); } }
+    if (!b) b = newBill(s, e, total, '', true);
+    b.doc = info.kind; b.bill_no = info.kind === 'invoice' ? info.no : ''; b.bill_date = info.date; b.fulfilled = true; b.fulfilled_on = b.fulfilled_on || s.today;
+    b.docinfo = info; b.alt = []; recalc(b);
+    if (info.order_ref && !e.order_ref) e.order_ref = info.order_ref;
+    return b;
+  }
+  // Undo an attach (used by "move"): the Bill becomes document-less again and merges back with any remainder.
+  function detach(s, b) {
+    const e = exp(s, b.expense_id);
+    b.doc = null; b.bill_no = ''; b.bill_date = null; b.alt = [];
+    if (e.kind === 'online') { b.fulfilled = false; b.fulfilled_on = null; }
+    recalc(b);
+    const other = docless(e, s).find(x => x.id !== b.id);
+    if (other) { other.amount += b.amount; s.bills.splice(s.bills.indexOf(b), 1); }
+  }
+  const eligibleForBill = (s, claimant, vendor, date, total, order_ref) => {
+    const list = s.expenses.filter(e => e.claimant === claimant && e.status === 'open' && e.amount != null && capacity(e, s) >= total &&
+      ((order_ref && e.order_ref && norm(order_ref) === norm(e.order_ref)) || (similar(vendorOf(e), vendor) && Math.abs(daysBetween(e.paid_on, date)) <= 10)));
+    const byOrder = list.filter(e => order_ref && norm(e.order_ref) === norm(order_ref));
+    if (byOrder.length) return byOrder;
+    return list.sort((x, y) => Math.abs(daysBetween(x.paid_on, date)) - Math.abs(daysBetween(y.paid_on, date)) || (capacity(x, s) === total ? -1 : 1));
+  };
+
+  // ---- validation: one rule set, used by reduce() and allowedActions() ----
+  const no = reason => ({ ok: false, reason });
+  const yes = { ok: true, reason: '' };
+  const posInt = n => Number.isInteger(n) && n > 0;
+  const lockedBy = (s, e) => billsOf(s, e).find(b => submittedBill(s, b));
+
+  function validate(s, a) {
+    switch (a.type) {
+      case 'advance': return posInt(a.days) && a.days <= 365 ? yes : no('Days must be a whole number from 1 to 365');
+      case 'add_method': {
+        const c = s.claimants[a.claimant]; if (!c) return no('Unknown Claimant');
+        if (!(a.method || '').trim()) return no('Payment method name is empty');
+        return methodLabels(c).includes(a.method.trim()) ? no(`${a.claimant} already has the payment method "${a.method.trim()}"`) : yes;
+      }
+      case 'log_payment': {
+        const c = s.claimants[a.claimant]; if (!c) return no('Pick a Claimant');
+        if (!posInt(a.amount)) return no('Amount must be more than zero');
+        if (!(a.payee || '').trim()) return no('Payee is empty');
+        if (!['online', 'shop', 'service'].includes(a.kind)) return no('Kind must be online, shop or service');
+        if (!methodLabels(c).includes(a.method)) return no(`"${a.method || ''}" is not one of ${a.claimant}'s payment methods (add it first)`);
+        return yes;
+      }
+      case 'share_payment': {
+        if (!s.claimants[a.claimant]) return no('Pick a Claimant');
+        if (a.amount != null && !posInt(a.amount)) return no('Amount must be more than zero (or leave it unreadable)');
+        if (a.amount != null && !(a.payee || '').trim()) return no('Payee is empty');
+        if (a.date && !validDate(a.date)) return no('Date is not valid');
+        return yes;
+      }
+      case 'share_bill': {
+        if (!s.claimants[a.claimant]) return no('Pick a Claimant');
+        if (!['invoice', 'informal'].includes(a.kind)) return no('A shared bill is an Invoice or an Informal bill');
+        if (!(a.vendor || '').trim()) return no('Vendor is empty');
+        if (!posInt(a.total)) return no('Total must be more than zero');
+        if (a.kind === 'invoice' && !(a.bill_no || '').trim()) return no('An Invoice needs a bill number');
+        if (a.date && !validDate(a.date)) return no('Date is not valid');
+        return yes;
+      }
+      case 'describe': {
+        const e = exp(s, a.expense); if (!e) return no('Unknown Expense');
+        if (e.status === 'closed') return no(`Expense ${e.id} is closed`);
+        return a.what != null && !a.what.trim() ? no('Say what it was for') : yes;
+      }
+      case 'confirm_draft': {
+        const e = exp(s, a.expense); if (!e) return no('Unknown Expense');
+        return e.status === 'draft' ? yes : no(`Expense ${e.id} is already ${e.status}, only drafts can be confirmed`);
+      }
+      case 'mark_fulfilled': {
+        const b = bill(s, a.bill); if (!b) return no('Unknown Bill');
+        return b.status === 'expected' ? yes : no(`Bill ${b.id} is ${b.fulfilled ? 'already fulfilled' : b.status}`);
+      }
+      case 'attach_document': {
+        const b = bill(s, a.bill); if (!b) return no('Unknown Bill');
+        if (['claimed', 'reimbursed', 'cancelled'].includes(b.status)) return no(`Bill ${b.id} is ${b.status}; its documents can no longer change`);
+        if (b.doc) return no(`Bill ${b.id} already has a document (${b.doc})`);
+        if (a.doc_kind == null) return yes;
+        if (!['invoice', 'informal', 'payment_proof'].includes(a.doc_kind)) return no('Document must be invoice, informal bill or payment proof');
+        if (a.doc_kind === 'invoice' && !(a.bill_no || b.bill_no || '').trim()) return no('An Invoice needs a bill number');
+        if (a.doc_kind === 'payment_proof' && !exp(s, b.expense_id).proof.length) return no(`Expense ${b.expense_id} has no payment confirmation to use as the bill`);
+        return yes;
+      }
+      case 'cancel_bill': {
+        const b = bill(s, a.bill); if (!b) return no('Unknown Bill');
+        return b.status === 'expected' ? yes : no(`Bill ${b.id} is ${b.status}; only a Bill whose goods have not arrived can be cancelled (after delivery use Record return)`);
+      }
+      case 'cancel_part': {
+        const e = exp(s, a.expense); if (!e) return no('Unknown Expense');
+        if (e.status !== 'open') return no(`Expense ${e.id} is ${e.status}`);
+        const ex = billsOf(s, e).filter(b => b.status === 'expected');
+        if (!ex.length) return no(`Expense ${e.id} has no expected Bill left to cancel part of`);
+        if (a.amount == null) return yes;
+        if (!posInt(a.amount)) return no('Amount must be more than zero');
+        if (ex.some(b => b.amount > a.amount)) return yes;
+        return no(`${rupees(a.amount)} is not less than the ${rupees(Math.max(...ex.map(b => b.amount)))} still expected; use "Cancel rest of order" for all of it`);
+      }
+      case 'record_return': {
+        const b = bill(s, a.bill); if (!b) return no('Unknown Bill');
+        if (!['fulfilled', 'ready', 'claimed', 'reimbursed'].includes(b.status)) return no(`Bill ${b.id} is ${b.status}; only a fulfilled Bill can be returned`);
+        if (b.claim_id && clm(s, b.claim_id).status === 'draft') return no(`Bill ${b.id} sits on draft claim ${claimLabel(clm(s, b.claim_id))}; remove it from the claim first`);
+        if (s.refunds.some(r => r.bill_id === b.id)) return no(`A return or cancellation is already recorded for Bill ${b.id}`);
+        return yes;
+      }
+      case 'receive_refund': {
+        const r = rfd(s, a.refund); if (!r) return no('Unknown Refund');
+        return r.status === 'expected' ? yes : no(`Refund ${r.id} is already ${r.status}`);
+      }
+      case 'resolve_owed': {
+        const r = rfd(s, a.refund); if (!r) return no('Unknown Refund');
+        return r.postClaim && !r.resolved ? yes : no(`Refund ${r.id} does not need resolving by hand`);
+      }
+      case 'move_bill': {
+        const b = bill(s, a.bill), t = exp(s, a.to); if (!b || !t) return no('Unknown Bill or Expense');
+        if (!b.docinfo) return no(`Bill ${b.id} was not attached from a shared document, so there is nothing to move`);
+        if (b.claim_id) return no(`Bill ${b.id} is already on a claim`);
+        if (t.id === b.expense_id) return no(`Bill ${b.id} is already on ${t.id}`);
+        if (t.claimant !== ownerOf(s, b)) return no('The other Expense belongs to a different Claimant');
+        if (t.status !== 'open') return no(`Expense ${t.id} is ${t.status}`);
+        return capacity(t, s) >= b.amount ? yes : no(`Expense ${t.id} has no room for ${rupees(b.amount)}`);
+      }
+      case 'confirm_match': {
+        const b = bill(s, a.bill); if (!b) return no('Unknown Bill');
+        return b.alt.length ? yes : no(`Bill ${b.id} has no open "Check" to confirm`);
+      }
+      case 'link_payback': {
+        const p = exp(s, a.payback), c = exp(s, a.colleague); if (!p || !c) return no('Unknown Expense');
+        if (!p.payback) return no(`Expense ${p.id} is not a Payback`);
+        if (p.status !== 'open' || c.status !== 'open') return no('Both Expenses must be open');
+        if (c.claimant === p.claimant) return no('Both Expenses belong to the same Claimant');
+        if (c.claimant !== p.payee) return no(`${p.id} was paid to ${p.payee}, but ${c.id} belongs to ${c.claimant}`);
+        const stuck = [...billsOf(s, p), ...billsOf(s, c)].find(b => b.claim_id);
+        if (stuck) return no(`Bill ${stuck.id} is already on a claim; link before claiming`);
+        return yes;
+      }
+      case 'correct': {
+        const e = exp(s, a.expense); if (!e) return no('Unknown Expense');
+        if (e.status === 'closed') return no(`Expense ${e.id} is closed`);
+        const lk = lockedBy(s, e);
+        if (lk) return no(`Bill ${lk.id} is on submitted claim ${claimLabel(clm(s, lk.claim_id))}; the Expense can no longer be corrected`);
+        if (a.field == null) return yes;
+        if (!['amount', 'payee', 'date', 'method'].includes(a.field)) return no('Only amount, payee, date or method can be corrected');
+        if (a.field === 'amount' && !posInt(a.value)) return no('Amount must be more than zero');
+        if (a.field === 'payee' && !(a.value || '').trim()) return no('Payee is empty');
+        if (a.field === 'date' && !validDate(a.value)) return no('Date is not valid');
+        if (a.field === 'method' && ![...methodLabels(s.claimants[e.claimant]), NOTREC].includes(a.value)) return no(`"${a.value}" is not one of ${e.claimant}'s payment methods`);
+        return yes;
+      }
+      case 'start_claim': return s.claimants[a.claimant] ? yes : no('Pick a Claimant');
+      case 'add_to_claim': {
+        const c = clm(s, a.claim), b = bill(s, a.bill); if (!c || !b) return no('Unknown Claim or Bill');
+        if (c.status !== 'draft') return no(`Claim ${claimLabel(c)} is ${c.status}; Bills can only be added while it is a draft (recall it first)`);
+        if (ownerOf(s, b) !== c.claimant) return no(`Bill ${b.id} belongs to ${ownerOf(s, b)}; claim ${claimLabel(c)} is ${c.claimant}'s`);
+        const k = canClaim(b, s); return k.ok ? yes : no(k.reason);
+      }
+      case 'remove_from_claim': {
+        const c = clm(s, a.claim); if (!c) return no('Unknown Claim');
+        if (c.status !== 'draft') return no(`Claim ${claimLabel(c)} is ${c.status}; Bills can only be removed while it is a draft (recall it first)`);
+        return c.lines.includes(a.bill) ? yes : no(`Bill ${a.bill} is not on claim ${claimLabel(c)}`);
+      }
+      case 'submit_claim': {
+        const c = clm(s, a.claim); if (!c) return no('Unknown Claim');
+        if (c.status !== 'draft') return no(`Claim ${claimLabel(c)} is already ${c.status}`);
+        if (!c.lines.length) return no(`Claim ${claimLabel(c)} has no lines`);
+        for (const id of c.lines) { const blk = duplicates(bill(s, id), s).find(d => d.level === 'block'); if (blk) return no(`Bill ${id} is blocked as duplicate: ${blk.msg}`); }
+        return yes;
+      }
+      case 'recall_claim': {
+        const c = clm(s, a.claim); if (!c) return no('Unknown Claim');
+        return c.status === 'submitted' ? yes : no(`Claim ${claimLabel(c)} is ${c.status}; only a submitted claim can be recalled`);
+      }
+      case 'mark_reimbursed': {
+        const c = clm(s, a.claim); if (!c) return no('Unknown Claim');
+        return c.status === 'submitted' ? yes : no(`Claim ${claimLabel(c)} is ${c.status}; only a submitted claim can be marked reimbursed`);
+      }
+      case 'close_expense': {
+        const e = exp(s, a.expense); if (!e) return no('Unknown Expense');
+        if (e.status === 'closed') return no(`Expense ${e.id} is already closed`);
+        const stuck = lockedBy(s, e);
+        if (stuck) return no(`Bill ${stuck.id} is on submitted claim ${claimLabel(clm(s, stuck.claim_id))}; an Expense with such a Bill cannot be closed`);
+        if (a.reason != null && !a.reason.trim()) return no('Give a reason (personal, duplicate, written off...)');
+        if (a.choices != null) for (const r of refundsOf(s, e).filter(r => r.status === 'expected'))
+          if (!['keep', 'writeoff'].includes(a.choices[r.id])) return no(`Say what happens to expected Refund ${r.id} (${rupees(r.amount)}): keep expecting it or write it off`);
+        return yes;
+      }
+      default: return no('Unknown action ' + a.type);
+    }
+  }
+
+  // apply() mutates a clone and may return a short note that is appended to the headline.
+  function apply(s, a) {
+    const t = s.today;
+    switch (a.type) {
+      case 'advance': s.today = addDays(t, a.days); break;
+      case 'add_method': s.claimants[a.claimant].methods.push({ label: a.method.trim(), hints: (a.hints || '').split(',').map(x => x.trim()).filter(Boolean) }); break;
+      case 'log_payment': {
+        const e = mkExpense(s, { claimant: a.claimant, amount: a.amount, payee: a.payee.trim(), vendor: (a.vendor || '').trim(), what: (a.what || '').trim(), kind: a.kind, method: a.method, orderer: (a.orderer || '').trim(), payback: a.payback, paid_on: t, status: a.draft ? 'draft' : 'open', source: a.draft ? 'back-fill' : 'manual' });
+        return `logged as ${e.id}${a.draft ? ' (draft)' : ''}`;
+      }
+      case 'share_payment': {
+        const c = s.claimants[a.claimant], date = a.date || t, ref = (a.ref || '').trim(), app = (a.app || '').trim();
+        const same = ref && s.expenses.find(e => e.claimant === a.claimant && e.proof.some(p => p.ref === ref));
+        if (same) return `same reference ${ref} is already on ${same.id}: attached to it, no new Expense`;
+        const m = a.amount != null && s.expenses.filter(e => e.claimant === a.claimant && e.status === 'open' && e.amount != null && e.method === NOTREC && !e.proof.length && Math.abs(e.amount - a.amount) <= 100 && Math.abs(daysBetween(e.paid_on, date)) <= 10 && similar(vendorOf(e), a.payee))
+          .sort((x, y) => Math.abs(daysBetween(x.paid_on, date)) - Math.abs(daysBetween(y.paid_on, date)))[0];
+        if (m) { m.proof.push({ ref, app }); m.paid_on = date; m.method = matchMethod(c, (a.hint || '') + ' ' + app); m.ref = ref; return `matched ${m.id} (its bill came first): filled date, payment method and reference, no new Expense`; }
+        const e = mkExpense(s, { claimant: a.claimant, amount: a.amount, payee: (a.payee || '').trim() || '(unreadable)', kind: guessKind(a.payee || ''), method: matchMethod(c, (a.hint || '') + ' ' + app), paid_on: date, proof: [{ ref, app }], ref, source: 'document' });
+        return a.amount == null ? `logged ${e.id} with the amount blank` : `logged ${e.id} straight away (payment method ${e.method})`;
+      }
+      case 'share_bill': {
+        const date = a.date || t, vendor = a.vendor.trim(), total = a.total, no = a.kind === 'invoice' ? a.bill_no.trim() : '', order_ref = (a.order_ref || '').trim();
+        const cands = eligibleForBill(s, a.claimant, vendor, date, total, order_ref);
+        const info = { kind: a.kind, no, date, total, vendor, order_ref };
+        if (!cands.length) {
+          const e = mkExpense(s, { claimant: a.claimant, amount: total, payee: vendor, kind: guessKind(vendor), method: NOTREC, paid_on: date, order_ref, source: 'document' });
+          attachTo(s, e, info); return `no matching Expense, so ${e.id} was logged from the bill (payment method "not recorded")`;
+        }
+        const e = cands[0], b = attachTo(s, e, info);
+        if (cands.length > 1) { b.alt = cands.slice(1).map(x => x.id); return `attached to ${e.id} as Bill ${b.id}, but ${b.alt.join(', ')} could also fit`; }
+        return `attached to ${e.id} as Bill ${b.id}`;
+      }
+      case 'describe': {
+        const e = exp(s, a.expense); if (a.what != null) e.what = a.what.trim();
+        if (a.kind) e.kind = a.kind;
+        if (a.order_ref) e.order_ref = a.order_ref.trim();
+        break;
+      }
+      case 'confirm_draft': { const e = exp(s, a.expense); e.status = 'open'; initBills(s, e); break; }
+      case 'mark_fulfilled': { const b = bill(s, a.bill); b.fulfilled = true; b.fulfilled_on = t; recalc(b); break; }
+      case 'attach_document': {
+        const b = bill(s, a.bill); b.doc = a.doc_kind;
+        if (a.doc_kind === 'invoice' && (a.bill_no || '').trim()) b.bill_no = a.bill_no.trim();
+        if (a.doc_kind !== 'invoice') b.bill_no = '';
+        b.fulfilled = b.fulfilled || a.doc_kind === 'payment_proof' && exp(s, b.expense_id).kind !== 'online';
+        recalc(b); break;
+      }
+      case 'cancel_bill': { const b = bill(s, a.bill); b.status = 'cancelled'; newRefund(s, exp(s, b.expense_id), b.amount, 'cancelled', b.id, false); break; }
+      case 'cancel_part': {
+        const e = exp(s, a.expense), b = billsOf(s, e).filter(x => x.status === 'expected' && x.amount > a.amount)[0];
+        b.amount -= a.amount; const r = newRefund(s, e, a.amount, 'cancelled', null, false); return `expected Bill ${b.id} shrinks to ${rupees(b.amount)}, expected Refund ${r.id} ${rupees(a.amount)}`;
+      }
+      case 'record_return': {
+        const b = bill(s, a.bill), e = exp(s, b.expense_id);
+        if (b.claim_id) { b.returned = true; newRefund(s, e, b.amount, 'returned', b.id, true); return 'the claim is NOT touched; owed to university'; }
+        b.status = 'cancelled'; b.returned = true; newRefund(s, e, b.amount, 'returned', b.id, false); return 'the Bill is cancelled for good';
+      }
+      case 'receive_refund': rfd(s, a.refund).status = 'received'; break;
+      case 'resolve_owed': rfd(s, a.refund).resolved = true; break;
+      case 'move_bill': {
+        const b = bill(s, a.bill), from = b.expense_id, info = b.docinfo;
+        detach(s, b); const b2 = attachTo(s, exp(s, a.to), info); return `moved from ${from} to ${a.to} as Bill ${b2.id}`;
+      }
+      case 'confirm_match': bill(s, a.bill).alt = []; break;
+      case 'link_payback': {
+        const p = exp(s, a.payback), c = exp(s, a.colleague);
+        s.bills = s.bills.filter(b => b.expense_id !== p.id); // the Payback's placeholder Bills give way to the colleague's real ones
+        for (const b of billsOf(s, c)) b.expense_id = p.id;
+        for (const r of s.refunds) if (r.expense_id === c.id) r.expense_id = p.id;
+        p.vendor = vendorOf(c); if (!p.what) p.what = c.what;
+        c.status = 'closed'; c.closed_reason = `paid back by ${p.claimant}`; c.linked_to = p.id; p.linked_from = c.id; break;
+      }
+      case 'correct': {
+        const e = exp(s, a.expense), old = { amount: e.amount, payee: e.payee, date: e.paid_on, method: e.method }[a.field];
+        if (a.field === 'amount') {
+          const d = docless(e, s);
+          if (e.amount == null) { e.amount = a.value; initBills(s, e); }
+          else {
+            const others = sum(billsOf(s, e).filter(counts).map(b => b.amount)) - sum(d.map(b => b.amount)) + sum(refundsOf(s, e).map(r => r.amount));
+            e.amount = a.value; if (d.length === 1 && a.value - others > 0) d[0].amount = a.value - others;
+          }
+        } else if (a.field === 'payee') e.payee = a.value.trim();
+        else if (a.field === 'date') e.paid_on = a.value;
+        else e.method = a.value;
+        const show = x => x == null ? '(blank)' : a.field === 'amount' ? rupees(x) : x;
+        s.audit.push({ on: t, expense: e.id, field: a.field, from: show(old), to: show(a.value) });
+        break;
+      }
+      case 'start_claim': s.claims.push({ id: 'C' + (++s.seq.C), name: null, claimant: a.claimant, status: 'draft', lines: [], submitted_on: null, sum: 0, total: 0 }); break;
+      case 'add_to_claim': { const c = clm(s, a.claim), b = bill(s, a.bill); c.lines.push(b.id); b.claim_id = c.id; b.status = 'claimed'; break; }
+      case 'remove_from_claim': {
+        const c = clm(s, a.claim), b = bill(s, a.bill); c.lines.splice(c.lines.indexOf(b.id), 1); b.claim_id = null;
+        if (b.returned) { b.status = 'cancelled'; for (const r of s.refunds) if (r.bill_id === b.id) r.postClaim = false; return 'it was returned, so it is cancelled for good and nothing is owed'; }
+        b.status = 'expected'; recalc(b); break;
+      }
+      case 'submit_claim': { const c = clm(s, a.claim); c.status = 'submitted'; c.submitted_on = t; if (!c.name) c.name = nameClaim(s, c); return `named ${c.name}`; }
+      case 'recall_claim': clm(s, a.claim).status = 'draft'; break;
+      case 'mark_reimbursed': {
+        const c = clm(s, a.claim); c.status = 'reimbursed';
+        for (const id of c.lines) {
+          const b = bill(s, id); b.status = 'reimbursed';
+          const e = exp(s, b.expense_id);
+          s.ledger.push({ bill_no: b.bill_no, amount: b.amount, desc: descOf(s, b) + (e.payback ? ` (paid back to ${e.payee})` : ''), vendor: vendorOf(e), date: b.bill_date || e.paid_on, claimant: c.claimant, claim: c.name, bill_id: b.id });
+        }
+        break;
+      }
+      case 'close_expense': {
+        const e = exp(s, a.expense); e.status = 'closed'; e.closed_reason = (a.reason || 'closed').trim();
+        for (const r of refundsOf(s, e)) if (r.status === 'expected' && a.choices && a.choices[r.id] === 'writeoff') r.status = 'written off';
+        for (const b of billsOf(s, e)) if (b.status !== 'cancelled') {
+          if (b.claim_id) { const c = clm(s, b.claim_id); c.lines.splice(c.lines.indexOf(b.id), 1); b.claim_id = null; }
+          b.status = 'cancelled'; // no Refund is created
+        }
+        break;
+      }
+    }
+  }
+
+  function attention(s, today) {
+    const items = [], push = (key, rule, text) => items.push({ key, rule, text });
+    const live = e => e.status === 'open';
+    const needDesc = s.expenses.filter(e => live(e) && !e.what);
+    if (needDesc.length) push('desc:' + needDesc.map(e => e.id).join(','), 'Needs description', `${needDesc.length} payment${needDesc.length > 1 ? 's need' : ' needs'} a description: ${needDesc.map(e => `${e.id} (${e.amount == null ? 'amount unreadable' : rupees(e.amount)} to ${e.payee})`).join(', ')}`);
+    for (const e of s.expenses) {
+      if (e.status === 'draft' && daysBetween(e.created_on, today) > 1) push('draft:' + e.id, 'Draft waiting', `Expense ${e.id} (${rupees(e.amount)} to ${e.payee}) has been a draft for ${daysBetween(e.created_on, today)} days`);
+      if (live(e) && e.amount == null) push('read:' + e.id, "Couldn't read", `Payment confirmation on ${e.id} (to ${e.payee}) could not be read; fill in the amount once`);
+      if (live(e) && e.amount != null) {
+        const open = openAmount(e, s);
+        if (open !== 0 && daysBetween(e.last_change_on, today) > 3)
+          push('unacc:' + e.id, 'Unaccounted', `Expense ${e.id}: Bills + Refunds are ${rupees(Math.abs(open))} ${open > 0 ? 'short of' : 'over'} the Payment for ${daysBetween(e.last_change_on, today)} days`);
+      }
+    }
+    for (const b of s.bills) {
+      const e = exp(s, b.expense_id); if (!live(e)) continue;
+      if (b.status === 'expected' && daysBetween(e.paid_on, today) > 7) push('late:' + b.id, 'Goods late', `Bill ${b.id} (${rupees(b.amount)}, ${e.id}) still expected ${daysBetween(e.paid_on, today)} days after payment`);
+      if (b.status === 'fulfilled' && daysBetween(b.fulfilled_on, today) > 3) push('nodoc:' + b.id, 'Bill missing', `Bill ${b.id} (${rupees(b.amount)}, ${e.id}) is fulfilled but has no document for ${daysBetween(b.fulfilled_on, today)} days`);
+      if (b.alt.length) push('check:' + b.id + ':' + b.alt.join(','), 'Check', `Check: Bill ${b.id} (${rupees(b.amount)}) was attached to ${e.id}, but could also be ${b.alt.join(' or ')}`);
+    }
+    for (const r of s.refunds) {
+      const e = exp(s, r.expense_id); if (e.status === 'draft') continue;
+      if (r.postClaim && !r.resolved) push('owed:' + r.id, 'Owed to university', `Owed to university ${rupees(r.amount)}: Bill ${r.bill_id} was returned after it was on claim ${claimLabel(clm(s, bill(s, r.bill_id).claim_id))}. The claim was not changed; deduct it from a later claim or repay, then resolve by hand`);
+      if (r.status === 'expected' && daysBetween(r.created_on, today) > 10) push('refund:' + r.id, 'Refund owed', `Refund ${r.id} (${rupees(r.amount)}, ${e.id}) expected for ${daysBetween(r.created_on, today)} days`);
+    }
+    for (const c of s.claims)
+      if (c.status === 'submitted' && daysBetween(c.submitted_on, today) > 45) push('unpaid:' + c.id, 'Claim unpaid', `Claim ${claimLabel(c)} submitted ${daysBetween(c.submitted_on, today)} days ago and not reimbursed`);
+    const seen = new Map();
+    for (const b of s.bills) {
+      if (['cancelled', 'reimbursed'].includes(b.status) || !live(exp(s, b.expense_id))) continue;
+      for (const d of duplicates(b, s)) {
+        const k = [b.id, d.other].sort().join('~'), prev = seen.get(k);
+        if (!prev || (d.level === 'block' && prev.level === 'warn')) seen.set(k, { level: d.level, b, d });
+      }
+    }
+    for (const [k, v] of seen) push('dup:' + k, 'Possible duplicate', `${v.d.level === 'block' ? 'BLOCKED. ' : ''}Bill ${v.b.id}: ${v.d.msg}`);
+    return items;
+  }
+
+  function allowedActions(s) {
+    const out = {}, put = (k, a) => { out[k] = validate(s, a); };
+    for (const c of Object.keys(s.claimants)) put('start_claim:' + c, { type: 'start_claim', claimant: c });
+    for (const e of s.expenses) {
+      put('confirm_draft:' + e.id, { type: 'confirm_draft', expense: e.id });
+      put('close_expense:' + e.id, { type: 'close_expense', expense: e.id });
+      put('describe:' + e.id, { type: 'describe', expense: e.id });
+      put('correct:' + e.id, { type: 'correct', expense: e.id });
+      put('cancel_part:' + e.id, { type: 'cancel_part', expense: e.id });
+      if (e.payback) for (const c of s.expenses) if (c.claimant === e.payee) put(`link_payback:${e.id}:${c.id}`, { type: 'link_payback', payback: e.id, colleague: c.id });
+    }
+    for (const b of s.bills) {
+      put('mark_fulfilled:' + b.id, { type: 'mark_fulfilled', bill: b.id });
+      put('attach_document:' + b.id, { type: 'attach_document', bill: b.id });
+      put('cancel_bill:' + b.id, { type: 'cancel_bill', bill: b.id });
+      put('record_return:' + b.id, { type: 'record_return', bill: b.id });
+      put('confirm_match:' + b.id, { type: 'confirm_match', bill: b.id });
+      for (const x of b.alt) put(`move_bill:${b.id}:${x}`, { type: 'move_bill', bill: b.id, to: x });
+      for (const c of s.claims) if (c.status === 'draft') put(`add_to_claim:${b.id}:${c.id}`, { type: 'add_to_claim', claim: c.id, bill: b.id });
+    }
+    for (const c of s.claims) {
+      put('submit_claim:' + c.id, { type: 'submit_claim', claim: c.id });
+      put('recall_claim:' + c.id, { type: 'recall_claim', claim: c.id });
+      put('mark_reimbursed:' + c.id, { type: 'mark_reimbursed', claim: c.id });
+      for (const id of c.lines) put(`remove_from_claim:${c.id}:${id}`, { type: 'remove_from_claim', claim: c.id, bill: id });
+    }
+    for (const r of s.refunds) { put('receive_refund:' + r.id, { type: 'receive_refund', refund: r.id }); put('resolve_owed:' + r.id, { type: 'resolve_owed', refund: r.id }); }
+    return out;
+  }
+
+  const headline = (a, s) => ({
+    advance: () => `Time moved forward ${a.days} day(s) to ${fmtDate(s.today)}`,
+    add_method: () => `${a.claimant} added payment method "${a.method.trim()}"`,
+    log_payment: () => `${a.claimant} ${a.draft ? 'created a draft for' : 'quick-added'} a Payment of ${rupees(a.amount)} to ${a.payee.trim()} (${a.kind}${a.payback ? ', Payback' : ''})`,
+    share_payment: () => `${a.claimant} shared a payment confirmation${a.app ? ' from ' + a.app : ''}: ${a.amount == null ? 'amount unreadable' : rupees(a.amount)} to ${a.payee || '?'}`,
+    share_bill: () => `${a.claimant} shared ${a.kind === 'invoice' ? 'Invoice ' + a.bill_no : 'an Informal bill'}: ${rupees(a.total)} from ${a.vendor}`,
+    describe: () => `Described ${a.expense}${a.what ? ': "' + a.what.trim() + '"' : ''}`,
+    confirm_draft: () => `Confirmed draft ${a.expense}`,
+    mark_fulfilled: () => `Marked Bill ${a.bill} fulfilled`,
+    attach_document: () => `Attached ${a.doc_kind} to Bill ${a.bill}`,
+    cancel_bill: () => `Cancelled the rest of the order: Bill ${a.bill}`,
+    cancel_part: () => `Cancelled part of the order on ${a.expense}: ${rupees(a.amount)}`,
+    record_return: () => `Recorded return of Bill ${a.bill}`,
+    receive_refund: () => `Marked Refund ${a.refund} received`,
+    resolve_owed: () => `Resolved Refund ${a.refund} by hand (owed to university)`,
+    move_bill: () => `Moved Bill ${a.bill} to ${a.to}`,
+    confirm_match: () => `Confirmed the match for Bill ${a.bill}`,
+    link_payback: () => `Linked Payback ${a.payback} to ${a.colleague}`,
+    correct: () => `Corrected ${a.field} on ${a.expense}`,
+    start_claim: () => `${a.claimant} started a Claim`,
+    add_to_claim: () => `Added Bill ${a.bill} to claim ${a.claim}`,
+    remove_from_claim: () => `Removed Bill ${a.bill} from claim ${a.claim}`,
+    submit_claim: () => `Submitted claim ${a.claim}`,
+    recall_claim: () => `Recalled claim ${a.claim} back to draft`,
+    mark_reimbursed: () => `Marked claim ${a.claim} reimbursed`,
+    close_expense: () => `Closed Expense ${a.expense} (${(a.reason || '').trim()})`,
+  }[a.type] || (() => a.type))();
+
+  function diff(a, b) {
+    const ev = [], T = (type, text) => ev.push({ type, text });
+    if (a.today !== b.today) T('chg', `Today is now ${fmtDate(b.today)}`);
+    for (const e of b.expenses) {
+      const o = exp(a, e.id);
+      if (!o) { T('chg', `Expense ${e.id} created (${e.status}): ${e.amount == null ? 'amount blank' : rupees(e.amount)} to ${e.payee}, via ${e.method}`); continue; }
+      const so = expenseStatus(o, a), sn = expenseStatus(e, b);
+      if (so !== sn) T('chg', `Expense ${e.id}: ${so} → ${sn}`);
+      for (const [f, lab] of [['amount', 'amount'], ['payee', 'payee'], ['paid_on', 'date'], ['method', 'payment method'], ['what', 'what for']])
+        if (o[f] !== e[f]) T('chg', `Expense ${e.id} ${lab}: ${f === 'amount' ? (o[f] == null ? '(blank)' : rupees(o[f])) : o[f] || '(empty)'} → ${f === 'amount' ? rupees(e[f]) : f === 'paid_on' ? fmtDate(e[f]) : e[f]}`);
+      if (e.proof.length !== o.proof.length) T('chg', `Expense ${e.id} payment confirmation attached (${e.proof.length})`);
+      const oo = openAmount(o, a), on = openAmount(e, b);
+      if (oo !== on && sn !== 'closed') T('chg', `Expense ${e.id} Open amount ${rupees(oo)} → ${rupees(on)}`);
+      const wo = whyOpen(o, a).join(', '), wn = whyOpen(e, b).join(', ');
+      if (wo !== wn && sn !== 'closed') T('chg', `Expense ${e.id} why open: ${wo} → ${wn}`);
+    }
+    for (const x of b.bills) {
+      const o = bill(a, x.id);
+      if (!o) T('chg', `Bill ${x.id} added to ${x.expense_id}: ${rupees(x.amount)}, ${x.status}${x.bill_no ? ', no. ' + x.bill_no : ''}`);
+      else {
+        if (o.status !== x.status) T('chg', `Bill ${x.id}: ${o.status} → ${x.status}`);
+        if (o.amount !== x.amount) T('chg', `Bill ${x.id} amount ${rupees(o.amount)} → ${rupees(x.amount)}`);
+        if (o.expense_id !== x.expense_id) T('chg', `Bill ${x.id} moved from ${o.expense_id} to ${x.expense_id}`);
+        if (!o.doc && x.doc) T('chg', `Bill ${x.id} got a document (${x.doc})`);
+        if (o.doc && !x.doc) T('chg', `Bill ${x.id} lost its document (moved away)`);
+      }
+    }
+    for (const o of a.bills) if (!bill(b, o.id)) T('chg', `Bill ${o.id} removed (${o.status === 'expected' || o.status === 'fulfilled' ? 'placeholder replaced' : 'merged'})`);
+    for (const x of b.refunds) {
+      const o = rfd(a, x.id);
+      if (!o) T(x.postClaim ? 'warn' : 'chg', `Refund ${x.id} expected: ${rupees(x.amount)} (${x.reason}${x.postClaim ? ', AFTER the bill was claimed' : ''})`);
+      else if (o.status !== x.status) T('chg', `Refund ${x.id}: ${o.status} → ${x.status}`);
+    }
+    for (const x of b.claims) {
+      const o = clm(a, x.id);
+      if (!o) { T('chg', `Claim ${claimLabel(x)} started for ${x.claimant}`); continue; }
+      if (o.status !== x.status) T('chg', `Claim ${claimLabel(x)}: ${o.status} → ${x.status}`);
+      if (o.lines.length !== x.lines.length) T('chg', `Claim ${claimLabel(x)} now has ${x.lines.length} line(s): lines add to ${rupees(x.sum)}, total ${rupees(x.total)}`);
+    }
+    for (const l of b.ledger.slice(a.ledger.length)) T('chg', `Ledger +${l.bill_no || '(no bill no.)'} ${rupees(l.amount)} ${l.desc} (${l.claimant}, ${l.claim})`);
+    for (const u of b.audit.slice(a.audit.length)) T('chg', `Audit log: ${u.expense} ${u.field} ${u.from} → ${u.to}`);
+    const had = new Set(attention(a, a.today).map(i => i.key));
+    for (const i of attention(b, b.today)) if (!had.has(i.key)) T('warn', `Needs attention: [${i.rule}] ${i.text}`);
+    return ev;
+  }
+
+  function reduce(state, a) {
+    const v = validate(state, a);
+    if (!v.ok) return { state, events: [{ type: 'rejected', text: v.reason }] };
+    const s = structuredClone(state);
+    const sig = (st, e) => JSON.stringify([e.status, e.amount, e.method, billsOf(st, e).map(b => [b.id, b.amount, b.status, b.doc]), refundsOf(st, e).map(r => [r.id, r.status])]);
+    const note = apply(s, a);
+    for (const c of s.claims) { c.sum = claimSum(c, s); c.total = claimTotal(c, s); } // both stored: exact sum and rounded-up total
+    for (const e of s.expenses) { const o = exp(state, e.id); if (!o || sig(state, o) !== sig(s, e)) e.last_change_on = s.today; }
+    return { state: s, events: [{ type: 'did', text: headline(a, s) + (note ? ' (' + note + ')' : '') }, ...diff(state, s)] };
+  }
+
+  return { seed, reduce, openAmount, whyOpen, canClaim, duplicates, attention, allowedActions, expenseStatus, claimTotal, claimSum, claimLabel, descOf, vendorOf, methodLabels, rupees, fmtDate, addDays, daysBetween, billsOf, refundsOf };
+})();
+</script>
+
+<script id="scenarios">
+// ===== Walkthrough data (pure; no DOM). Each step builds an action from the current state. =====
+const Scenarios = (() => {
+  const K = 'Rohan', Ay = 'Arjun';
+  const A = a => () => a;
+  const last = (s, k) => [...s.claims].reverse().find(c => c.claimant === k).id;
+  const st = (label, action, expect = 'ok', note = '') => ({ label, action, expect, note });
+  const R = rs => '₹' + rs.toLocaleString('en-IN');
+  const adv = d => st(`Move time forward ${d} day${d > 1 ? 's' : ''}`, A({ type: 'advance', days: d }));
+  // Share a payment confirmation. o: app, hint, ref, ago (days before today), note
+  const pay = (k, rs, payee, o = {}) => st(`${k} shares a ${o.app || 'payment'} confirmation: ${rs == null ? 'amount unreadable' : R(rs)} to ${payee}`,
+    s => ({ type: 'share_payment', claimant: k, amount: rs == null ? null : rs * 100, payee, app: o.app || '', hint: o.hint || '', ref: o.ref || '', date: o.ago ? Ayd(s.today, -o.ago) : undefined }), 'ok', o.note || '');
+  const Ayd = (d, n) => Logic.addDays(d, n);
+  // Share a bill. o: no, order, ago, note
+  const bil = (k, kind, rs, vendor, o = {}) => st(`${k} shares ${kind === 'invoice' ? 'Invoice ' + o.no : 'an Informal bill'}: ${R(rs)} from ${vendor}`,
+    s => ({ type: 'share_bill', claimant: k, kind, vendor, bill_no: o.no || '', order_ref: o.order || '', total: rs * 100, date: o.ago ? Ayd(s.today, -o.ago) : undefined }), 'ok', o.note || '');
+  const desc = (e, what) => st(`Describe ${e}: "${what}"`, A({ type: 'describe', expense: e, what }));
+  const startC = k => st(`${k} starts a claim`, A({ type: 'start_claim', claimant: k }));
+  const addC = (k, b, expect = 'ok', label) => st(label || `${k} adds Bill ${b} to the claim`, s => ({ type: 'add_to_claim', claim: last(s, k), bill: b }), expect);
+  const submitC = (k, note) => st(`${k} submits the claim`, s => ({ type: 'submit_claim', claim: last(s, k) }), 'ok', note);
+  const reimb = (k, note) => st(`Mark ${k}'s claim reimbursed`, s => ({ type: 'mark_reimbursed', claim: last(s, k) }), 'ok', note);
+  const refRecv = (r, note) => st(`Mark Refund ${r} received`, A({ type: 'receive_refund', refund: r }), 'ok', note);
+
+  return [
+    { id: 'a', name: 'a. Happy path', title: 'Happy path: shop purchase',
+      situation: 'Rohan pays ₹450 at a local hardware shop with PhonePe and shares the confirmation. Later he shares the handwritten slip.',
+      watch: 'The Expense is logged the moment the confirmation is shared (no draft); the Payment method is matched from the bank hint; "Needs description" collects it. The shop Bill is fulfilled but "bill missing" until the slip arrives. The Claim is named only when submitted.',
+      steps: [
+        pay(K, 450, 'Local hardware shop', { app: 'PhonePe', hint: 'Acme Bank xx1234', ref: 'PP2611200001' }),
+        desc('E1', 'Soldering tips'),
+        bil(K, 'informal', 450, 'Local hardware shop', { note: 'Attached to E1; no second Expense.' }),
+        startC(K), addC(K, 'B1'), submitC(K, 'The draft was called "Draft"; the name appears now.'),
+        reimb(K, 'Expense E1 goes to settled and the Ledger gains a line.'),
+      ] },
+    { id: 'b', name: 'b. Split across Claims', title: 'Amazon order delivered in two parts, claimed in two Claims',
+      situation: 'Rohan pays ₹5,000 to Amazon. The Expense starts with ONE expected Bill for the full amount. A ₹3,000 invoice arrives and is split off it; the ₹2,000 one arrives two weeks later (dated earlier, shared late).',
+      watch: 'After the first invoice the expected Bill shrinks to ₹2,000, and only the split-off invoice can be claimed. After the first reimbursement the Expense stays open (awaiting goods) and "Goods late" fires. The second Claim is named by the month it is submitted.',
+      steps: [
+        pay(K, 5000, 'Amazon', { app: 'CRED', hint: 'Nova Card 9876', ref: 'CR-9001' }),
+        desc('E1', 'Dev boards'),
+        startC(K),
+        addC(K, 'B1', 'refused', 'Try adding the expected Bill B1 to the claim (should be refused: goods not arrived)'),
+        bil(K, 'invoice', 3000, 'Amazon', { no: 'AMZ-A', note: 'B1 shrinks to ₹2,000; new Bill B2 is ready.' }),
+        addC(K, 'B2'), submitC(K), reimb(K, 'Expense stays open: Bill B1 is still expected.'),
+        adv(14),
+        bil(K, 'invoice', 2000, 'Amazon', { no: 'AMZ-B', ago: 5, note: 'Fits the expected Bill exactly, so B1 itself becomes ready.' }),
+        startC(K), addC(K, 'B1'), submitC(K, 'Named by submission month and the Claimant\'s own sequence.'),
+        reimb(K, 'Expense settles: Order complete.'),
+      ] },
+    { id: 'c', name: 'c. Cancel rest', title: 'Cancelling the rest of an order',
+      situation: 'Rohan pays ₹4,000 to Robu. A ₹2,500 invoice arrives; the remaining ₹1,500 never ships and is cancelled.',
+      watch: 'Cancelling what is left turns the expected Bill into an expected Refund. Open amount stays ₹0, but the Expense only settles when the Refund is received AND the claim is reimbursed.',
+      steps: [
+        pay(K, 4000, 'Robu', { app: 'GPay', hint: 'Acme Bank', ref: 'GP-7001' }),
+        desc('E1', 'Sensors'),
+        bil(K, 'invoice', 2500, 'Robu', { no: 'ROB-1' }),
+        st('Cancel the rest of the order (Bill B1, ₹1,500)', A({ type: 'cancel_bill', bill: 'B1' }), 'ok', 'An expected Refund of ₹1,500 appears.'),
+        adv(11),
+        refRecv('R1'),
+        startC(K), addC(K, 'B2'), submitC(K),
+        reimb(K, 'Now the Expense settles.'),
+      ] },
+    { id: 'd', name: 'd. Return before claim', title: 'Return before the Bill was on a submitted Claim',
+      situation: 'Rohan pays ₹900 at a hobby shop; the invoice arrives; the goods are returned before he claims anything.',
+      watch: 'The Bill becomes cancelled for good (it can never become ready again) and a Refund is expected. Trying to claim it is refused. Once the Refund is received the Expense settles with no claim at all.',
+      steps: [
+        pay(K, 900, 'Hobby shop', { app: 'GPay', hint: 'Acme Bank', ref: 'GP-8001' }),
+        desc('E1', 'Servo kit'),
+        bil(K, 'invoice', 900, 'Hobby shop', { no: 'HS-882' }),
+        st('Record return of Bill B1', A({ type: 'record_return', bill: 'B1' }), 'ok', 'Bill cancelled permanently; expected Refund of ₹900.'),
+        startC(K),
+        addC(K, 'B1', 'refused', 'Try adding the returned Bill B1 to a claim (should be refused)'),
+        refRecv('R1', 'Expense settles with no Reimbursement needed.'),
+      ] },
+    { id: 'e', name: 'e. Illegal attempts', title: 'Illegal attempts',
+      situation: 'A series of things the model must refuse. Steps marked "(should be refused)" must show a red reason and change nothing.',
+      watch: 'Every refusal says why in plain words and nothing changes. The last one is blocked because Bill number 7731045 for ₹250 is already in the Ledger from January.',
+      steps: [
+        pay(K, 500, 'Robu.in', { app: 'GPay', hint: 'Acme Bank', ref: 'GP-1' }),
+        startC(K),
+        addC(K, 'B1', 'refused', 'Try adding Bill B1: goods not arrived (should be refused)'),
+        bil(K, 'invoice', 500, 'Robu.in', { no: 'ROB-1' }),
+        addC(K, 'B1', 'refused', 'Try adding Bill B1: no description yet (should be refused)'),
+        desc('E1', 'Resistors'), addC(K, 'B1'), submitC(K),
+        st('Try removing Bill B1 from the submitted claim (should be refused)', s => ({ type: 'remove_from_claim', claim: last(s, K), bill: 'B1' }), 'refused'),
+        st('Try correcting the amount of E1 now that its Bill is on a submitted claim (should be refused)', A({ type: 'correct', expense: 'E1', field: 'amount', value: 60000 }), 'refused'),
+        st('Try closing E1 as personal (should be refused)', A({ type: 'close_expense', expense: 'E1', reason: 'personal' }), 'refused'),
+        pay(K, 250, 'Paint shop', { app: 'GPay', hint: 'Acme Bank', ref: 'GP-2' }),
+        desc('E2', 'Spray paint'),
+        bil(K, 'invoice', 250, 'Paint shop', { no: '7731045', note: 'Note the BLOCKED duplicate in Needs attention.' }),
+        addC(K, 'B2', 'refused', 'Try adding Bill B2 to the already-submitted claim (should be refused)'),
+        startC(K),
+        addC(K, 'B2', 'refused', 'Try adding Bill B2 (7731045, ₹250) to a new claim (should be refused: in the Ledger)'),
+      ] },
+    { id: 'f', name: 'f. Payback', title: 'Payback to a colleague, linked',
+      situation: 'Arjun pays Circuit Hub ₹1,200 and logs it. Rohan pays Arjun back and logs a Payback. Both get the invoice INV-77. Rohan links his Payback to Arjun\'s Expense and claims. Arjun shares the same invoice once more and tries to claim it.',
+      watch: 'Before linking, both Expenses carry INV-77 and a duplicate warning shows. Linking closes Arjun\'s Expense as "paid back by Rohan", moves its Bill onto the Payback and silences the warning. Arjun\'s second attempt is blocked: the number and amount are already on Rohan\'s claim.',
+      steps: [
+        pay(Ay, 1200, 'Circuit Hub', { app: 'GPay', hint: 'Zeta 7730', ref: 'AY-1' }),
+        desc('E1', 'Circuit Hub order'),
+        bil(Ay, 'invoice', 1200, 'Circuit Hub', { no: 'INV-77' }),
+        st('Rohan quick-adds a ₹1,200 Payback to Arjun (vendor Circuit Hub, online)', A({ type: 'log_payment', claimant: K, amount: 120000, payee: Ay, vendor: 'Circuit Hub', what: 'Circuit Hub order', kind: 'online', method: 'Savings account', orderer: Ay, payback: true }), 'ok', 'Expense E2 starts with one expected Bill for the full amount.'),
+        bil(K, 'invoice', 1200, 'Circuit Hub', { no: 'INV-77', note: 'Attached to E2. Duplicate warning: Arjun\'s B1 has the same number and amount.' }),
+        st('Link Rohan\'s Payback E2 to Arjun\'s Expense E1', A({ type: 'link_payback', payback: 'E2', colleague: 'E1' }), 'ok', 'E1 closes as "paid back by Rohan"; its Bill moves to E2; the duplicate warning disappears.'),
+        startC(K),
+        st('Rohan adds the moved Bill B1 to his claim', s => ({ type: 'add_to_claim', claim: last(s, K), bill: 'B1' })),
+        submitC(K),
+        bil(Ay, 'invoice', 1200, 'Circuit Hub', { no: 'INV-77', note: 'No open Expense to match, so a new Expense E3 is logged; it is already blocked as a duplicate.' }),
+        startC(Ay),
+        addC(Ay, 'B3', 'refused', 'Arjun tries to claim INV-77 again (should be refused: already on Rohan\'s claim)'),
+      ] },
+    { id: 'g', name: 'g. Unaccounted money', title: 'Unaccounted money',
+      situation: 'Rohan shares a ₹2,400 confirmation and the matching bill. Then he corrects the Payment to ₹3,000 (the first read was wrong).',
+      watch: 'The correction is allowed (no Bill is on a submitted claim) and lands in the audit log. Bills + Refunds no longer equal the Payment: "unaccounted ₹600" shows at once, but becomes a Needs-attention item only after more than 3 days.',
+      steps: [
+        pay(K, 2400, 'Local vendor', { app: 'PhonePe', hint: 'Acme Bank', ref: 'PP-5' }),
+        bil(K, 'informal', 2400, 'Local vendor'),
+        st('Correct the amount of E1 to ₹3,000', A({ type: 'correct', expense: 'E1', field: 'amount', value: 300000 }), 'ok', 'Audit log gets a line; the Bill has a document so it is not resized.'),
+        adv(1), adv(4),
+      ] },
+    { id: 'h', name: 'h. Screenshot, then invoice', title: 'Screenshot first, then invoice',
+      situation: 'Rohan pays Anand Hardware ₹1,850 with GPay and shares the confirmation. Two days later he shares an informal bill for the same amount.',
+      watch: 'The Expense is logged at once and needs a description. The bill attaches to it (no second Expense) because amount, vendor and dates agree. He then describes it and claims.',
+      steps: [
+        pay(K, 1850, 'Anand Hardware', { app: 'GPay', hint: 'Acme Bank xx1234', ref: 'GP-1850' }),
+        adv(2),
+        bil(K, 'informal', 1850, 'Anand Hardware', { note: 'Attaches to E1; no second Expense.' }),
+        desc('E1', 'Drill bits'),
+        startC(K), addC(K, 'B1'), submitC(K), reimb(K),
+      ] },
+    { id: 'i', name: 'i. Invoice, then screenshot', title: 'Invoice first, then screenshot',
+      situation: 'Rohan shares Invoice INV-2290 for ₹4,300 from New Era Plywood before any payment record exists. Later he shares the PhonePe confirmation.',
+      watch: 'The invoice logs an Expense by itself with payment method "not recorded" and the Bill is claimable immediately: no payment record is needed. The later confirmation (amount within ₹1, payee similar, dates within 10 days) attaches to it, filling date, method and reference.',
+      steps: [
+        bil(K, 'invoice', 4300, 'New Era Plywood', { no: 'INV-2290' }),
+        desc('E1', 'Plywood sheets'),
+        startC(K), addC(K, 'B1'), submitC(K),
+        adv(3),
+        pay(K, 4300, 'New Era', { app: 'PhonePe', hint: 'Acme Bank', ref: 'PP-4300', note: 'No new Expense: E1 gets its payment fields filled.' }),
+      ] },
+    { id: 'j', name: 'j. Ambiguous match', title: 'Ambiguous match',
+      situation: 'Two ₹500 payments to the same vendor, three days apart. A ₹500 bill arrives that fits both.',
+      watch: 'The bill attaches to the best fit (closest date) and a "Check" item names the other candidate. One action moves it. Note the Bill is claimable while the Check is still open.',
+      steps: [
+        pay(K, 500, 'Lakshmi Traders', { app: 'GPay', hint: 'Acme Bank', ref: 'GP-L1' }),
+        adv(3),
+        pay(K, 500, 'Lakshmi Traders', { app: 'GPay', hint: 'Acme Bank', ref: 'GP-L2' }),
+        bil(K, 'informal', 500, 'Lakshmi Traders', { note: 'Attached to E2 (nearest date) plus a Check item for E1.' }),
+        st('Move the bill to E1 (it was the earlier purchase)', A({ type: 'move_bill', bill: 'B2', to: 'E1' }), 'ok', 'E2 gets its placeholder back; E1 now has the document.'),
+      ] },
+    { id: 'k', name: 'k. Order partly cancelled', title: 'Amazon order partly cancelled',
+      situation: 'Rohan pays ₹6,000 to Amazon. A ₹2,500 invoice arrives; ₹1,000 worth is then cancelled; a second ₹2,500 invoice arrives; the refund lands; both invoices are claimed.',
+      watch: 'Invoices split off the single expected Bill. Cancelling part reduces the expected remainder and creates an expected Refund. When Bills (₹5,000) + Refund (₹1,000) equal the Payment and everything is reimbursed or received, the Order is complete.',
+      steps: [
+        pay(K, 6000, 'Amazon', { app: 'CRED', hint: 'Nova Card', ref: 'CR-6000' }),
+        desc('E1', 'Workshop supplies'),
+        bil(K, 'invoice', 2500, 'Amazon', { no: 'AMZ-1', note: 'B1 shrinks from ₹6,000 to ₹3,500.' }),
+        st('Cancel part of the order (₹1,000)', A({ type: 'cancel_part', expense: 'E1', amount: 100000 }), 'ok', 'B1 shrinks to ₹2,500; expected Refund R1 ₹1,000.'),
+        bil(K, 'invoice', 2500, 'Amazon', { no: 'AMZ-2', note: 'Fits B1 exactly; B1 becomes ready.' }),
+        refRecv('R1'),
+        startC(K), addC(K, 'B1'), addC(K, 'B2'), submitC(K),
+        reimb(K, 'Order complete: Bills + Refunds = Payment, all reimbursed or received.'),
+      ] },
+    { id: 'l', name: 'l. Shared twice', title: 'Same confirmation shared twice',
+      situation: 'Rohan shares the same GPay confirmation twice (a double tap, or a screenshot plus a share).',
+      watch: 'The second one carries the same reference, so it attaches to the existing Expense. No new Expense appears.',
+      steps: [
+        pay(K, 1850, 'Anand Hardware', { app: 'GPay', hint: 'Acme Bank', ref: 'GP-DUP-1' }),
+        pay(K, 1850, 'Anand Hardware', { app: 'GPay', hint: 'Acme Bank', ref: 'GP-DUP-1', note: 'Still one Expense (E1).' }),
+      ] },
+    { id: 'm', name: 'm. Return after claim', title: 'Return after the Claim was submitted',
+      situation: 'Rohan claims a ₹900 shop purchase. After submitting, the goods go back to the shop.',
+      watch: 'An "Owed to university ₹900" item appears and the Claim is NOT changed. The Expense cannot settle until Rohan presses "Resolve by hand". The Bill is marked returned, so it can never be claimed again.',
+      steps: [
+        pay(K, 900, 'Hobby shop', { app: 'GPay', hint: 'Acme Bank', ref: 'GP-M1' }),
+        bil(K, 'invoice', 900, 'Hobby shop', { no: 'HS-900' }),
+        desc('E1', 'Servo kit'),
+        startC(K), addC(K, 'B1'), submitC(K), adv(5),
+        st('Record return of Bill B1', A({ type: 'record_return', bill: 'B1' }), 'ok', 'Claim stays as submitted; "Owed to university" is raised.'),
+        refRecv('R1', 'The shop paid Rohan back. The university has not been repaid yet.'),
+        reimb(K, 'The university pays the full claim. Expense still not settled: money is owed back.'),
+        st('Resolve Refund R1 by hand (deducted or repaid)', A({ type: 'resolve_owed', refund: 'R1' }), 'ok', 'Now the Expense settles.'),
+      ] },
+  ];
+})();
+</script>
+<script id="page">
+// ===== THIN PAGE SHELL. Calls into Logic; Logic never calls back. =====
+(() => {
+  const $ = id => document.getElementById(id);
+  const R = Logic.rupees, esc = x => String(x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let state = Logic.seed(), events = [], reg = [];
+  const wt = { tab: 'a', step: 0, results: [] };
+
+  function dispatch(a) { const r = Logic.reduce(state, a); state = r.state; events = r.events; render(); return r; }
+  function resetAll(tab) { state = Logic.seed(); events = [{ type: 'did', text: 'Reset to the starting state (two historic Ledger rows, nobody has spent anything yet)' }]; wt.tab = tab || wt.tab; wt.step = 0; wt.results = []; ['pd', 'bd'].forEach(i => delete $(i).dataset.t); render(); }
+
+  const chip = (t, cls = '') => `<span class="chip ${cls}">${esc(t)}</span>`;
+  const statusChip = s => chip(s, ['ready', 'settled', 'reimbursed', 'open'].includes(s) ? 'acc' : '');
+  const rs = v => Math.round(parseFloat(v) * 100) || 0;
+
+  function renderBanner() {
+    const rej = events[0] && events[0].type === 'rejected';
+    if (!events.length) { $('banner').innerHTML = `<div class="banner"><span class="muted">Nothing has happened yet. Press a walkthrough step or use free play.</span></div>`; return; }
+    if (rej) { $('banner').innerHTML = `<div class="banner rej"><div class="head">Refused</div>${esc(events[0].text)}<div class="small">Nothing changed.</div></div>`; return; }
+    $('banner').innerHTML = `<div class="banner"><div class="head">${esc(events[0].text)}</div><div class="small muted">What just changed</div><ul>${events.slice(1).map(e => `<li${e.type === 'warn' ? ' class="no"' : ''}>${esc(e.text)}</li>`).join('') || '<li class="muted">no other effect</li>'}</ul></div>`;
+  }
+
+  function billLine(b) {
+    const doc = b.doc ? chip({ invoice: 'Invoice', informal: 'Informal bill', payment_proof: 'Payment proof' }[b.doc], 'acc') : chip('no document');
+    return `<div class="row"><b>${b.id}</b><span class="amt">${R(b.amount)}</span><span class="muted">${b.bill_no ? 'no. ' + esc(b.bill_no) : 'no bill number'}</span>${statusChip(b.status)}${doc}${b.fulfilled ? chip('fulfilled') : chip('goods pending')}${b.claim_id ? chip('claim ' + esc(Logic.claimLabel(state.claims.find(c => c.id === b.claim_id))), 'acc') : ''}${b.returned ? chip('returned', 'bad') : ''}${b.alt.length ? chip('check: could be ' + b.alt.join(' / '), 'bad') : ''}</div>`;
+  }
+
+  function renderState() {
+    let h = '';
+    for (const [name, c] of Object.entries(state.claimants)) {
+      const exps = state.expenses.filter(e => e.claimant === name);
+      h += `<div class="card"><h3>${esc(name)} <span class="muted small">payment methods: ${c.methods.map(m => esc(m.label) + (m.hints.length ? ' (' + esc(m.hints.join(', ')) + ')' : '')).join('; ')}</span></h3>`;
+      if (!exps.length) h += `<div class="muted small" style="margin-top:6px">No expenses yet.</div>`;
+      for (const e of exps) {
+        const st = Logic.expenseStatus(e, state), open = Logic.openAmount(e, state), why = Logic.whyOpen(e, state);
+        h += `<div class="ex"><div class="row"><b>${e.id}</b><span class="amt">${e.amount == null ? 'amount unreadable' : R(e.amount)}</span><span>to ${esc(e.payee)}${e.vendor ? ' (vendor ' + esc(e.vendor) + ')' : ''}</span><span class="muted">${e.what ? '(' + esc(e.what) + ') ' : ''}${e.kind} &middot; ${Logic.fmtDate(e.paid_on)} &middot; via ${esc(e.method)} &middot; orderer ${esc(e.orderer)}${e.order_ref ? ' &middot; order ' + esc(e.order_ref) : ''}</span>${e.what ? '' : chip('needs description', 'bad')}${e.payback ? chip('Payback', 'acc') : ''}${e.proof.length ? chip(e.proof.length + ' payment confirmation' + (e.proof.length > 1 ? 's' : '')) : ''}${statusChip(st)}${st === 'settled' && e.kind === 'online' ? chip('Order complete', 'acc') : ''}</div>
+          <div class="row small">${st === 'closed' || st === 'draft' ? '' : `<span>Open amount <b class="${open ? 'no' : ''}">${R(open)}</b></span>`}<span class="muted">why: ${esc(why.join(' + '))}</span></div>
+          <div class="bills">${Logic.billsOf(state, e).map(billLine).join('') || '<div class="muted small">no bills</div>'}
+          ${Logic.refundsOf(state, e).map(r => `<div class="row"><b>${r.id}</b><span>Refund</span><span class="amt">${R(r.amount)}</span>${chip(r.status, r.status === 'received' ? 'acc' : '')}<span class="muted">${r.reason}</span>${r.postClaim ? chip(r.resolved ? 'owed to university: resolved' : 'owed to university', r.resolved ? '' : 'bad') : ''}</div>`).join('')}</div></div>`;
+      }
+      h += `</div>`;
+    }
+    h += `<h2>Claims</h2>`;
+    if (!state.claims.length) h += `<div class="card muted small">No claims yet.</div>`;
+    for (const c of state.claims) {
+      h += `<div class="card"><div class="row"><b>${esc(Logic.claimLabel(c))}</b><span class="muted">${esc(c.claimant)}</span>${statusChip(c.status)}${c.submitted_on ? `<span class="muted small">submitted ${Logic.fmtDate(c.submitted_on)}</span>` : ''}</div>
+        <table>${c.lines.map(id => { const b = state.bills.find(x => x.id === id), e = state.expenses.find(x => x.id === b.expense_id); return `<tr><td>${b.id}</td><td>${esc(b.bill_no || '(no number)')}</td><td>${esc(Logic.descOf(state, b))}${e.payback ? ' (paid back to ' + esc(e.payee) + ')' : ''}</td><td class="r">${R(b.amount)}</td></tr>`; }).join('') || '<tr><td class="muted">no lines</td></tr>'}
+        <tr><td colspan="3" class="r">Lines add to (exact)</td><td class="r amt">${R(c.sum)}</td></tr>
+        <tr><td colspan="3" class="r"><b>Claim total</b> <span class="muted small">(rounded up to whole rupees)</span></td><td class="r amt">${R(c.total)}</td></tr></table></div>`;
+    }
+    h += `<h2>Ledger (all Claimants)</h2><div class="card"><table><tr><th>Bill no.</th><th>Description</th><th>Vendor</th><th>Claimant</th><th>Claim</th><th class="r">Amount</th></tr>${state.ledger.map(l => `<tr><td>${esc(l.bill_no || '(none)')}</td><td>${esc(l.desc)}</td><td>${esc(l.vendor)}, ${Logic.fmtDate(l.date)}</td><td>${esc(l.claimant)}</td><td>${esc(l.claim)}</td><td class="r">${R(l.amount)}</td></tr>`).join('')}</table></div>`;
+    h += `<h2>Corrections audit log</h2><div class="card">${state.audit.map(u => `<div class="small">${Logic.fmtDate(u.on)}: ${u.expense} ${esc(u.field)} ${esc(u.from)} &rarr; ${esc(u.to)}</div>`).join('') || '<span class="muted small">No corrections yet.</span>'}</div>`;
+    const at = Logic.attention(state, state.today);
+    h += `<h2>Needs attention</h2><div class="card">${at.map(i => `<div class="attn">${chip(i.rule, 'bad')} ${esc(i.text)}</div>`).join('') || '<span class="muted">Nothing needs attention.</span>'}</div>`;
+    $('state').innerHTML = h;
+  }
+
+  // ---- Free play: per-object buttons, disabled with the reason when illegal ----
+  let allowed = {};
+  function acts(items, extra = '') {
+    let btns = '', whys = [];
+    for (const [label, key, build] of items) {
+      const al = allowed[key] || { ok: true }, i = reg.push(build) - 1;
+      btns += `<button data-i="${i}" ${al.ok ? '' : 'disabled'} title="${esc(al.ok ? '' : al.reason)}">${label}</button>`;
+      if (!al.ok) whys.push(`<b>${label}:</b> ${esc(al.reason)}`);
+    }
+    return `<div class="acts">${extra}${btns}</div>${whys.length ? `<div class="why">Not possible now &mdash; ${whys.join(' &nbsp;|&nbsp; ')}</div>` : ''}`;
+  }
+  const val = (el, cls) => { const x = el.closest('.obj').querySelector('.' + cls); return x ? x.value : ''; };
+
+  function renderFree() {
+    reg = []; allowed = Logic.allowedActions(state); let h = '<h3 style="margin:4px 0 8px">Act on things</h3>';
+    if (!state.expenses.length && !state.claims.length) h += '<div class="muted small card">Share a payment confirmation or a bill to get started.</div>';
+    for (const e of state.expenses) {
+      const expRef = Logic.refundsOf(state, e).filter(r => r.status === 'expected');
+      h += `<div class="card obj"><div class="row"><b>Expense ${e.id}</b><span class="muted">${e.amount == null ? 'amount unreadable' : R(e.amount)} to ${esc(e.payee)} (${esc(e.claimant)})</span>${statusChip(Logic.expenseStatus(e, state))}</div>`;
+      h += acts([['Confirm draft', 'confirm_draft:' + e.id, () => ({ type: 'confirm_draft', expense: e.id })]]);
+      h += acts([['Describe', 'describe:' + e.id, b => ({ type: 'describe', expense: e.id, what: val(b, 'i-what') })]], `<input class="i-what w" placeholder="what for" value="${esc(e.what)}">`);
+      h += acts([['Correct', 'correct:' + e.id, b => { const f = val(b, 'i-f'), v = val(b, 'i-v'); return { type: 'correct', expense: e.id, field: f, value: f === 'amount' ? rs(v) : v }; }]],
+        `<select class="i-f"><option value="amount">amount</option><option value="payee">payee</option><option value="date">date (YYYY-MM-DD)</option><option value="method">method</option></select><input class="i-v w" placeholder="new value">`);
+      h += acts([['Cancel part of order', 'cancel_part:' + e.id, b => ({ type: 'cancel_part', expense: e.id, amount: rs(val(b, 'i-cp')) })]], `&#8377;<input type="number" class="i-cp" step="0.01" placeholder="amount">`);
+      const lk = [];
+      if (e.payback) for (const c of state.expenses) if (c.claimant === e.payee) lk.push([`Link to ${c.id}`, `link_payback:${e.id}:${c.id}`, () => ({ type: 'link_payback', payback: e.id, colleague: c.id })]);
+      if (lk.length) h += acts(lk);
+      h += acts([['Close Expense', 'close_expense:' + e.id, b => { const ch = {}; b.closest('.obj').querySelectorAll('.i-rf').forEach(x => { ch[x.dataset.r] = x.value; }); return { type: 'close_expense', expense: e.id, reason: val(b, 'i-why'), choices: ch }; }]],
+        `<select class="i-why"><option>personal</option><option>duplicate</option><option>written off</option></select>` + expRef.map(r => `<span class="small">${r.id}: <select class="i-rf" data-r="${r.id}"><option value="keep">keep expecting</option><option value="writeoff">write off</option></select></span>`).join(' '));
+      for (const b of Logic.billsOf(state, e)) {
+        h += `<div class="obj" style="margin-left:14px;border-left:2px solid var(--line);padding-left:10px">${billLine(b)}`;
+        h += acts([['Mark bill fulfilled', 'mark_fulfilled:' + b.id, () => ({ type: 'mark_fulfilled', bill: b.id })], ['Cancel rest of order', 'cancel_bill:' + b.id, () => ({ type: 'cancel_bill', bill: b.id })], ['Record return', 'record_return:' + b.id, () => ({ type: 'record_return', bill: b.id })]]);
+        h += acts([['Attach document', 'attach_document:' + b.id, x => ({ type: 'attach_document', bill: b.id, doc_kind: val(x, 'i-kind'), bill_no: val(x, 'i-no') })]],
+          `<select class="i-kind"><option value="invoice">Invoice</option><option value="informal">Informal bill</option><option value="payment_proof">Payment proof</option></select><input class="i-no w" placeholder="bill no. (invoice)" value="${esc(b.bill_no)}">`);
+        if (b.alt.length) h += acts([['It is right', 'confirm_match:' + b.id, () => ({ type: 'confirm_match', bill: b.id })], ...b.alt.map(x => [`Move to ${x}`, `move_bill:${b.id}:${x}`, () => ({ type: 'move_bill', bill: b.id, to: x })])]);
+        const drafts = state.claims.filter(c => c.status === 'draft');
+        if (drafts.length) h += acts(drafts.map(c => [`Add to ${esc(Logic.claimLabel(c))}`, `add_to_claim:${b.id}:${c.id}`, () => ({ type: 'add_to_claim', claim: c.id, bill: b.id })]));
+        else h += `<div class="acts"><button disabled title="No draft claim exists">Add bill to claim</button></div><div class="why">Not possible now &mdash; start a claim first</div>`;
+        h += `</div>`;
+      }
+      for (const r of Logic.refundsOf(state, e)) h += `<div class="obj" style="margin-left:14px;padding-left:10px"><div class="row"><b>Refund ${r.id}</b><span>${R(r.amount)}</span>${chip(r.status)}</div>${acts([['Mark refund received', 'receive_refund:' + r.id, () => ({ type: 'receive_refund', refund: r.id })], ...(r.postClaim ? [['Resolve by hand', 'resolve_owed:' + r.id, () => ({ type: 'resolve_owed', refund: r.id })]] : [])])}</div>`;
+      h += `</div>`;
+    }
+    for (const c of state.claims) {
+      h += `<div class="card obj"><div class="row"><b>Claim ${esc(Logic.claimLabel(c))}</b><span class="muted">${esc(c.claimant)}</span>${statusChip(c.status)}</div>`;
+      h += acts([['Submit claim', 'submit_claim:' + c.id, () => ({ type: 'submit_claim', claim: c.id })], ['Recall claim', 'recall_claim:' + c.id, () => ({ type: 'recall_claim', claim: c.id })], ['Mark claim reimbursed', 'mark_reimbursed:' + c.id, () => ({ type: 'mark_reimbursed', claim: c.id })]]);
+      if (c.lines.length) h += acts(c.lines.map(id => [`Remove ${id} from claim`, `remove_from_claim:${c.id}:${id}`, () => ({ type: 'remove_from_claim', claim: c.id, bill: id })]));
+      h += `</div>`;
+    }
+    $('free').innerHTML = h;
+  }
+
+  function syncForms() {
+    const names = Object.keys(state.claimants);
+    for (const id of ['lc', 'mc', 'sc', 'pc', 'bc']) { const el = $(id), keep = el.value; el.innerHTML = names.map(n => `<option>${esc(n)}</option>`).join(''); if (names.includes(keep)) el.value = keep; }
+    const m = $('lm'), keepM = m.value, labels = Logic.methodLabels(state.claimants[$('lc').value]); m.innerHTML = labels.map(x => `<option>${esc(x)}</option>`).join(''); if (labels.includes(keepM)) m.value = keepM;
+    $('people').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
+    for (const i of ['pd', 'bd']) if (!$(i).dataset.t) $(i).value = state.today;
+    $('today').textContent = Logic.fmtDate(state.today);
+  }
+
+  // ---- Walkthrough ----
+  function renderWT() {
+    $('tabs').innerHTML = Scenarios.map(s => `<button data-tab="${s.id}" class="${s.id === wt.tab ? 'on' : ''}">${esc(s.name)}</button>`).join('');
+    const sc = Scenarios.find(s => s.id === wt.tab);
+    $('wt').innerHTML = `<h3>${esc(sc.title)}</h3><p>${esc(sc.situation)}</p><p class="muted"><b>Watch for:</b> ${esc(sc.watch)}</p>
+      <button class="ghost" data-wtreset>Restart this walkthrough</button>
+      <ol class="steps">${sc.steps.map((s, i) => {
+        const res = wt.results[i], stt = res === undefined ? '' : res === 'ok' ? '<span class="ok">done</span>' : '<span class="no">refused</span>';
+        return `<li><span class="n">${i + 1}</span><button data-step="${i}" ${i === wt.step ? 'class="solid"' : 'disabled'}>${esc(s.label)}</button><span class="state">${stt}</span></li>${s.note && res !== undefined ? `<li class="muted small" style="border:0;padding:0 0 4px 28px">${esc(s.note)}</li>` : ''}`;
+      }).join('')}</ol>${wt.step >= sc.steps.length ? '<div class="ok">Walkthrough finished. Keep poking in free play, or restart.</div>' : ''}`;
+  }
+
+  function render() { renderBanner(); renderState(); renderFree(); syncForms(); renderWT(); }
+
+  document.addEventListener('click', e => {
+    const t = e.target.closest('button'); if (!t) return;
+    if (t.dataset.i !== undefined && !t.disabled) { const a = reg[t.dataset.i](t); if (a) dispatch(a); }
+    else if (t.dataset.adv) dispatch({ type: 'advance', days: +t.dataset.adv });
+    else if (t.dataset.tab) resetAll(t.dataset.tab);
+    else if ('wtreset' in t.dataset) resetAll();
+    else if (t.dataset.step !== undefined && !t.disabled) {
+      const sc = Scenarios.find(s => s.id === wt.tab), i = +t.dataset.step;
+      const r = dispatch(sc.steps[i].action(state));
+      wt.results[i] = r.events[0].type === 'rejected' ? 'refused' : 'ok'; wt.step = i + 1; renderWT();
+    }
+  });
+  $('resetAll').onclick = () => resetAll();
+  $('lc').onchange = syncForms;
+  for (const i of ['pd', 'bd']) $(i).oninput = () => { $(i).dataset.t = '1'; };
+  $('bPay').onclick = () => dispatch({ type: 'share_payment', claimant: $('pc').value, amount: $('pu').checked ? null : rs($('pa').value), payee: $('pp').value, date: $('pd').value, ref: $('pr').value, app: $('pg').value, hint: $('ph').value });
+  $('bBill').onclick = () => dispatch({ type: 'share_bill', claimant: $('bc').value, kind: $('bk').value, vendor: $('bv').value, bill_no: $('bn').value, order_ref: $('bo').value, date: $('bd').value, total: rs($('bt').value) });
+  $('bLog').onclick = () => dispatch({ type: 'log_payment', claimant: $('lc').value, amount: rs($('la').value), payee: $('lp').value, vendor: $('lv').value, what: $('lw').value, kind: $('lk').value, method: $('lm').value, orderer: $('lo').value, payback: $('lb').checked, draft: $('ld').checked });
+  $('bMeth').onclick = () => dispatch({ type: 'add_method', claimant: $('mc').value, method: $('mn').value, hints: $('mh').value });
+  $('bClaim').onclick = () => dispatch({ type: 'start_claim', claimant: $('sc').value });
+
+  $('openq').innerHTML = [
+    "<b>A claimable Bill can sit under an unresolved \"Check\".</b> Walkthrough j: the bill attaches to the best of two same-amount Expenses and is claimable at once. Nothing stops it being claimed against the wrong Expense before the Claimant looks. Should a Check block claiming, or only warn?",
+    "<b>Vendor and amount matching is crude, and wrong guesses are quiet.</b> \"Similar vendor\" is a shared word. OCR noise (\"ANAND HW &amp; TOOLS\") would split one purchase into two Expenses; two different vendors sharing a word would merge. A bill that does not fit any single Expense's room (shipping added, one payment for two invoices) logs a new Expense instead, and the two payments are never reunited.",
+    "<b>The fuzzy duplicate warning cries wolf on legitimate repeat purchases.</b> Walkthrough j: two real ₹500 payments to the same shop within a week warn as possible duplicates. \"Different\" is not remembered in this prototype.",
+    "<b>The Unaccounted rule now almost never fires.</b> With an expected Bill covering the full Payment from the start, and shop Bills created for the full amount, Bills + Refunds equal the Payment unless something is corrected (walkthrough g). A payment whose bill simply never arrives shows up as \"Goods late\" or \"Bill missing\", not Unaccounted. Is the rule still earning its place, and is \"3 days since the Expense last changed\" the right clock?",
+    "<b>Owed to university is a flag, not a ledger.</b> \"Resolve by hand\" just ticks it off. The app does not know how much was deducted from which later Claim, or whether it was repaid, and the Ledger line for the returned Bill stays as it was.",
+    "<b>Linking a Payback is one-way and destructive.</b> It discards the Payback's own placeholder Bills and moves the colleague's Bills across; there is no unlink. It also needs the colleague to be a Claimant who logged the payment before any claiming. Otherwise the Payback keeps only the colleague as payee and the vendor is typed by hand.",
+    "<b>Exact duplicate blocking is still first-claimer-wins.</b> A Payback pair that was never linked, both with INV-77, is only warned until one is claimed, then the other is blocked. Linking fixes it, but only if someone notices.",
+    "<b>\"Needs description\" gates claiming.</b> The spec says \"what for\" is needed before a Bill goes on a Claim; I enforce it as a hard refusal when adding to a Claim. Confirm it should not merely warn.",
+    "<b>Corrections do not reach the Bills.</b> Correcting an amount resizes a lone document-less Bill, but never one that already has a document, so the Expense shows \"unaccounted\" until someone acts. There is no action to fix the Bill's own amount.",
+    "<b>Rounding up still leaves a gap nobody records.</b> A ₹100.50 line gives a ₹101 Claim total; both are stored but the 50 paise is not tracked as money, and the Ledger holds ₹100.50.",
+    "<b>A Claim's name is fixed at first submission.</b> Recall it and resubmit next month and it keeps the old month. The spec does not say.",
+    "<b>Reference dedupe only covers payments that have a reference.</b> An unreadable confirmation (no amount, often no reference) shared twice makes two Expenses; the only guard is the Claimant noticing the \"Couldn't read\" items.",
+  ].map(x => `<li>${x}</li>`).join('');
+  resetAll('a');
+})();
+</script>
+</body>
+</html>
