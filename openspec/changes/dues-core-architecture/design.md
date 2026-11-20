@@ -89,32 +89,20 @@ Named **Books**, not "ledger", because GLOSSARY reserves **Ledger** for the reco
 - **Why separate from the rest of Books' core**: it is the part most likely to be tuned (capability `bill-matching`), and its tests are a table of fixtures → Proposal. Deletion test: delete it and the scoring spreads through `decide` for `LogDocument`; kept.
 - **Dependencies / Seams**: none. Only caller: Books.
 
-### 3. Extractor (the language-agnostic Seam)
+### 3. Extractor (pulled providers) and Readings (ADR 0006)
 
-Classification and field extraction are one contract: both read the same text, and a second Seam would buy nothing.
+One contract, two kinds of reader. A provider is `Document → RawExtraction`, called by Dues; the Claimant's Claude Code is the same function turned around: it asks Intake what is pending and hands back what it read.
 
-- **Interface**: `extract(request) → Extraction`, a pure function of the document. The same JSON is used in-process and over HTTP (`POST /extract`), so the caller cannot tell which Adapter answered.
+- **Port** `Extractor.extract({images[], textLayer?, schema}) → RawExtraction | unavailable | refused | contract_mismatch`.
+  - `RawExtraction` (contract 2): `{ invoices: [{ kind, vendor_name, vendor_gstin, bill_number, bill_date, grand_total, …, each with its printed label }] }`, values **as printed**. The same JSON Schema is sent to providers as `response_format: json_schema`, is the MCP tool input, and is the fixture format.
+  - **Invariants**: no conversion, no confidence, no Claimant data; a file may hold several invoices; unreadable fields are null, never guessed.
+  - **Error modes**: `unavailable` (retry later), `refused` (expired/revoked: skip this provider until reconfigured), `contract_mismatch`.
+- **Adapters**: one `openai-compatible` Adapter (BharatCode `glm-5.3-flash` and vLLM Gemma 4 are config rows) and a `canned` fake. Two Adapters, a real Seam. No rules Adapter.
+- **Config**: `extractors: [{name, baseUrl, model, keyEnv, privacy: internal|external}]`, tried in order; external rows are skipped for Claimants who have not opted in.
+- **Hides**: prompt, page rendering (PDF 200 dpi, photos ≤ 2048 px, ≤ 4 pages), text layer, schema request, retries, provider quirks.
+- **Tested through its Interface**: contract tests on fictional fixtures against the fake; a recorded smoke test per configured provider.
 
-  Request:
-  ```
-  { contract: 1,
-    document: { text, mime, page_count, image?: base64 },   // image only when the caller wants a vision pass
-    context:  { time_zone: "Asia/Kolkata", currency: "INR" } }
-  ```
-  Response:
-  ```
-  { contract: 1,
-    kind:   { value: "payment_confirmation" | "invoice" | "informal_bill" | "unknown", confidence },
-    fields: { amount_paise, date, time, counterparty, reference, instrument,
-              bill_no, order_ref, description },             // each: { value, confidence, evidence? } or absent
-    extractor: { name, version } }
-  ```
-  - **Invariants**: amounts are integer paise, never floats; `date` is a plain calendar date read in `context.time_zone`; `confidence` is 0–1 and comparable only within one extractor version; an unreadable document is a valid result (`kind: unknown`, fields absent), never an error; no side effects; no knowledge of Claimants, Expenses or Payment methods (the caller matches `instrument` against the Claimant's hints); no calls outside the internal network.
-  - **Error modes**: `unavailable` (transport or timeout; caller retries the job) and `contract_mismatch`. Nothing else.
-  - **Config**: per-Adapter endpoint and timeout; the acceptance threshold lives in Intake, not here.
-- **Hides**: regexes and per-app recognisers, OCR-noise repair, date and amount normalisation, model prompts.
-- **Adapters**: rules extractor (in the app's language, or the Python worker, whichever the experiment picks); canned fake for tests; later a local vision model on the GPU host. Two Adapters exist from day one (rules + fake), so the Seam is real; the experiment decides which real Adapter ships without touching Intake.
-- **Tested through its Interface**: a fixture corpus of OCR text → expected Extraction, run against every Adapter (contract test). The experiment's corpus becomes this suite. Fixtures in the repo are synthetic or redacted; real samples stay in `private/`.
+**Readings.** Every result, pulled or pushed, is stored as a Reading `{documentRef, checksum, extractor{name, model, version}, by: provider|claude-code, actor, raw, at}`: append-only, unique on (document, extractor name, model, version). The proposal is an order-independent fold over a document's Readings: Intake converts printed values (paise, ISO dates with plausibility checks, handwritten `2270-00` = ₹2,270.00), runs validators (subtotal + tax = total, GSTIN check digit, 12-digit UPI reference, value present in the text layer) and derives confidence from validators plus agreement across model families. Handwritten bills never auto-accept.
 
 ### 4. Paperless (Adapter Module)
 
@@ -127,10 +115,11 @@ Classification and field extraction are one contract: both read the same text, a
 
 Capability `document-intake`.
 
-- **Interface**: `handleDocument(paperlessId) → Logged{events} | Skipped{reason} | Parked{reason}`. Safe to call any number of times for the same document. `Skipped`: documents Dues uploaded itself (Claim forms) and documents already linked. `Parked`: the paperless owner is not a Claimant; surfaced to an admin, never dropped.
-- **Hides**: fetching the document, owner → Claimant resolution, Extractor chaining (rules first; vision second pass when the amount is missing or below threshold), matching `instrument` to the Claimant's Payment method hints, building the `LogDocument` command, the "couldn't read" path (Expense still logged with a blank amount), write-back to paperless.
+- **Interface**: `handleDocument(paperlessId) → Logged{events} | Skipped{reason} | Parked{reason}` (pull: runs the configured providers); `pending(actor) → [{documentRef, checksum, mime, have: [extractor]}]` and `propose(actor, documentRef | upload, rawExtraction, extractor) → Recorded{agreement, reviewUrl} | Rejected{not_found | locked | validation | contract_mismatch}` (push: the Claimant's Claude Code). All safe to call any number of times for the same document. `Skipped`: documents Dues uploaded itself (Claim forms) and documents already linked. `Parked`: the paperless owner is not a Claimant; surfaced to an admin, never dropped.
+- **Hides**: fetching the document, owner → Claimant resolution, provider order and privacy filtering, Readings and their fold (§3), matching `instrument` to the Claimant's Payment method hints, building the `LogDocument` command, the "couldn't read" path (Expense still logged with a blank amount), write-back to paperless.
 - **Deliberately not here**: the match decision. Intake reports a fact (`LogDocument{documentRef, extraction}`); Books decides under its lock what the fact means (D5).
 - **Dependencies**: Paperless, Extractor, Claimants, Books.
+- **Driving Adapters**: the paperless webhook (pull) and the Dues MCP server (push, OAuth through Zitadel, scope `extraction`, tools `documents_to_read`, `read_document`, `submit_extraction`, `upload_url`), shipped to Claimants as a Claude Code plugin (MCP config + one skill: "file my pending bills").
 - **Tested through its Interface**: fake Paperless + canned Extractor + real Books; assert on Books state and on the annotations the fake received. Repeat-delivery and out-of-order tests (invoice first, confirmation first, both at once).
 
 ### 6. Claim package
@@ -216,7 +205,7 @@ Stored: facts (amounts, dates, fulfilled-on, document link, Claim membership, Cl
 
 Every Books command and query requires an Actor, produced only by `Claimants.authenticate` (session or token) or by Intake (`via: intake`, the document owner's Claimant). No Books operation accepts a Claimant ID from request input. Scoping is applied in the one place Books loads rows; foreign entities are `not_found`. The only cross-Claimant reads are internal to the duplicate guard and Payback linking, and their results are redacted to "already claimed, by whom". Assistant tokens carry the issuing Claimant's scope and nothing more. `admin` grants `ImportLedgerLines` and the parked-documents view, not other Claimants' Expenses. **Rationale**: the app is the only gate, so the scope must be impossible to forget. **Alternatives**: checks in route handlers (rejected: one missed handler leaks); Postgres row-level security (deferred: the duplicate guard legitimately reads across Claimants, and a second enforcement point is only worth it if a second writer to the database appears).
 
-### D7. Extractor contract owns classification and returns confidence, not decisions
+### D7. Extractors return printed values; Dues owns conversion and confidence (revised by ADR 0006)
 
 See Module 3. Intake applies the thresholds and chains Adapters. **Rationale**: this is the one place the language may differ, so the contract is JSON, stateless and Claimant-free; it can be served in-process or by a worker with no change to callers, and the experiment's corpus is its test suite. **Alternatives**: separate classifier and extractor Seams (rejected: same input, always called together); extractor matching Payment methods or Expenses itself (rejected: leaks Claimant data across the Seam and makes fixtures stateful).
 
@@ -322,3 +311,4 @@ What will be verified, whatever the stack:
 - Claim name fixed at package build, frozen at submission (claims).
 - `admin` sees and does everything, audited (identity-access).
 - UUIDv7 keys plus global unpadded References (ADR 0005, platform-foundations).
+- Pluggable extraction (ADR 0006): one OpenAI-compatible provider Adapter configured by rows; Claimant's Claude Code pushes Readings over MCP; append-only Readings folded into one proposal; external providers only with the Claimant's opt-in; rules extractor dropped.

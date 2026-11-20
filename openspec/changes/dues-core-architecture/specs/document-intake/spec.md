@@ -27,19 +27,12 @@ The system SHALL classify each new document from its OCR text as a payment confi
 - **THEN** the document is classified as a bill and passed to bill-matching
 
 ### Requirement: Payment confirmation extraction
-The system SHALL extract from a payment confirmation, independent of the payment app, the amount in rupees, the payee, the date and time, the transaction reference (a 12-digit UPI reference, UTR or transaction ID) and the paying bank or card as shown, SHALL use a local vision model on the maintainer's GPU host as a second pass when OCR text is too poor, and MUST NOT send a document to an external service.
+The system SHALL extract from a payment confirmation, independent of the payment app, the amount in rupees, the payee, the date and time, the transaction reference (a 12-digit UPI reference, UTR or transaction ID) and the paying bank or card as shown, using the configured extractors (ADR 0006).
 
 #### Scenario: Extraction from a UPI screenshot
 - **WHEN** a confirmation reads "Paid ₹2,500 to Sample Electronics, UPI Ref 123456789012"
 - **THEN** amount 250000 paise, payee Sample Electronics and reference 123456789012 are extracted
 
-#### Scenario: Poor OCR retried locally
-- **WHEN** OCR text is too poor to extract an amount and a local vision model is available
-- **THEN** a second pass runs on the local model only
-
-#### Scenario: Never external
-- **WHEN** extraction fails twice
-- **THEN** no document content is sent to an external service
 
 ### Requirement: Zero-friction logging of a Payment
 The system SHALL log an Expense immediately, open and not draft, for each payment confirmation with kind guessed from the payee (known vendor history, or online for marketplace vendors, otherwise shop), Payment method matched through the Claimant's hints, and "what for" left empty, so that sharing the confirmation is the only required action.
@@ -162,3 +155,56 @@ The system SHALL send a Web Push notification to the Claimant after a Payment is
 #### Scenario: Add details
 - **WHEN** the Claimant taps Add details and enters "Robotics club"
 - **THEN** the Expense's "what for" is "Robotics club"
+
+### Requirement: Providers configured, ordered and privacy-marked
+The system SHALL read documents through an ordered list of configured providers, each marked `internal` or `external`, SHALL send a Claimant's document to an `external` provider only if that Claimant has opted in, and SHALL skip a provider that answers `refused` until it is reconfigured, falling through to the next one.
+
+#### Scenario: External skipped without opt-in
+- **WHEN** the first provider is external and the Claimant has not opted in
+- **THEN** the document goes to the next internal provider and nothing is sent outside the network
+
+#### Scenario: Expired provider
+- **WHEN** the first provider answers `refused`
+- **THEN** the next provider in the list reads the document and the expired one is not retried until reconfigured
+
+#### Scenario: Swap by configuration
+- **WHEN** the maintainer replaces the provider row with another OpenAI-compatible endpoint
+- **THEN** new documents are read by it with no code change
+
+### Requirement: Readings and proposals
+The system SHALL store each extractor's result for a document as an append-only Reading recording the extractor name, model, version, whether it was pulled or pushed and by whom, SHALL treat a repeated submission from the same extractor version as the same Reading, and SHALL build the proposal shown to the Claimant from all Readings of the document, with confidence from validators and agreement between model families. Readings MUST only propose: a value the Claimant confirmed, or a Bill on a submitted Claim, MUST NOT change.
+
+#### Scenario: Two readers agree
+- **WHEN** a provider and the Claimant's Claude Code both read total 1180.25/- and Bill number SI-0042 for a document
+- **THEN** both fields are proposed with high confidence
+
+#### Scenario: Two readers differ
+- **WHEN** they read totals of ₹700.00 and ₹7,000.00
+- **THEN** the total is flagged for the Claimant to check and neither value is accepted automatically
+
+#### Scenario: Late Reading never overwrites
+- **WHEN** a Reading arrives after the Claimant confirmed the total
+- **THEN** the confirmed total stays and the Reading is kept only as history
+
+#### Scenario: Handwritten bills
+- **WHEN** a document is classified as a handwritten bill
+- **THEN** its fields always need the Claimant's confirmation, whatever the agreement
+
+#### Scenario: Printed values converted by Dues
+- **WHEN** a Reading has grand total "2270-00"
+- **THEN** the proposed total is ₹2,270.00
+
+### Requirement: Claimant's Claude Code as a reader
+The system SHALL let a Claimant connect their own Claude Code to Dues through an MCP server authorised through Zitadel with an `extraction` scope, offering tools to list their documents still to read, fetch a document's pages, submit what was read and get an upload link, and SHALL let that connection see and submit only the Claimant's own documents.
+
+#### Scenario: File my pending bills
+- **WHEN** a Claimant types "file my pending bills" into Claude Code with the Dues plugin installed
+- **THEN** Claude Code reads each pending document, submits a Reading for it, and the Claimant confirms the proposals in Dues
+
+#### Scenario: Another Claimant's document
+- **WHEN** the connection asks for a document owned by another Claimant
+- **THEN** the answer is not found
+
+#### Scenario: Model name is self-declared
+- **WHEN** the same Claimant submits two Readings claiming different models of the same family
+- **THEN** they count as one vote for agreement

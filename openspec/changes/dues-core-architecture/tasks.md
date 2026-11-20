@@ -20,7 +20,7 @@ Stack-specific commands are filled in at task 1.6.
 - [ ] 1.3 Spike: decode a real Zitadel token for a test user; record the exact roles-claim shape as a fixture (no secrets) for task 2.6
 - [ ] 1.4 Spike: paperless OIDC login against a Zitadel test client; per-user API token upload owner; webhook payload, custom secret header and whether OCR text is ready when it fires
 - [ ] 1.5 Device test: share the success screen from CRED, Google Pay, PhonePe, Paytm, BHIM and a bank app; record image vs text vs nothing; check HEIC handling in paperless
-- [ ] 1.6 Decide the stack from 1.1–1.2; record it as ADR 0006; fill in this file's build/test commands and the Extractor Adapter choice; freeze the Extractor contract (design §3)
+- [ ] 1.6 Decide the stack from 1.1–1.2; record it as ADR 0007; fill in this file's build/test commands; freeze RawExtraction contract 2 (design §3, ADR 0006)
 
 ## 2. Phase 1: foundations, identity, Expense core
 
@@ -46,8 +46,12 @@ Stack-specific commands are filled in at task 1.6.
 
 ## 3. Phase 2: document intake and matching
 
-- [ ] 3.1 test: Extractor contract fixtures (fictionalised payment confirmations, GST invoices, receipts, handwritten bills) → kind + fields + confidence
-- [ ] 3.2 Extractor Adapter chosen in 1.6, plus a canned fake
+- [ ] 3.1 test: openai-compatible Extractor Adapter against a recorded fake endpoint — json_schema request, page rendering, `unavailable` / `refused` / `contract_mismatch`
+- [ ] 3.2 openai-compatible Adapter + canned fake; provider rows in config (BharatCode, then Gemma on the GPU host)
+- [ ] 3.2a test: Readings fold — conversion of printed values (paise, dates incl. month-first receipts, `2270-00`), validators, agreement across families, handwritten never auto-accepted, late Reading never overwrites a confirmed value
+- [ ] 3.2b Readings store and fold; Books `ReviseExtraction` for unconfirmed fields
+- [ ] 3.2c test: provider order, privacy filter with Claimant opt-in, `refused` falls through
+- [ ] 3.2d Provider routing + consent setting (identity-access)
 - [ ] 3.3 test: Paperless Adapter against a recorded-response fake (get, download, annotate, upload, findByChecksum)
 - [ ] 3.4 Paperless HTTP Adapter (service-account token)
 - [ ] 3.5 test: Matching `propose` — one clear match, several candidates (Check), none; ±₹1 / ±10 days; one Payment for 2–3 invoices from one vendor; four invoices get no suggestion
@@ -88,7 +92,10 @@ Stack-specific commands are filled in at task 1.6.
 - [ ] 5.9 test: Notifier with a recording fake — nudge after a logged payment, daily nudge, no subscription
 - [ ] 5.10 Web Push Notifier and the daily job
 
-## 6. Phase 5: assistant API
+## 6. Phase 5: assistant API and Claude Code plugin
+
+- [ ] 6.0a test: MCP tools (`documents_to_read`, `read_document`, `submit_extraction`, `upload_url`) scoped to the Claimant; another Claimant's document not found; resubmission idempotent
+- [ ] 6.0b Dues MCP server (OAuth via Zitadel, scope `extraction`) and the Claude Code plugin (MCP config + "file my pending bills" skill); spike first: Zitadel as MCP authorisation server, image size limits in MCP results
 
 - [ ] 6.1 test: personal access tokens scoped to the maintainer; another Claimant's data refused; idempotency keys
 - [ ] 6.2 Tokens and API shell

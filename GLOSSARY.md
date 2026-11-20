@@ -60,6 +60,10 @@ _Avoid_: Receipt, voucher
 A Bill whose goods have all arrived (or whose service is done). Only Fulfilled Bills can go on a Claim.
 _Avoid_: Delivered, complete
 
+**Reading**:
+One reader's account of what a document says, as printed: from a provider Dues calls, or from a Claimant's own Claude Code. Readings only propose; the Claimant confirms.
+_Avoid_: OCR result, parse, extraction
+
 **Invoice**:
 A Bill issued by the vendor with a bill number, typically a GST tax invoice.
 _Avoid_: Tax receipt

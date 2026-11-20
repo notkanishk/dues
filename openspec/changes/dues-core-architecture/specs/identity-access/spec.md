@@ -101,3 +101,14 @@ The system SHALL let a user with the `admin` role read and act on every Claimant
 #### Scenario: Admin change audited
 - **WHEN** an admin corrects another Claimant's Expense amount
 - **THEN** the audit log records the admin as actor and the Claimant as owner
+
+### Requirement: Consent to external reading
+The system SHALL keep, per Claimant, a setting that allows their documents to be read by external providers, off by default and changeable at any time, and SHALL record each change in the audit log.
+
+#### Scenario: Default off
+- **WHEN** a new Claimant signs in for the first time
+- **THEN** external reading is off for them
+
+#### Scenario: Opt in
+- **WHEN** a Claimant turns external reading on
+- **THEN** their next uploads may be read by external providers and the audit log records the change
