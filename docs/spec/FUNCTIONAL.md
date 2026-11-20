@@ -18,7 +18,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 ### Expense
 | Field | Notes |
 |---|---|
-| id | Tracker ID, e.g. `E-0213` |
+| id | Reference, e.g. `E-213` (ADR 0005) |
 | status | `draft` · `open` · `settled` · `closed` (§3.1) |
 | paid_on | Date of the Payment |
 | amount | Payment amount, ₹ 2dp |
@@ -39,7 +39,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 ### Bill
 | Field | Notes |
 |---|---|
-| id | `B-0431` |
+| id | `B-431` |
 | expense_id | Parent Expense |
 | kind | `invoice` · `informal` · `payment_proof` |
 | bill_no | As printed; empty for informal/payment proof |
@@ -64,7 +64,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 `id`, `claimant`, `bill_id`, `claim_id` (the submitted Claim the Bill was on), `amount`, `status` (`open` · `repaid` with date). Created when a Bill already on a submitted Claim is returned (W2.6). Not expected to happen in practice; exists only so the money trail can't silently break. Never appears on a form (no minus lines).
 
 ### Ledger line (history)
-The existing `ledger.csv` rows (199 at import). Read-only history: date, bill_no, description, amount, claim. Imported as already-`reimbursed` Bills without an Expense, so the duplicate check sees them.
+The existing `ledger.csv` rows (199 at import). Read-only history: date, bill_no, description, amount, claim. Imported as Ledger lines with no Expense or Bill behind them (design D9), so the duplicate check sees them.
 
 ### Claimant (profile)
 Identity from Zitadel (subject, name, email). Profile fields the form needs: full name, employee code, designation. Approvers (names + emails for the submission email). Payment methods (list of labels, e.g. "Savings account", "Credit card", "Cash"; editable, can be archived, never hard-coded), each with optional match hints (bank name, card last 4, UPI handle) used to recognise it on a payment screenshot. Notification preference (Web Push on/off, daily nudge time). Claim naming sequence.
@@ -200,8 +200,8 @@ Any document is logged with zero further steps; matching prevents the same purch
 **Custom fields:**
 | Field | Type | Purpose |
 |---|---|---|
-| Expense ID | Text | Tracker link (`E-0213`); set on uploads that already know their Expense so W4 can auto-attach |
-| Bill ID | Text | `B-0431` |
+| Expense ID | Text | Tracker link (`E-213`); set on uploads that already know their Expense so W4 can auto-attach |
+| Bill ID | Text | `B-431` |
 | Amount | Monetary (INR) | Bill amount as confirmed |
 | Bill no | Text | As printed |
 | Claim | Text | e.g. `jdoe/2026/November1` |

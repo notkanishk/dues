@@ -43,10 +43,14 @@ Money a vendor returns for an Expense after a cancellation or return. An Expense
 _Avoid_: Reversal, cashback
 
 **Open amount**:
-The part of an Expense's Payment not yet covered by a Bill or a Refund: goods still coming, a refund still owed, or a bill not yet in hand. An Expense is settled when its Open amount is zero.
+The part of an Expense's Payment not yet covered by a Bill or a Refund: goods still coming, a refund still owed, or a bill not yet in hand. An Expense is settled when its Open amount is zero, every Refund has arrived and every Bill is reimbursed or cancelled.
 _Avoid_: Balance, pending, outstanding
 
 ## Proof
+
+**Reference**:
+The short label Dues gives each Expense, Bill, Refund and Owed to university record, such as E-213 or B-431, unique across all Claimants and never changed. Distinct from the Bill number the vendor prints.
+_Avoid_: ID, tracker ID, invoice number
 
 **Bill**:
 A document that proves part or all of an Expense to the university, and the unit that is claimed. Comes in three kinds: Invoice, Informal bill, Payment proof.
@@ -71,7 +75,7 @@ _Avoid_: UPI receipt, screenshot
 ## Getting paid back
 
 **Claim**:
-One submitted Contingency Reimbursement Form and the Bills sent with it, filed by one Claimant and named by filing month and sequence, e.g. September1.
+One submitted Contingency Reimbursement Form and the Bills sent with it, filed by one Claimant and named by the month it is sent and its sequence among that Claimant's Claims that month, e.g. 2026/September1; once submitted the name never changes, even after a recall.
 _Avoid_: Batch, report, reimbursement
 
 **Claim line**:
