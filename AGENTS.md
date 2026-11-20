@@ -25,7 +25,7 @@ Dues tracks money makerspace members spend for the lab, from payment to universi
   - **haiku**: finding, listing, locating, mapping, gathering facts.
   - **sonnet**: building from a precise brief, research, audits that need judgement, tests, UI wiring, fixes.
   - **opus**: code review before merge; hard or sensitive coding (auth, access control, money paths, migrations, concurrency, anything touching production).
-  - **fable**: thinking, deciding and designing only (architecture, trade-offs, design answers). Fable sends scouting to haiku or sonnet with a narrow brief and a compact answer format, and keeps the conclusions.
+  - **fable**: thinking, deciding and designing only: architecture (including sensitive architecture: auth model, money model, data ownership, security boundaries), trade-offs, design answers. Fable sends scouting to haiku or sonnet with a narrow brief and a compact answer format, and keeps the conclusions.
 - **Briefs for parallel helpers.** Several helpers on one job share a brief at `.claude/briefs/<job>.md`: hard rules, what to read first (absolute paths), setup (own git worktree at a named commit), how to work, the commit trailer for their model. Each prompt then names only that helper's items.
 - **Verify, then fix, then review.** Findings are checked against the code (read-only) before anyone fixes them; fixes land in small commits; opus reviews the branch before it merges.
 
