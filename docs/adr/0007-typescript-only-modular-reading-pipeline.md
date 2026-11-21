@@ -55,6 +55,6 @@ Box bake-off, 21 Nov 2026: 38 single-invoice real bills (14 text PDFs, 24 raster
 
 - **Swap rule.** Any change of PageText Adapter, Extractor provider, Locator or validator list passes the gold-set gate: a script in `evals/` runs any PageText x Extractor x Locator combination against a gold set kept outside the repo and prints the per-field table. The swap must not score below the current one on any field. Only aggregate numbers are recorded.
 - Paperless keeps two jobs: the archive file and the checksum. Its OCR text no longer grounds values and its word positions no longer give boxes; this updates the Consequences of ADR 0006.
-- PP-OCR runs in a worker with a thread cap and bounded memory. The ONNX files need their denormal weights zeroed first; their licence is checked before shipping.
+- PP-OCR runs in a worker with a thread cap and bounded memory. Zeroed denormal weights are harmless but not the speed fix; the thread cap is. Their licence is checked before shipping.
 - A GPU or non-TypeScript OCR service (for example Nemotron OCR v2 or PaddleOCR-VL) is added as an `http-ocr` PageText Adapter, with no change to callers.
 - The Claim form filler is docxtemplater (design §6).
