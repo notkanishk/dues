@@ -15,17 +15,18 @@ Test-first vertical slices: each `test:` task is written red, then its paired ta
 | Validators (pure, one table each) | each Signal | combination into confidence |
 | `evals/` gold-set gate (private gold set, aggregates only) | any swap scoring below the current one on a field | review UX |
 
-Commands (framework-agnostic, ADR 0007; the web framework is still open and adds only its own dev/build commands):
+Commands (ADR 0007: Next.js 16 on Bun):
 
 | Purpose | Command |
 |---|---|
-| Install | `pnpm install` |
-| Typecheck | `pnpm exec tsc --noEmit` |
-| Unit and golden tests | `pnpm exec vitest run` |
-| Database tests (real Postgres) | `pnpm exec vitest run --project db` |
-| End-to-end | `pnpm exec playwright test` |
-| Migrations | `pnpm exec drizzle-kit generate`, `pnpm exec drizzle-kit migrate` |
-| Gold-set gate | `pnpm exec tsx evals/run.ts` (private gold set path from env; prints aggregates only) |
+| Install | `bun install` |
+| Dev, build | `bun --bun next dev`, `bun --bun next build` |
+| Typecheck | `bunx tsc --noEmit` |
+| Unit and golden tests | `bunx vitest run` |
+| Database tests (real Postgres) | `bunx vitest run --project db` |
+| End-to-end | `bunx playwright test` |
+| Migrations | `bunx drizzle-kit generate`, `bunx drizzle-kit migrate` |
+| Gold-set gate | `bun evals/run.ts` (private gold set path from env; prints aggregates only) |
 
 ## 1. Phase 0: stack decision and spikes
 
@@ -35,6 +36,7 @@ Commands (framework-agnostic, ADR 0007; the web framework is still open and adds
 - [ ] 1.4 Spike: paperless OIDC login against a Zitadel test client; per-user API token upload owner; webhook payload, custom secret header and whether OCR text is ready when it fires
 - [ ] 1.5 Device test: share the success screen from CRED, Google Pay, PhonePe, Paytm, BHIM and a bank app; record image vs text vs nothing; check HEIC handling in paperless
 - [x] 1.6 Decide the stack from 1.1–1.2; record it as ADR 0007; fill in this file's build/test commands; freeze RawExtraction contract 2 (design §3, ADR 0006). Done: ADR 0007 (TypeScript only); commands above; contract 2 frozen. Web framework (Next.js 16 proposed) is still open, awaiting the owner.
+- [ ] 1.7 Bun compatibility check (fictional data, experiment host): under `bun --bun`, Next.js 16 build and standalone start; web-push VAPID send to a local push endpoint; pg-boss 12 send/work; Drizzle migrate on Postgres 18; openid-client discovery; `@embedpdf/pdfium` char boxes; onnxruntime-node PP-OCRv6 one page with memory bound; docxtemplater fill. Anything failing runs on Node 24; record which in ADR 0007.
 
 ## 2. Phase 1: foundations, identity, Expense core
 

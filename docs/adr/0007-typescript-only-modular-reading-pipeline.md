@@ -2,13 +2,13 @@
 
 Status: Accepted, 2026-11-21. Owner, 21 Nov 2026: "lock in typescript for now. make the architecture modular so that we can swap out different modules and sources for different functions such as text extraction, boxing, comparing, etc".
 
-Dues is one TypeScript app on Node 24. Any other language, and any GPU model, joins only as an HTTP Adapter behind an existing port, never in-process. This replaces the earlier clause "a Python worker if the gate fails" (design Open Question 1, `openspec/config.yaml`). The reading pipeline is split into parts that can each be swapped: **PageText** (words with boxes from a page; a Seam), the **Locator** (finds a value among those words; a pure Module), the **Extractor** (ADR 0006, unchanged) and the **validators** (pure functions that compare proposal, readings and located boxes). The rule from the design stands: one Adapter is a hypothetical Seam, two make a real one, pure Modules need no Seam. Detail: design §3a.
+Dues is one TypeScript app: Next.js 16 on Bun. Any other language, and any GPU model, joins only as an HTTP Adapter behind an existing port, never in-process. This replaces the earlier clause "a Python worker if the gate fails" (design Open Question 1, `openspec/config.yaml`). The reading pipeline is split into parts that can each be swapped: **PageText** (words with boxes from a page; a Seam), the **Locator** (finds a value among those words; a pure Module), the **Extractor** (ADR 0006, unchanged) and the **validators** (pure functions that compare proposal, readings and located boxes). The rule from the design stands: one Adapter is a hypothetical Seam, two make a real one, pure Modules need no Seam. Detail: design §3a.
 
 ## Stack
 
-Node 24; Drizzle 0.45 on `pg` (Postgres 18); Vitest (unit, db, golden) and Playwright; pg-boss 12; `@modelcontextprotocol/sdk`; `web-push` 4.0.0 (pin 3.x if the ESM major bites); docxtemplater plus Gotenberg; `sharp` plus `@embedpdf/pdfium`; `onnxruntime-node` for OCR; Zod for the RawExtraction contract 2 (JSON Schema is generated from it).
+Bun 1.4 (runtime, package manager, script runner), with Node 24 as the fallback runtime for any piece that fails the Bun compatibility check (task 1.7); Next.js 16 (App Router); Drizzle 0.45 on `pg` (Postgres 18); Vitest (unit, db, golden) and Playwright; pg-boss 12; `@modelcontextprotocol/sdk`; `web-push` 4.0.0 (pin 3.x if the ESM major bites); docxtemplater plus Gotenberg; `sharp` plus `@embedpdf/pdfium`; `onnxruntime-node` for OCR; Zod for the RawExtraction contract 2 (JSON Schema is generated from it).
 
-**Open item, not decided:** the web framework. Next.js 16 is proposed (`docs/research/notes/Tracker stack choice/stack_choice.md`) and awaits the owner's confirmation. Nothing in the Module map depends on it (design D10).
+**Web framework and runtime (owner, 21 Nov 2026: "nextjs and bun").** Next.js 16 (`docs/research/notes/Tracker stack choice/stack_choice.md`) on Bun. Known Bun risks, checked in task 1.7: `node:crypto` is only partly implemented (web-push VAPID signing), Next.js on Bun is supported by Bun rather than by Next.js's primary target, and onnxruntime-node memory grows per page in one Bun process (the OCR worker already runs a worker per few pages). Anything that fails runs on Node 24 instead; the Module map does not change (design D10).
 
 ## Considered Options
 
