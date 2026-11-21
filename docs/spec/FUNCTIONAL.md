@@ -18,7 +18,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 ### Expense
 | Field | Notes |
 |---|---|
-| id | Tracker ID, e.g. `E-0213` |
+| id | Reference, e.g. `E-213` (ADR 0005) |
 | status | `draft` · `open` · `settled` · `closed` (§3.1) |
 | paid_on | Date of the Payment |
 | amount | Payment amount, ₹ 2dp |
@@ -39,7 +39,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 ### Bill
 | Field | Notes |
 |---|---|
-| id | `B-0431` |
+| id | `B-431` |
 | expense_id | Parent Expense |
 | kind | `invoice` · `informal` · `payment_proof` |
 | bill_no | As printed; empty for informal/payment proof |
@@ -49,6 +49,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 | fulfilled | bool + `fulfilled_on` |
 | paperless_id | Document ID; required before the Bill can be claimed |
 | status | `expected` · `ready` · `claimed` · `reimbursed` · `cancelled` (§3.2) |
+| review | `in review` (not every field confirmed) · `confirmed`; alongside `status`, not part of it (§3.2) |
 | claim_id | Set when added to a Claim |
 | remarks | e.g. "Informal/raw bill attached" (auto for `informal`) |
 
@@ -56,7 +57,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 `id, expense_id, amount, refunded_on, reason (cancelled | returned | partial)`. Status `expected` → `received`.
 
 ### Claim
-`id`, `claimant`, `name` (assigned **at first submission**: submission month + sequence among that Claimant's Claims that month, e.g. `2026/November1`; drafts are just "Draft"; a recalled and resubmitted Claim keeps its name), `status` (§3.3), `submitted_on` (latest submission), `reimbursed_on`, `total` (Σ Claim lines, rounded **up** to whole rupees), `form_doc` (paperless ID of the form PDF).
+`id`, `claimant`, `name` (assigned **when the submission package is built**, since the email subject carries it: build month + sequence among that Claimant's named Claims that month, e.g. `2026/November1`; renamed if rebuilt in a later month before submission; frozen once submitted, including after recall; a Claim without a built package shows only "Draft"), `status` (§3.3), `submitted_on` (latest submission), `reimbursed_on`, `total` (Σ Claim lines, rounded **up** to whole rupees), `form_doc` (paperless ID of the form PDF).
 
 **Rounding:** a Claim's total is rounded up to whole rupees (as the university form requires); Claim lines keep exact paise. Both are stored on the Claim; the difference is not tracked anywhere else.
 
@@ -64,7 +65,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 `id`, `claimant`, `bill_id`, `claim_id` (the submitted Claim the Bill was on), `amount`, `status` (`open` · `repaid` with date). Created when a Bill already on a submitted Claim is returned (W2.6). Not expected to happen in practice; exists only so the money trail can't silently break. Never appears on a form (no minus lines).
 
 ### Ledger line (history)
-The existing `ledger.csv` rows (199 at import). Read-only history: date, bill_no, description, amount, claim. Imported as already-`reimbursed` Bills without an Expense, so the duplicate check sees them.
+The existing `ledger.csv` rows (199 at import). Read-only history: date, bill_no, description, amount, claim. Imported as Ledger lines with no Expense or Bill behind them (design D9), so the duplicate check sees them.
 
 ### Claimant (profile)
 Identity from Zitadel (subject, name, email). Profile fields the form needs: full name, employee code, designation. Approvers (names + emails for the submission email). Payment methods (list of labels, e.g. "Savings account", "Credit card", "Cash"; editable, can be archived, never hard-coded), each with optional match hints (bank name, card last 4, UPI handle) used to recognise it on a payment screenshot. Notification preference (Web Push on/off, daily nudge time). Claim naming sequence.
@@ -83,7 +84,7 @@ draft ──confirm──▶ open ──Open amount = 0 and all Bills reimbursed
 - `draft`: created from an Amazon pick or a Back-fill and not yet confirmed by the Claimant. Shared payment confirmations (W1) and bills (W4) skip `draft` and open the Expense directly.
 - `open`: confirmed, Open amount ≠ 0 or some Bill not yet reimbursed.
 - **Corrections:** amount, payee, date and Payment method stay editable until one of the Expense's Bills is on a submitted Claim; every edit goes to the audit log.
-- **Closing** (personal / duplicate / written off) asks what happens to each expected Refund (still expected, or written off) and cancels unclaimed Bills; blocked if any Bill is on a submitted Claim.
+- **Closing** (personal / duplicate / written off) asks what happens to each expected Refund (still expected, or written off) and cancels unclaimed Bills; blocked if any Bill is on a submitted Claim. In paperless the documents lose their `reimb:*` tag; closing as personal also adds `personal` (written only by Dues, only here), duplicate and written off add no tag.
 - **Why it's open** (shown everywhere, drives reminders): `awaiting goods` (Bills expected, not fulfilled) · `refund owed` (Refund expected) · `bill missing` (fulfilled, no document) · `mismatch ₹X` (nothing expected any more, but Bills + Refunds ≠ Payment) · `in claim` (all covered, waiting for Reimbursement).
 
 ### 3.2 Bill
@@ -91,11 +92,17 @@ draft ──confirm──▶ open ──Open amount = 0 and all Bills reimbursed
 expected ──goods arrive / service done──▶ fulfilled? ──document attached──▶ ready ──added to Claim──▶ claimed ──Reimbursement──▶ reimbursed
    │                                          (ready requires both fulfilled AND paperless_id)
    └──cancelled before fulfilment──▶ cancelled  (creates an expected Refund of the same amount)
+
+review, alongside status:  in review ──Claimant confirms every field──▶ confirmed
+                           in review ◀──any value changes, or Undo confirm──┘
 ```
 - `shop` and `service` Expenses create their Bill already fulfilled.
 - A bill arriving first creates its Expense and a fulfilled, `ready` Bill (you can only scan what you have); no payment record is needed to claim it.
-- Only `ready` Bills can be added to a Claim. Also blocked: a Bill matching a Ledger line (§7); a Bill with an open "Check" match (W4.3, one tap to confirm or move); a Bill held by two Claimants with no Payback link (W9.5); a Bill whose Expense has no "what for" (it can be typed inline while building the Claim, W7).
-- **Corrections after a document is attached:** amount, bill no and date stay editable (e.g. the reader got them wrong). The Bill then shows "differs from the document" until the Claimant confirms the document says so; every edit goes to the audit log. Locked once the Bill is on a submitted Claim.
+- Only `ready` Bills can be added to a Claim. Also blocked: a Bill in review (not every field confirmed); a Bill matching a Ledger line (§7); a Bill with an open "Check" match (W4.3, one tap to confirm or move); a Bill held by two Claimants with no Payback link (W9.5); a Bill whose Expense has no "what for" (it can be typed inline while building the Claim, W7).
+- **Field confirmation.** The fields read from a Bill's document (bill no, bill date, amount, and the like) are each confirmed by the Claimant; the reader only proposes. A Bill is **confirmed** when every one of its fields is; until then it is **in review**. How a Claimant reviews a Bill is designed in [`docs/research/notes/Bill review UX/design.md`](../research/notes/Bill%20review%20UX/design.md) §7 (variant R, approved 21 Nov 2026); see ADRs [0008](../adr/0008-region-marking-has-no-keyboard-only-path.md) and [0009](../adr/0009-bill-confirm-reopen-undo-model.md).
+- **Confirmed → back in review.** Any change to a value on a confirmed Bill, by any path, reopens it: it is in review until confirmed again. Keeping the reader's value changes nothing and does not reopen. Undo is allowed until the Bill is on a submitted Claim: one "Undo confirm" per Bill restores the values from before the confirm and puts the Bill back in review. Every confirm, reopen, edit and undo goes to the audit log (ADR 0009).
+- **Recall unlocks.** When a Claim is recalled (§3.3), its Bills become editable again. Each Bill stays confirmed until one of its values changes; then it goes back to review and must be confirmed again (ADR 0009). "Undo confirm" is offered again, because the Bill is no longer on a submitted Claim.
+- **Corrections after a document is attached:** amount, bill no and date stay editable (e.g. the reader got them wrong). An edit reopens review (above); once the value is confirmed again it carries the label "differs from the document". Every edit goes to the audit log. Locked once the Bill is on a submitted Claim.
 
 ### 3.3 Claim
 ```
@@ -104,7 +111,8 @@ draft ──app builds form + package, Claimant sends──▶ submitted ──m
   └───────────────────────recall (edit and resend)──────────────┘
 ```
 - Adding/removing Bills only in `draft`. A Claimant can have several `draft` Claims.
-- Recall returns the Claim to `draft` with its name; resubmitting updates `submitted_on`.
+- Recall returns the Claim to `draft` with its name; resubmitting updates `submitted_on`. In paperless, recall puts `reimb:ready` back on the Bills' documents and keeps the Claim field.
+- On `submitted`: documents → `reimb:claimed` with the Claim field set (not at draft).
 - On `reimbursed`: Bills → `reimbursed`, Claim lines appended to the Ledger, documents re-tagged `reimb:reimbursed`.
 
 ## 4. Workflows
@@ -117,7 +125,7 @@ Each step marks who acts: **K** (the Claimant), **T** (tracker app), **P** (pape
 
 1. **K (the only required step):** share the payment confirmation to the paperless uploader, pinned as a Direct Share target so it is one tap: the payment app's success screen (its share button if it gives an image, otherwise screenshot → share), a card/bank receipt, or an order confirmation for card checkouts.
 2. **P:** stores it under K's paperless user (owner = Claimant), type `Payment proof`, tag `inbox`; webhook to T.
-3. **T: extracts** from the OCR text with an app-agnostic parser: amount (₹ figure), payee name ("Paid to", "To", merchant line), date-time, transaction reference (12-digit UPI ref / UTR / transaction ID — labels differ by app), and the paying bank/card as shown. Small per-app recognisers can be added for common apps, but nothing assumes one app. If OCR text is too poor, T may run a local vision model (GPU host) as a second pass; never an external service.
+3. **T: extracts** the fields by sending the page images to the configured vision-language extractors (ADR 0006): providers pulled by Dues (internal GPU first; external ones only with the Claimant's opt-in) and, when the Claimant files with Claude Code, their own Claude Code. Values come back as printed; Dues converts and checks them.
 4. **T: logs the Expense immediately** — not a draft. Kind guessed from the payee (known vendor history; Amazon/Robu/Blinkit → `online`, else `shop`), Payment method matched via the Claimant's method hints (bank name, card last 4, UPI handle), "what for" left empty. Dedupe: a second screenshot with the same UPI ref attaches to the existing Expense instead of creating one. When neither can be read (no ref), two confirmations from the same Claimant within 10 minutes get "Same payment as E-x?" (one tap merges; never automatic).
 5. **T: optional nudge** — a Web Push notification to K's phone: "₹2,500 to Robu.in logged. What was it for?" with actions *Add details* (opens a one-field form: what for; kind and order ref one tap away) and *Later*. Ignoring it is fine.
 6. **Later, in batch:** Expenses missing "what for" collect under one attention item ("3 payments need a description"); the daily nudge links there. They can be described in one pass, and "what for" is needed only before a Bill goes on a Claim.
@@ -141,6 +149,7 @@ Each step marks who acts: **K** (the Claimant), **T** (tracker app), **P** (pape
 ### W3. Shop or service payment
 1. W1, with kind `shop` or `service` → one Bill created already fulfilled, reason `bill missing`.
 2. K scans the paper bill (W4) or, if none exists, marks the payment confirmation as the Bill (`payment_proof`). Bill → `ready`.
+3. In paperless a Payment proof loses `inbox` and gets its Expense ID but no `reimb:*` tag, unless it was marked as the Bill.
 
 ### W4. A document arrives (phone share, upload, email, Mac drop)
 Any document is logged with zero further steps; matching prevents the same purchase becoming two Expenses, whatever order the payment confirmation and the invoice arrive in.
@@ -153,6 +162,7 @@ Any document is logged with zero further steps; matching prevents the same purch
 4. A payment confirmation arriving later for that Expense (same amount ±₹1, date ±10 days, payee ≈ vendor) attaches to it as Payment proof and fills paid_on, Payment method and reference — instead of creating a new Expense.
    - **One payment for several invoices:** if the payment equals the sum of 2–3 invoice-only Expenses from the same vendor within ±10 days, T suggests merging them into **one Expense** (one tap, never automatic). Each invoice stays its own Bill, so each is still its own Claim line.
 5. T writes back to paperless: removes `inbox`, sets document type, correspondent (vendor), custom fields (§5), tag `reimb:ready`.
+- **State moves** are "add one `reimb:*`, remove the other two" in a single API call (`bulk_edit` `modify_tags`, or a PATCH with the full tag set).
 - Earlier "draft from document" behaviour is replaced by this; `draft` remains only for Amazon picks and Back-fill.
 
 ### W5. Pick my orders from the shared Amazon account (laptop)
@@ -171,8 +181,8 @@ Any document is logged with zero further steps; matching prevents the same purch
 ### W7. Build and submit a Claim (app feature, ADR 0003)
 1. Claimant selects `ready` Bills (default: all) → T creates a `draft` Claim, runs the duplicate check (§7) across all Claimants. Bills whose Expense lacks "what for" are listed with an inline field to fill it here.
 2. T fills the Contingency Reimbursement Form from the Claimant profile and Claim lines (grouped by `purpose`, total rounded **up**, amount in words), renders the PDF, and assembles the submission package: form PDF + Bill files + email subject/body with the purpose breakdown, addressed to the Claimant's Approvers.
-3. T stores the form PDF as a `Claim form` document and tags the Bills' documents with the Claim.
-4. Claimant sends the email themselves (download package / open mail client), then marks the Claim `submitted`.
+3. T stores the form PDF as a `Claim form` document (a draft writes nothing else to paperless).
+4. Claimant sends the email themselves (download package / open mail client), then marks the Claim `submitted`. Only now T sets tag `reimb:claimed` and the Claim field on the Bills' documents and on the Claim form document, so Claims shows the whole package.
 - Maintainer only: Claude can additionally create the Gmail draft and copy files to the maintainer's local folder workflow.
 
 ### W8. Reimbursement arrives
@@ -191,28 +201,40 @@ Any document is logged with zero further steps; matching prevents the same purch
 
 **Multi-Claimant:** each Claimant has a paperless user (same Zitadel identity via paperless OIDC login, to confirm with infra). Documents are owned by the uploading Claimant; the tracker's service account can read all and only shows a Claimant their own. The owner on a phone upload is how T knows whose draft Expense to create.
 
+**Status lives in Dues.** Paperless has no status lists (no Ready, Claimed or Reimbursed views); status shows there only as a tag chip. Claimants get no paperless views: Dues is their only screen, and their paperless login exists only so uploads carry their owner.
+
+**Saved views (admin only):**
+| View | Filter | Shown |
+|---|---|---|
+| Inbox | tag `inbox`, oldest first | dashboard; empty means nothing to do |
+| Not in Dues | no `inbox` tag, and neither Expense ID nor Claim field set | dashboard; empty means every document is linked |
+| Claims | Claim field set, sorted by Claim | sidebar only |
+
+Rule: a dashboard list is one that should be empty, and filters read link fields, never hand-kept ID lists.
+
 **Document types:** Invoice · Informal bill · Payment proof · Claim form.
 
-**Tags:** `inbox` (auto on every new document, removed when linked) · `reimb:ready` · `reimb:claimed` · `reimb:reimbursed` · `personal`.
+**Tags:** `inbox` (paperless's own inbox flag, on every consumed document, removed when linked) · `reimb:ready` · `reimb:claimed` · `reimb:reimbursed` · `personal` (written only by Dues, §3.1).
 
 **Correspondents:** vendors (auto-learned; created on confirm in W4).
 
 **Custom fields:**
 | Field | Type | Purpose |
 |---|---|---|
-| Expense ID | Text | Tracker link (`E-0213`); set on uploads that already know their Expense so W4 can auto-attach |
-| Bill ID | Text | `B-0431` |
+| Expense ID | Text | Tracker link (`E-213`); set on uploads that already know their Expense so W4 can auto-attach |
+| Bill ID | Text | `B-431` |
 | Amount | Monetary (INR) | Bill amount as confirmed |
 | Bill no | Text | As printed |
 | Claim | Text | e.g. `jdoe/2026/November1` |
 
 **Storage path:** `{{ owner_username }}/{{ created_year }}/{{ document_type }}/{{ title }}` — paperless media lives on TrueNAS (§6).
 
-**Workflows:**
-1. *Inbox on arrival* — Document Added (any source) → tag `inbox`.
-2. *Notify tracker* — Document Added → Webhook `POST <tracker>/hooks/paperless` with document ID.
+**Workflow:**
+*Notify tracker* — Document Added → Webhook `POST <tracker>/hooks/paperless` with document ID.
 
 **Intake channels:** Android uploader app (share menu) for payment screenshots and photos; web upload; optional mail rule per Claimant for forwarded invoices.
+
+**Own uploads:** paperless adds `inbox` to every consumed document, including the tracker's own uploads (Claim forms, Amazon invoices, the historic import). The tracker removes `inbox` from them, or Inbox never empties.
 
 **API use by the tracker:** service-account token; `GET /api/documents/<id>/` (+ OCR content) on webhook; `custom_field_query` to find by Expense/Bill ID; `bulk_edit` to set tags/fields on confirm; `post_document` (+ `/api/tasks/`) for uploads (claim forms, Amazon invoices).
 
@@ -221,7 +243,7 @@ Any document is logged with zero further steps; matching prevents the same purch
 - Documents live in a dedicated TrueNAS dataset (e.g. `<pool>/reimbursements`) exported over NFS only to the Proxmox host (`<PVE_HOST>`), mapped to one service UID, bind-mounted into the paperless LXC and the tracker LXC. Not on the general SMB share, not in user home folders, never mounted on client machines.
 - **Blocked** until the NAS has snapshots, an off-site backup and healthy disks. **Launch on paperless's local disk** with the nightly backup, only until TrueNAS is connected; preparing the NAS is a separate task, and the move needs the maintainer's OK.
 - Other Claimants never see or need a folder; the app offers "download Claim" for local copies.
-- Historic `Filed/` content is imported once: files into paperless (owner: the maintainer, tagged with their Claim), rows already in the Ledger.
+- Historic `Filed/` content is imported once: files into paperless (owner: the maintainer, tagged with their Claim, `inbox` removed), rows already in the Ledger.
 
 ### 6.1 The maintainer's Mac folder (ADR 0002, maintainer only)
 

@@ -26,3 +26,8 @@ test-results/
 
 # OS
 .DS_Store
+
+# Impeccable per-developer overrides
+.impeccable/config.local.json
+.impeccable/cache/
+.impeccable/review/

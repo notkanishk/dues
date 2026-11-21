@@ -1,0 +1,38 @@
+schema: spec-driven
+
+context: |
+  Product: Dues ("Dues ex Machina") - tracks money makerspace members spend for the lab,
+  from payment to university reimbursement, for every Claimant. Public repo, MIT.
+  Domain language: GLOSSARY.md (Expense, Order, Payment, Bill, Claim, Claim line, Refund,
+  Open amount, Payback, Ledger, Owed to university, Back-fill). Use these terms exactly.
+  Functional source of truth before specs existed: docs/spec/FUNCTIONAL.md. Decisions: docs/adr/.
+  Integrations: paperless-ngx 3.x (documents, OCR, webhook, REST API), Zitadel OIDC
+  (roles claim, Syndra grants roles), Gotenberg (docx -> PDF).
+  Stack: TypeScript only, Next.js 16 on Bun 1.4, Node 26 LTS as fallback, Postgres 19, latest pinned versions (ADR 0007): Drizzle, pg-boss, docxtemplater, onnxruntime-node.
+  Other languages or GPU
+  models join only as HTTP Adapters. Postgres.
+  Deployment: Docker Compose in a Proxmox LXC behind Caddy (placeholders only: <APP_HOST>,
+  dues.example.org; real values in private/DEPLOY.local.md, never committed).
+  Rules of the domain: money as integer paise; moments UTC timestamptz, business dates plain
+  date, display in the Claimant's IANA zone; suggest-then-confirm, never silent money changes;
+  append-only audit log.
+  Navigation: openspec/INDEX.md.
+
+rules:
+  proposal:
+    - Keep proposals under 500 words
+    - State which roadmap phase this targets
+    - Name the GLOSSARY terms the change touches
+  specs:
+    - Use GLOSSARY terms verbatim in requirement and scenario text
+    - Every state transition and money rule gets at least one scenario
+    - Placeholders only for hosts, domains and people; fictional example data
+  design:
+    - Cross-reference related changes, capability specs and ADRs
+    - State the roadmap phase
+    - Describe modules as deep modules with small interfaces; name the seams
+    - Include a Verification section with build/test commands (or "pending stack decision")
+  tasks:
+    - Chunks of at most 2 hours
+    - Test-first - every implementation task is preceded or paired by its test task
+    - Use P1/P2 fix sections for post-review corrections
