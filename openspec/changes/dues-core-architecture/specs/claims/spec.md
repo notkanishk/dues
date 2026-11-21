@@ -96,7 +96,7 @@ The system SHALL fill the Contingency Reimbursement Form from the Claimant profi
 - **THEN** no Payback information appears (see paybacks)
 
 ### Requirement: Submission package
-The system SHALL assemble a package of the form PDF, the Bill files and an email subject and body with the purpose breakdown, addressed to the Claimant's Approvers, SHALL store the form as a Claim form document and tag the Bills' documents with the Claim, and MUST NOT send the email or submit anything without the Claimant.
+The system SHALL assemble a package of the form PDF, the Bill files and an email subject and body with the purpose breakdown, addressed to the Claimant's Approvers, SHALL store the form as a Claim form document, and MUST NOT send the email or submit anything without the Claimant.
 
 #### Scenario: Package contents
 - **WHEN** the package is built
@@ -109,7 +109,7 @@ The system SHALL assemble a package of the form PDF, the Bill files and an email
 
 #### Scenario: Form stored
 - **WHEN** the form PDF is produced
-- **THEN** it is stored as a document of type Claim form and the Bills' documents are tagged with the Claim
+- **THEN** it is stored as a document of type Claim form and no tag or Claim field is written yet
 
 ### Requirement: Claim naming
 The system SHALL assign a Claim its name when its submission package is built, as the build year and month name plus the sequence among that Claimant's named Claims of that month (for example 2026/November1), the month being taken in the Claimant's time zone, because the name appears in the submission email subject. If the package is rebuilt in a later month before the Claim is marked submitted, the system SHALL rename it for that month and rebuild the package. Once the Claim is marked submitted its name MUST never change, including after a recall. A Claim without a built package MUST show only "Draft".
@@ -139,7 +139,7 @@ The system SHALL assign a Claim its name when its submission package is built, a
 - **THEN** it is shown as "Draft"
 
 ### Requirement: Submitting a Claim
-The system SHALL move a draft Claim to submitted when the Claimant marks it submitted after sending, recording the submission date and tagging the Bills' documents `reimb:claimed`, and the Bills MUST be claimed.
+The system SHALL move a draft Claim to submitted when the Claimant marks it submitted after sending, recording the submission date and, in one paperless call, setting the Claim field and tag `reimb:claimed` on the Bills' documents and the Claim form document, and the Bills MUST be claimed.
 
 #### Scenario: Marking submitted
 - **WHEN** the Claimant marks a draft Claim submitted
@@ -150,7 +150,7 @@ The system SHALL move a draft Claim to submitted when the Claimant marks it subm
 - **THEN** it cannot be submitted
 
 ### Requirement: Recall
-The system SHALL let a Claimant recall a submitted Claim to draft for editing and resending, a recalled Claim MUST keep its name, and resubmitting SHALL update the submitted-on date to the latest submission.
+The system SHALL let a Claimant recall a submitted Claim to draft for editing and resending, a recalled Claim MUST keep its name, its documents MUST go back to `reimb:ready` keeping the Claim field, and resubmitting SHALL update the submitted-on date to the latest submission.
 
 #### Scenario: Name kept
 - **WHEN** Claim 2026/November1 is recalled and resubmitted

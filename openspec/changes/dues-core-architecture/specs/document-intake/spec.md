@@ -110,7 +110,7 @@ The system SHALL consult duplicate-guard before attaching a Bill, and a file alr
 - **THEN** it is not attached to a second Bill and the Claimant is told which Bill holds it
 
 ### Requirement: Write-back to paperless-ngx
-The system SHALL, after a document is linked, remove the `inbox` tag, set the document type, set the correspondent to the vendor, fill the custom fields (Expense ID, Bill ID, Amount, Bill number, Claim) and set the tag `reimb:ready`, and the tracker MUST remain the record of truth if paperless-ngx metadata disagrees.
+The system SHALL, after a document is linked, remove the `inbox` tag, set the document type, set the correspondent to the vendor, fill the custom fields (Expense ID, Bill ID, Amount, Bill number, Claim) and set the tag `reimb:ready`, a Payment proof not marked as the Bill SHALL lose `inbox` and get its Expense ID but no `reimb:*` tag, and the tracker MUST remain the record of truth if paperless-ngx metadata disagrees.
 
 #### Scenario: Bill linked
 - **WHEN** a Bill's document is attached

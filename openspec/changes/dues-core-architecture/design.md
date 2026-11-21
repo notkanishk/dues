@@ -120,7 +120,7 @@ One contract, two kinds of reader. A provider is `Document → RawExtraction`, c
 
 ### 4. Paperless (Adapter Module)
 
-- **Interface**: `getDocument(id) → {id, ownerUsername, checksum, mime, text, type, tags, fields, created}`; `download(id, "archive" | "original") → bytes`; `annotate(id, {type?, correspondent?, addTags?, removeTags?, fields?})` (set semantics, safe to repeat); `upload(bytes, meta) → id` (resolves only when paperless has finished consuming); `findByChecksum(sha256) → id?`; `listInbox(olderThan) → ids`.
+- **Interface**: `getDocument(id) → {id, ownerUsername, checksum, mime, text, type, tags, fields, created}`; `download(id, "archive" | "original") → bytes`; `annotate(id, {type?, correspondent?, addTags?, removeTags?, fields?})` (set semantics, safe to repeat; one API call, so a state move is add one `reimb:*` and remove the other two together: `bulk_edit` `modify_tags` or a PATCH with the full tag set); `upload(bytes, meta) → id` (resolves only when paperless has finished consuming); `findByChecksum(sha256) → id?`; `listInbox(olderThan) → ids`.
   - **Error modes**: `not_found`, `unavailable`.
 - **Hides**: the service-account token, tag / type / custom-field ID lookup and creation, `post_document` + task polling, `bulk_edit`, pagination, API version header.
 - **Seam**: real HTTP Adapter and an in-memory fake (used by Intake, Reactions and Claim package tests). The real Adapter has a small contract-test suite run against a live paperless in Phase 0 and before upgrades.
@@ -212,7 +212,7 @@ Stored: facts (amounts, dates, fulfilled-on, document link, Claim membership, Cl
 
 ### D4. Idempotency: natural keys first, idempotency keys second
 
-- **Webhook**: the handler only enqueues `intake(documentId)` with the document ID as the job's singleton key. `LogDocument` is idempotent on the paperless document ID (unique link); a repeat returns the original result. Removing the `inbox` tag is Intake's last step, so a periodic sweep of `Paperless.listInbox(olderThan)` re-enqueues anything a lost webhook or crashed job left behind. Documents Dues uploaded itself are skipped.
+- **Webhook**: the handler only enqueues `intake(documentId)` with the document ID as the job's singleton key. `LogDocument` is idempotent on the paperless document ID (unique link); a repeat returns the original result. Removing the `inbox` tag is Intake's last step, so a periodic sweep of `Paperless.listInbox(olderThan)` re-enqueues anything a lost webhook or crashed job left behind. Documents Dues uploaded itself are skipped, and Dues removes the `inbox` tag paperless auto-applies to them (Claim forms, invoices uploaded for a known Expense), or Inbox never empties.
 - **Assistant API**: every write requires an `Idempotency-Key`. Books stores `(actor, key) → command hash, result` in the command's transaction; same key and same command returns the stored result; same key and a different command is `idempotency_conflict`. Natural keys still apply underneath (UPI reference, order number + shipment, file checksum), so a retry without the key becomes a duplicate hit, not a twin.
 - **Reactions and paperless writes**: set semantics, safe to repeat.
 
@@ -262,7 +262,7 @@ Web process and worker process from the same image; Postgres holds data and queu
 
 **Import of existing claim history into the Ledger**
 
-1. A script outside the app (maintainer's machine) reads the existing history file and produces rows: date, bill number, description, amount in paise, Claim name. It also uploads the historic filed documents to paperless under the maintainer's user, tagged with their Claim (ADR 0002 checksum rule makes re-runs additive).
+1. A script outside the app (maintainer's machine) reads the existing history file and produces rows: date, bill number, description, amount in paise, Claim name. It also uploads the historic filed documents to paperless under the maintainer's user, tagged with their Claim and with `inbox` removed (ADR 0002 checksum rule makes re-runs additive).
 2. `ImportLedgerLines{claimant, rows, dryRun}` (admin Actor, via the Assistant API). Each row gets a deterministic key (hash of its normalised content plus its position in its Claim); re-running imports nothing twice.
 3. Dry run first: reports row count, total per Claim, rows that already collide with each other on bill number + amount (history is recorded as it happened, collisions are flagged, not rejected), and unparseable rows. The maintainer compares counts and totals with the source before the real run.
 4. Real run appends Ledger lines with `source = import`, one audit event per batch. No Expenses, Bills or Claims are created.

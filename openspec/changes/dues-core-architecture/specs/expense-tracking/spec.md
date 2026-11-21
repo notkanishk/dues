@@ -100,6 +100,11 @@ The system SHALL let a Claimant close an Expense as personal, duplicate or writt
 - **THEN** its unclaimed Bills become cancelled
 - **AND** each expected Refund is kept expected or written off as the Claimant chooses
 
+#### Scenario: Paperless tags on close
+- **WHEN** an Expense is closed
+- **THEN** its documents lose their `reimb:*` tag
+- **AND** only closing as personal adds the tag `personal`; duplicate and written off add no tag
+
 #### Scenario: Closing blocked by a submitted Claim
 - **WHEN** a Claimant closes an Expense that has a Bill on a submitted Claim
 - **THEN** the system refuses
