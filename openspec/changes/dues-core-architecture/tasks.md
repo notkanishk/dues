@@ -16,7 +16,7 @@ Stack-specific commands are filled in at task 1.6.
 ## 1. Phase 0: stack decision and spikes
 
 - [x] 1.1 Finish the invoice-parsing experiment (branch `prototype/explorations`); score all variants against the gold set; write the verdict and the extraction approach (local rules, Python worker, or LLM/vision) into this change. Verdict: LLM/vision through the provider adapter; see design §3 "Extraction approach and verdict" and ADR 0006.
-- [ ] 1.2 Spike: fill the real form template with the chosen docx library from one fictionalised Claim; convert with Gotenberg; compare page count, table, fonts (Arial / Arial Narrow) against the Word-exported PDF
+- [x] 1.2 Spike: fill the real form template with the chosen docx library from one fictionalised Claim; convert with Gotenberg; compare page count, table, fonts (Arial / Arial Narrow) against the Word-exported PDF. Verdict: Gotenberg 9 with default fonts over the same .docx; see `docs/research/notes/Claim form PDF/results.md` and design §6
 - [ ] 1.3 Spike: decode a real Zitadel token for a test user; record the exact roles-claim shape as a fixture (no secrets) for task 2.6
 - [ ] 1.4 Spike: paperless OIDC login against a Zitadel test client; per-user API token upload owner; webhook payload, custom secret header and whether OCR text is ready when it fires
 - [ ] 1.5 Device test: share the success screen from CRED, Google Pay, PhonePe, Paytm, BHIM and a bank app; record image vs text vs nothing; check HEIC handling in paperless
@@ -72,7 +72,7 @@ Stack-specific commands are filled in at task 1.6.
 - [ ] 4.4 Claim totals
 - [ ] 4.5 test: naming — fixed at package build, renamed if rebuilt in a later month before submission, frozen at submission and after recall
 - [ ] 4.6 Claim naming
-- [ ] 4.7 test: Claim package `build` with fake PdfConverter — rows grouped by purpose, form shows invoice data only, email subject and breakdown; one golden test through real Gotenberg
+- [ ] 4.7 test: Claim package `build` with fake PdfConverter — rows grouped by purpose, form shows invoice data only, email subject and breakdown; one golden test through real Gotenberg, with a field-by-field text check of the PDF
 - [ ] 4.8 Claim package (template fill + Gotenberg Adapter)
 - [ ] 4.9 test: submit, recall, mark reimbursed → Bills reimbursed, Claim lines appended to the Ledger, documents re-tagged
 - [ ] 4.10 Submission and Reimbursement commands

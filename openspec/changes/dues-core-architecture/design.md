@@ -144,8 +144,15 @@ The rendering half of capability `claims`.
   - **Invariants**: the form shows invoice data only (no Payback, payee, Orderer or Payment method); total is the rounded-up figure stored on the Claim, lines keep exact paise; same input → byte-identical docx.
   - **Error modes**: `converter_unavailable`, `template_invalid`, `missing_profile_field{name}`.
 - **Hides**: the tagged template, row loop, amount in words (lakh / crore), grouping by "what for", email wording, file naming and order, merge or zip.
-- **Seam**: `PdfConverter.convert(docx) → pdf` and `merge(pdfs) → pdf`, with a Gotenberg Adapter and a fake. Template filling is not a Seam (one implementation) unless the Phase 0 spike fails.
-- **Tested through its Interface**: golden test on filled `word/document.xml` and page count (from the spike); the fake converter for everything else; one integration test against real Gotenberg.
+- **Seam**: `PdfConverter.convert(docx) → pdf` and `merge(pdfs) → pdf`, with a Gotenberg Adapter and a fake. Template filling is not a Seam (one implementation).
+- **Tested through its Interface**: golden test on filled `word/document.xml` and page count; a field-by-field text check of the PDF from real Gotenberg (every row's date, bill no, description, amount, receipt and remark, plus total and amount in words, against the Claim data); the fake converter for everything else.
+- **Direction (spike 1.2, 21 Nov 2026; results in `docs/research/notes/Claim form PDF/results.md`)**:
+  - **The .docx is always generated and kept** with the Claim. Owner, 21 Nov 2026: "it is good to have a docx version always".
+  - **The PDF is made from that same .docx by Gotenberg 9 (LibreOffice) with its default fonts.** There is one template, so the .docx and the PDF cannot drift apart. Measured: same page count and page-break row as Word, 0 of 112 fields missing, 104 MiB, 0.1 s warm.
+  - **The PDF must keep the form's general format and structure with no information loss.** Owner, 21 Nov 2026: "the pdf should just have the same general format and structure with no information loss". Pixel match with Word is not required. A golden test checks the text, field by field.
+  - **Typst and HTML (Chromium) were considered and not chosen**, because each needs a second template, which means drift. Typst passed the no-information-loss check (0 of 112 fields missing, 2 pages, header row repeated), so the rejection is about drift, not about loss.
+  - The filler follows the stack (docxtpl for Python, docxtemplater for TypeScript); ADR 0007 decides.
+  - Word on the Claimant's computer is a possible fallback that is not planned.
 
 ### 7. Claimants (identity and profile)
 
