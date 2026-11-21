@@ -126,7 +126,7 @@ Three parts sit between a stored document and a highlighted, validated proposal.
 - **Interface**: `read({bytes, mime}) → Page[] | unavailable`. `Page = {width, height, source{name, model, version}, words: [{text, quad, conf?}]}`, in page points.
 - **Adapters**:
   - `pdfium-text-layer`: `@embedpdf/pdfium` character boxes grouped into words; exact; about 0.01 s a page.
-  - `ppocr-onnx`: PP-OCRv6 through `onnxruntime-node`. Config tier `tiny | small | medium`; `intraOpNumThreads` 2; model files with denormal weights zeroed; a worker per page or per few pages to bound memory.
+  - `ppocr-onnx`: PP-OCRv6 through `onnxruntime-node`. Config tier `tiny | small | medium`; `intraOpNumThreads` 2; model files with denormal weights zeroed; a worker per page or per few pages to bound memory. It returns **word boxes**, cut from each recognised line at the character positions the recogniser's CTC decoding gives, never by splitting a line box in proportion to its characters. (Owner check, 21 Nov 2026: a proportional split put a GSTIN box beside the GSTIN, because the OCR line also held text from the next table cell.)
   - `canned`: fake for tests.
   - Later: `http-ocr` for a GPU service (for example Nemotron OCR v2 or PaddleOCR-VL), the same port in any language.
 - **Config**: `pageText: [{name, …}]`, in order. A born-digital page with a text layer uses it; other pages use OCR. Routing is hidden from callers.
@@ -137,14 +137,17 @@ Three parts sit between a stored document and a highlighted, validated proposal.
 
 - **Interface**: `locate(invoice: RawExtraction invoice, pages: Page[]) → per field {boxes: [{page, quad}], source} | not_located`.
 - **Hides**: the matcher: digit look-alikes (O/0, l/1, S/5, B/8, Z/2); bill number and GSTIN compared on letters and digits only, look-alikes folded, 1 edit at 8+ characters or 2 at 14+; handwritten `2270-00` amounts; dates with spaced separators; and `pick`, which keeps the match whose preceding text best fits the printed label.
-- **Invariant**: never a box without a match (variant R).
+- **Invariants** (owner check of the bake-off overlays, 21 Nov 2026):
+  - Never a box without a match (variant R). A value that is not located (for example a handwritten date) shows no box.
+  - **A box covers the whole value.** The value may span several words (a handwritten `4` apart from `331`, rupees and paise in separate columns); the box is the union of all of them. A match on only part of the value's digits is not a match, so it gives `not_located`, never a partial box.
+  - **One box per field.** When the same value is printed twice (an e-invoice acknowledgement date and the bill date), `pick` keeps the one whose label fits.
 - Model grounding is not an Adapter. It is a hypothetical Seam, added only if the gate shows a need.
 
 **Validators ("comparing").** The fold's validators are a named list of pure functions `(proposal, readings, located) → Signal`, chosen by config: grounded-in-text (via the Locator), arithmetic, GSTIN check digit, UPI reference, cross-family agreement, plausibility. Adding or removing one is a config change.
 
 **Extractor** is unchanged (§3). Whether OCR text from PageText, sent beside the image for raster bills, helps is under test; the outcome is pending and nothing here depends on it.
 
-**Swap rule.** Any Adapter or validator change must pass the gold-set gate. A script in `evals/` runs any PageText x Extractor x Locator combination against a private gold set kept outside the repo and prints the per-field table. The swap must not score below the current one on any field. Only aggregate numbers are recorded.
+**Swap rule.** Any Adapter or validator change must pass the gold-set gate. A script in `evals/` runs any PageText x Extractor x Locator combination against a private gold set kept outside the repo and prints the per-field table. A box counts as right only if it covers the whole value: on text pages, every character box of the value from the text layer; on raster pages, a hand-checked reference box for that field (an overlap with another engine is not enough). The swap must not score below the current one on any field. Only aggregate numbers are recorded.
 
 **Tested through its Interface**: PageText contract tests against fictional PDFs and the canned fake; Locator as a table of fictional pages and values to boxes; each validator as a table; the gate on the private gold set.
 

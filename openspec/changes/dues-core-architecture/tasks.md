@@ -69,13 +69,13 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 3.2b Readings store and fold; Books `ReviseExtraction` for unconfirmed fields
 - [ ] 3.2c test: provider order, privacy filter with Claimant opt-in, `refused` falls through
 - [ ] 3.2d Provider routing + consent setting (identity-access)
-- [ ] 3.2e test: PageText port — fictional PDFs and the canned fake; `pdfium-text-layer` word boxes in page points; `ppocr-onnx` on a fictional raster; source routing (text layer first, OCR otherwise); cache key (checksum, source name/model/version); `unavailable`
+- [ ] 3.2e test: PageText port — `ppocr-onnx` returns word boxes from CTC character positions, not proportional line splits (fictional line holding two table cells: the second cell's word box sits over that cell); fictional PDFs and the canned fake; `pdfium-text-layer` word boxes in page points; `ppocr-onnx` on a fictional raster; source routing (text layer first, OCR otherwise); cache key (checksum, source name/model/version); `unavailable`
 - [ ] 3.2f PageText port, `pdfium-text-layer` and `ppocr-onnx` Adapters, `canned` fake, `pageText` config
-- [ ] 3.2g test: Locator — table of fictional pages and invoices to boxes: digit look-alikes, fuzzy bill number and GSTIN (1 edit at 8+, 2 at 14+), `2270-00` amount, spaced date separators, `pick` by label, never a box without a match, `not_located`
+- [ ] 3.2g test: Locator — table of fictional pages and invoices to boxes, including the three owner-found cases (21 Nov 2026): a handwritten total split into words (`4` `331` `00`) gives one box over all of them; a partial digit match gives `not_located`; the same date printed twice under different labels gives one box under the bill-date label; digit look-alikes, fuzzy bill number and GSTIN (1 edit at 8+, 2 at 14+), `2270-00` amount, spaced date separators, `pick` by label, never a box without a match, `not_located`
 - [ ] 3.2h Locator (pure)
 - [ ] 3.2i test: validator list — one table per validator (grounded-in-text, arithmetic, GSTIN check digit, UPI ref, cross-family agreement, plausibility); config adds or removes one
 - [ ] 3.2j Validators as named pure functions `(proposal, readings, located) → Signal`; the fold takes the configured list
-- [ ] 3.2k `evals/` gold-set gate: runs any PageText x Extractor x Locator combination on the private gold set (outside the repo), prints the per-field table, fails if a swap scores below the current one on any field; only aggregates recorded
+- [ ] 3.2k `evals/` gold-set gate (a box is right only if it covers the whole value: text layer characters, or hand-checked reference boxes on raster bills): runs any PageText x Extractor x Locator combination on the private gold set (outside the repo), prints the per-field table, fails if a swap scores below the current one on any field; only aggregates recorded
 - [ ] 3.2l test: PP-OCR worker bounds — thread cap (`intraOpNumThreads` 2), memory stays flat over many pages, one failed page does not stop the rest
 - [ ] 3.2m PP-OCR worker: a worker per page or a few pages, denormal-zeroed model files, tier config (tiny | small | medium); check the ONNX files' licence before shipping
 - [ ] 3.3 test: Paperless Adapter against a recorded-response fake (get, download, annotate, upload, findByChecksum)
