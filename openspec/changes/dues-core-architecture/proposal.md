@@ -31,7 +31,7 @@ Makerspace members pay for lab supplies out of pocket and claim the money back f
 
 ## Impact
 
-- New repository code (stack decided after the invoice-parsing experiment; Postgres either way).
+- New repository code (TypeScript only, ADR 0007; Postgres).
 - paperless-ngx: OIDC login, per-Claimant users, document types, tags, custom fields, a webhook workflow, a service-account token.
 - Zitadel: a "Reimbursements" project with `claimant` and `admin` roles, a confidential web client, and a public PKCE client for iOS uploaders.
 - New services on `<APP_HOST>`: the app, Postgres, Gotenberg; served as `dues.example.org` through the internal reverse proxy.

@@ -10,8 +10,22 @@ Test-first vertical slices: each `test:` task is written red, then its paired ta
 | Claimants `authenticate` on recorded tokens | role gate, admin, Actor shape | Zitadel availability |
 | Reminders `items(actor, now)` | every attention rule and its ageing | delivery |
 | Assistant API over HTTP | token scope, idempotent endpoints, contract | UI |
+| PageText `read` (fictional PDFs, canned fake) | boxes in page points, source routing, cache key | OCR accuracy on real bills |
+| Locator `locate` (pure, fictional pages) | look-alikes, fuzzy ids, `pick`, never a box without a match | how Intake uses the boxes |
+| Validators (pure, one table each) | each Signal | combination into confidence |
+| `evals/` gold-set gate (private gold set, aggregates only) | any swap scoring below the current one on a field | review UX |
 
-Stack-specific commands are filled in at task 1.6.
+Commands (framework-agnostic, ADR 0007; the web framework is still open and adds only its own dev/build commands):
+
+| Purpose | Command |
+|---|---|
+| Install | `pnpm install` |
+| Typecheck | `pnpm exec tsc --noEmit` |
+| Unit and golden tests | `pnpm exec vitest run` |
+| Database tests (real Postgres) | `pnpm exec vitest run --project db` |
+| End-to-end | `pnpm exec playwright test` |
+| Migrations | `pnpm exec drizzle-kit generate`, `pnpm exec drizzle-kit migrate` |
+| Gold-set gate | `pnpm exec tsx evals/run.ts` (private gold set path from env; prints aggregates only) |
 
 ## 1. Phase 0: stack decision and spikes
 
@@ -20,7 +34,7 @@ Stack-specific commands are filled in at task 1.6.
 - [ ] 1.3 Spike: decode a real Zitadel token for a test user; record the exact roles-claim shape as a fixture (no secrets) for task 2.6
 - [ ] 1.4 Spike: paperless OIDC login against a Zitadel test client; per-user API token upload owner; webhook payload, custom secret header and whether OCR text is ready when it fires
 - [ ] 1.5 Device test: share the success screen from CRED, Google Pay, PhonePe, Paytm, BHIM and a bank app; record image vs text vs nothing; check HEIC handling in paperless
-- [ ] 1.6 Decide the stack from 1.1–1.2; record it as ADR 0007; fill in this file's build/test commands; freeze RawExtraction contract 2 (design §3, ADR 0006)
+- [x] 1.6 Decide the stack from 1.1–1.2; record it as ADR 0007; fill in this file's build/test commands; freeze RawExtraction contract 2 (design §3, ADR 0006). Done: ADR 0007 (TypeScript only); commands above; contract 2 frozen. Web framework (Next.js 16 proposed) is still open, awaiting the owner.
 
 ## 2. Phase 1: foundations, identity, Expense core
 
@@ -52,6 +66,15 @@ Stack-specific commands are filled in at task 1.6.
 - [ ] 3.2b Readings store and fold; Books `ReviseExtraction` for unconfirmed fields
 - [ ] 3.2c test: provider order, privacy filter with Claimant opt-in, `refused` falls through
 - [ ] 3.2d Provider routing + consent setting (identity-access)
+- [ ] 3.2e test: PageText port — fictional PDFs and the canned fake; `pdfium-text-layer` word boxes in page points; `ppocr-onnx` on a fictional raster; source routing (text layer first, OCR otherwise); cache key (checksum, source name/model/version); `unavailable`
+- [ ] 3.2f PageText port, `pdfium-text-layer` and `ppocr-onnx` Adapters, `canned` fake, `pageText` config
+- [ ] 3.2g test: Locator — table of fictional pages and invoices to boxes: digit look-alikes, fuzzy bill number and GSTIN (1 edit at 8+, 2 at 14+), `2270-00` amount, spaced date separators, `pick` by label, never a box without a match, `not_located`
+- [ ] 3.2h Locator (pure)
+- [ ] 3.2i test: validator list — one table per validator (grounded-in-text, arithmetic, GSTIN check digit, UPI ref, cross-family agreement, plausibility); config adds or removes one
+- [ ] 3.2j Validators as named pure functions `(proposal, readings, located) → Signal`; the fold takes the configured list
+- [ ] 3.2k `evals/` gold-set gate: runs any PageText x Extractor x Locator combination on the private gold set (outside the repo), prints the per-field table, fails if a swap scores below the current one on any field; only aggregates recorded
+- [ ] 3.2l test: PP-OCR worker bounds — thread cap (`intraOpNumThreads` 2), memory stays flat over many pages, one failed page does not stop the rest
+- [ ] 3.2m PP-OCR worker: a worker per page or a few pages, denormal-zeroed model files, tier config (tiny | small | medium); check the ONNX files' licence before shipping
 - [ ] 3.3 test: Paperless Adapter against a recorded-response fake (get, download, annotate, upload, findByChecksum)
 - [ ] 3.4 Paperless HTTP Adapter (service-account token)
 - [ ] 3.5 test: Matching `propose` — one clear match, several candidates (Check), none; ±₹1 / ±10 days; one Payment for 2–3 invoices from one vendor; four invoices get no suggestion

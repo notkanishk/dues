@@ -1,5 +1,7 @@
 # Pluggable extraction: Readings from pulled providers and pushed Claude Code
 
+> **Superseded in part by [ADR 0007](0007-typescript-only-modular-reading-pipeline.md) (2026-11-21):** highlight boxes and grounding now come from PageText (PDF text layer or PP-OCRv6) plus the Locator, not from paperless's OCR text and word positions. Providers, Readings and the fold are unchanged.
+
 Bills are read by vision-language models, not by OCR plus rules (an experiment on 42 real bills: rules 21% fully right; GLM-5.3 Flash, Claude Sonnet and Haiku 79–82%; models fail on different bills). Two kinds of reader feed one contract. **Providers** are pulled by Dues after upload through one OpenAI-compatible Adapter; each provider is a configuration row `{name, baseUrl, model, keyEnv, privacy: internal|external}` in an ordered list, so BharatCode today and Gemma on the makerspace GPU tomorrow differ only in config. **Claude Code** is pushed by the Claimant: a Dues plugin (an MCP connection plus one skill) lets their own Claude Code, on their own subscription, read their pending bills and submit what it read. Every reader returns values exactly as printed with their labels; Dues alone converts to paise and dates, runs validators and computes confidence. Each submission is stored as an append-only **Reading**; the proposal the Claimant confirms is a fold over all Readings of a document, and agreement between model families raises confidence. Readings only ever propose; confirmed values and Bills on submitted Claims are never overwritten.
 
 ## Considered Options

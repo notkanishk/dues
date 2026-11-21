@@ -8,9 +8,9 @@ context: |
   Functional source of truth before specs existed: docs/spec/FUNCTIONAL.md. Decisions: docs/adr/.
   Integrations: paperless-ngx 3.x (documents, OCR, webhook, REST API), Zitadel OIDC
   (roles claim, Syndra grants roles), Gotenberg (docx -> PDF).
-  Stack: NOT DECIDED - pending the invoice-parsing experiment (prototype/explorations branch).
-  Leading candidate: one TypeScript app (Next.js 16, Node 24, Drizzle, pg-boss, docxtemplater);
-  a Python worker only if the experiment shows it is needed. Postgres either way.
+  Stack: TypeScript only on Node 24 (ADR 0007): Drizzle, pg-boss, docxtemplater, onnxruntime-node.
+  Web framework (Next.js 16 proposed) awaits the owner's confirmation. Other languages or GPU
+  models join only as HTTP Adapters. Postgres.
   Deployment: Docker Compose in a Proxmox LXC behind Caddy (placeholders only: <APP_HOST>,
   dues.example.org; real values in private/DEPLOY.local.md, never committed).
   Rules of the domain: money as integer paise; moments UTC timestamptz, business dates plain

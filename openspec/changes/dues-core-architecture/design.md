@@ -11,7 +11,7 @@ Dues follows every Payment a Claimant makes for the lab until the university rei
 Constraints that shape the design:
 
 - **One maintainer.** Few moving parts; boring technology; every rule in one place.
-- **Stack not decided.** An invoice-parsing experiment (Python vs TypeScript libraries) is running. Leading candidate: one TypeScript app (Next.js 16, Node 24, Drizzle, pg-boss, docxtemplater, Gotenberg), with a Python worker only if extraction needs it. Postgres either way. This design must hold under either outcome, so it is written as Modules and Interfaces, not files and frameworks.
+- **TypeScript only (ADR 0007, 2026-11-21).** One TypeScript app on Node 24 (Drizzle, pg-boss, docxtemplater, Gotenberg, onnxruntime-node). Another language or a GPU model joins only as an HTTP Adapter behind an existing port. The web framework (Next.js 16 proposed) awaits the owner's confirmation, so the design stays in Modules and Interfaces, not files and frameworks.
 - **The app is the only gate.** The network does not isolate hosts; every read and write is scoped by Claimant inside the app.
 - **Money rules.** Integer paise; moments as UTC `timestamptz`; business dates as plain `date`; suggest, then confirm; append-only audit log.
 - **Scale is small.** Tens of Claimants, hundreds of Expenses each, a few Claims a month. Correctness and Locality beat throughput everywhere.
@@ -23,8 +23,8 @@ Vocabulary used below: **Module**, **Interface** (everything a caller must know:
 **Goals**
 
 - Every money rule and state transition lives in one deep Module with a command-shaped Interface that is also the test surface.
-- The stack decision changes Adapters and the shell, not the Module map.
-- Field extraction sits behind a language-agnostic contract so a TypeScript rules extractor, a Python worker or a local vision model can be swapped.
+- A change of framework changes Adapters and the shell, not the Module map.
+- Reading a bill is a pipeline of swappable parts (PageText, Extractor, Locator, validators) behind language-agnostic contracts; a part in another language or on a GPU joins as an HTTP Adapter (ADR 0007).
 - Authorization is enforced at one Seam; no query can forget the Claimant scope.
 - Webhooks and assistant API calls are safe to repeat; concurrent documents for one Expense cannot corrupt the Open amount or create twin Expenses.
 - External systems (paperless, Gotenberg, Zitadel, Web Push) can be down without losing or corrupting money state.
@@ -59,6 +59,8 @@ Vocabulary used below: **Module**, **Interface** (everything a caller must know:
                            └────┬────┘        ▼              │
                                 └──────▶  Postgres ──────────┘
 ```
+
+Reading pipeline, inside Intake (design §3a): `PageText` (Seam: pdfium-text-layer, ppocr-onnx, canned) gives `Page[]`; `Locator` (pure) turns an invoice plus `Page[]` into boxes; validators (pure) compare proposal, readings and boxes. `Extractor` (Seam) is the third swappable part.
 
 Dependency direction: everything points **towards Books**; Books points at Postgres, the pure Matching rules and an `enqueue` function, and at nothing else. Books never calls paperless, Gotenberg, Zitadel or Web Push.
 
@@ -102,21 +104,49 @@ One contract, two kinds of reader. A provider is `Document → RawExtraction`, c
 - **Hides**: prompt, page rendering (text PDF: text layer + 100 dpi image; other PDFs 200 dpi; photos ≤ 2048 px; ≤ 4 pages), text layer, schema request, retries, provider quirks.
 - **Tested through its Interface**: contract tests on fictional fixtures against the fake; a recorded smoke test per configured provider.
 
-**Readings.** Every result, pulled or pushed, is stored as a Reading `{documentRef, checksum, extractor{name, model, version}, by: provider|claude-code, actor, raw, at}`: append-only, unique on (document, extractor name, model, version). The proposal is an order-independent fold over a document's Readings: Intake converts printed values (paise, ISO dates with plausibility checks, handwritten `2270-00` = ₹2,270.00), runs validators (subtotal + tax = total, GSTIN check digit, 12-digit UPI reference, value present in the text layer) and derives confidence from validators plus agreement across model families. Handwritten bills never auto-accept. Reviewing the folded proposal field by field is designed in `docs/research/notes/Bill review UX/design.md` §7 (variant R, approved 21 Nov 2026); see ADRs 0008 and 0009.
+**Readings.** Every result, pulled or pushed, is stored as a Reading `{documentRef, checksum, extractor{name, model, version}, by: provider|claude-code, actor, raw, at}`: append-only, unique on (document, extractor name, model, version). The proposal is an order-independent fold over a document's Readings: Intake converts printed values (paise, ISO dates with plausibility checks, handwritten `2270-00` = ₹2,270.00), runs validators (subtotal + tax = total, GSTIN check digit, 12-digit UPI reference, value grounded in the page text, via the Locator; the list is §3a) and derives confidence from validators plus agreement across model families. Handwritten bills never auto-accept. Reviewing the folded proposal field by field is designed in `docs/research/notes/Bill review UX/design.md` §7 (variant R, approved 21 Nov 2026); see ADRs 0008 and 0009.
 
 **Extraction approach and verdict (task 1.1; prototype on branch `prototype/explorations`, data stays in `private/`).** Scored on a gold set of 42 real bills with a GLM vision model, through the one provider Adapter. Only aggregate counts and verdicts are recorded here.
 
 - **Keep.** For text PDFs, send the PDF text layer plus a 100 dpi page image: 0 broken fields and 55% fewer prompt tokens than the text layer plus a 200 dpi image.
 - **Drop.** Text only (no image); a 1280 px cap (it broke GSTINs); document crop; a 2048 px upscale (worse); region bands; paperless OCR text added to the prompt for raster images (no gain, +18% tokens over the raster baseline).
 - **No second reading by trigger.** Triggers that call for a second reading caught only 5 of 8 bills with a wrong key field (the keep rule needed ≥ 80%). Agreement between two model families works for totals but not for dates and bill numbers: 6 cases where both families agree on the wrong value. Agreement raises confidence; it never replaces review (ADR 0009).
-- **Paperless's role: nothing before the model; three jobs after it.**
-  - Its OCR text grounds the model's values, as a validator in the fold: an ambiguous numeric date does not count as grounded; a total must be > 0; a bill number carries label risk (a "Reference Number" read as the bill number).
-  - Word positions in paperless's archive PDF give the highlight boxes shown in review.
-  - Its checksum catches duplicate uploads.
-  - Its own created date is dropped as a Reading (15 right, 6 wrong, 17 none of 38).
-- **Box coverage** (single-invoice bills, 38): totals located 26 (12 with more than one box); date 24; bill number 21 located and right; GSTIN 17. Photos and handwriting are often not located; the review UI then shows "not located" with no box.
+- **Paperless's role: nothing before the model; two jobs after it.** It keeps the archive file (the page source for PageText) and the checksum, which catches duplicate uploads. Its OCR text is no longer used for grounding: it found 40 of 77 values on raster bills against 66 for PP-OCRv6 (ADR 0007). Its own created date is dropped as a Reading (15 right, 6 wrong, 17 none of 38).
+- **Grounding rules** (validator rules, unchanged): an ambiguous numeric date does not count as grounded; a total must be > 0; a bill number carries label risk (a "Reference Number" read as the bill number).
+- **Boxes** now come from PageText plus the Locator over paperless's archive PDF (§3a, evidence in ADR 0007). On 38 bills the TypeScript pipeline locates total / date / bill number / GSTIN 34 / 28 / 28 / 26 (old baseline 26 / 25 / 24 / 17). Photos and handwriting are sometimes not located; the review UI then shows "not located" with no box.
 - **Review.** What the Claimant sees and does with these boxes and values is in `docs/research/notes/Bill review UX/design.md` §7 (variant R, approved 21 Nov 2026) and ADRs 0008 and 0009; not restated here.
-- **Rendering is now:** text PDF = text layer + 100 dpi image; other PDFs and photos = images as above. The contract (`RawExtraction`, contract 2) is not frozen here (task 1.6).
+- **Rendering is now:** text PDF = text layer + 100 dpi image; other PDFs and photos = images as above. The contract (`RawExtraction`, contract 2) is frozen (task 1.6, ADR 0007).
+
+### 3a. Reading pipeline: PageText, Locator, validators (ADR 0007)
+
+Three parts sit between a stored document and a highlighted, validated proposal. Each can be swapped by config; every swap passes the gold-set gate (swap rule below).
+
+**PageText (Seam).**
+
+- **Interface**: `read({bytes, mime}) → Page[] | unavailable`. `Page = {width, height, source{name, model, version}, words: [{text, quad, conf?}]}`, in page points.
+- **Adapters**:
+  - `pdfium-text-layer`: `@embedpdf/pdfium` character boxes grouped into words; exact; about 0.01 s a page.
+  - `ppocr-onnx`: PP-OCRv6 through `onnxruntime-node`. Config tier `tiny | small | medium`; `intraOpNumThreads` 2; model files with denormal weights zeroed; a worker per page or per few pages to bound memory.
+  - `canned`: fake for tests.
+  - Later: `http-ocr` for a GPU service (for example Nemotron OCR v2 or PaddleOCR-VL), the same port in any language.
+- **Config**: `pageText: [{name, …}]`, in order. A born-digital page with a text layer uses it; other pages use OCR. Routing is hidden from callers.
+- **Hides**: rasterising, the worker pool, model files, thread caps.
+- **Caching**: results are stored per (document checksum, source name, model, version), so boxes are reproducible and are recomputed when a source changes.
+
+**Locator (pure Module, no Seam).**
+
+- **Interface**: `locate(invoice: RawExtraction invoice, pages: Page[]) → per field {boxes: [{page, quad}], source} | not_located`.
+- **Hides**: the matcher: digit look-alikes (O/0, l/1, S/5, B/8, Z/2); bill number and GSTIN compared on letters and digits only, look-alikes folded, 1 edit at 8+ characters or 2 at 14+; handwritten `2270-00` amounts; dates with spaced separators; and `pick`, which keeps the match whose preceding text best fits the printed label.
+- **Invariant**: never a box without a match (variant R).
+- Model grounding is not an Adapter. It is a hypothetical Seam, added only if the gate shows a need.
+
+**Validators ("comparing").** The fold's validators are a named list of pure functions `(proposal, readings, located) → Signal`, chosen by config: grounded-in-text (via the Locator), arithmetic, GSTIN check digit, UPI reference, cross-family agreement, plausibility. Adding or removing one is a config change.
+
+**Extractor** is unchanged (§3). Whether OCR text from PageText, sent beside the image for raster bills, helps is under test; the outcome is pending and nothing here depends on it.
+
+**Swap rule.** Any Adapter or validator change must pass the gold-set gate. A script in `evals/` runs any PageText x Extractor x Locator combination against a private gold set kept outside the repo and prints the per-field table. The swap must not score below the current one on any field. Only aggregate numbers are recorded.
+
+**Tested through its Interface**: PageText contract tests against fictional PDFs and the canned fake; Locator as a table of fictional pages and values to boxes; each validator as a table; the gate on the private gold set.
 
 ### 4. Paperless (Adapter Module)
 
@@ -132,7 +162,7 @@ Capability `document-intake`.
 - **Interface**: `handleDocument(paperlessId) → Logged{events} | Skipped{reason} | Parked{reason}` (pull: runs the configured providers); `pending(actor) → [{documentRef, checksum, mime, have: [extractor]}]` and `propose(actor, documentRef | upload, rawExtraction, extractor) → Recorded{agreement, reviewUrl} | Rejected{not_found | locked | validation | contract_mismatch}` (push: the Claimant's Claude Code). All safe to call any number of times for the same document. `Skipped`: documents Dues uploaded itself (Claim forms) and documents already linked. `Parked`: the paperless owner is not a Claimant; surfaced to an admin, never dropped.
 - **Hides**: fetching the document, owner → Claimant resolution, provider order and privacy filtering, Readings and their fold (§3), matching `instrument` to the Claimant's Payment method hints, building the `LogDocument` command, the "couldn't read" path (Expense still logged with a blank amount), write-back to paperless.
 - **Deliberately not here**: the match decision. Intake reports a fact (`LogDocument{documentRef, extraction}`); Books decides under its lock what the fact means (D5).
-- **Dependencies**: Paperless, Extractor, Claimants, Books.
+- **Dependencies**: Paperless, Extractor, PageText, Locator, Claimants, Books.
 - **Driving Adapters**: the paperless webhook (pull) and the Dues MCP server (push, OAuth through Zitadel, scope `extraction`, tools `documents_to_read`, `read_document`, `submit_extraction`, `upload_url`), shipped to Claimants as a Claude Code plugin (MCP config + one skill: "file my pending bills").
 - **Tested through its Interface**: fake Paperless + canned Extractor + real Books; assert on Books state and on the annotations the fake received. Repeat-delivery and out-of-order tests (invoice first, confirmation first, both at once).
 
@@ -151,7 +181,7 @@ The rendering half of capability `claims`.
   - **The PDF is made from that same .docx by Gotenberg 9 (LibreOffice) with its default fonts.** There is one template, so the .docx and the PDF cannot drift apart. Measured: same page count and page-break row as Word, 0 of 112 fields missing, 104 MiB, 0.1 s warm.
   - **The PDF must keep the form's general format and structure with no information loss.** Owner, 21 Nov 2026: "the pdf should just have the same general format and structure with no information loss". Pixel match with Word is not required. A golden test checks the text, field by field.
   - **Typst and HTML (Chromium) were considered and not chosen**, because each needs a second template, which means drift. Typst passed the no-information-loss check (0 of 112 fields missing, 2 pages, header row repeated), so the rejection is about drift, not about loss.
-  - The filler follows the stack (docxtpl for Python, docxtemplater for TypeScript); ADR 0007 decides.
+  - The filler is docxtemplater (ADR 0007).
   - Word on the Claimant's computer is a possible fallback that is not planned.
 
 ### 7. Claimants (identity and profile)
@@ -240,7 +270,7 @@ Ledger lines hold claimant, Claim name, bill number, bill date, description, amo
 
 ### D10. Stack-neutral shape: one app image, a worker process, Postgres, Gotenberg
 
-Web process and worker process from the same image; Postgres holds data and queue; Gotenberg as a sidecar; an optional extractor worker container only if the experiment calls for it. All bound to the internal network on `<APP_HOST>`, served as `dues.example.org` through the internal proxy. Nothing in the Module map depends on Next.js, Drizzle or pg-boss specifically.
+Web process and worker process from the same image; Postgres holds data and queue; Gotenberg as a sidecar; an OCR worker (PageText `ppocr-onnx`, same image, bounded memory) and, later, optional HTTP OCR services. All bound to the internal network on `<APP_HOST>`, served as `dues.example.org` through the internal proxy. Nothing in the Module map depends on Next.js, Drizzle or pg-boss specifically.
 
 ## Risks / Trade-offs
 
@@ -249,14 +279,14 @@ Web process and worker process from the same image; Postgres holds data and queu
 - [Per-Claimant lock held during a slow command] → Commands do no I/O other than Postgres (D8); extraction and rendering happen outside the lock.
 - [Extraction accuracy on real payment confirmations is poor] → Never blocks logging: the Expense is created with a blank amount and "couldn't read"; the vision second pass is another Adapter behind the same Seam.
 - [Auto-attach on "one clear match" is wrong] → Every attach is an audited event and reversible with `MoveBill` until the Bill is on a submitted Claim; thresholds live in one config.
-- [Form PDF differs from the Word output; fonts substituted in Gotenberg] → Phase 0 spike with a golden test; mount the fonts; fall back to a Python filler behind Claim package if the template tool fails.
+- [Form PDF differs from the Word output; fonts substituted in Gotenberg] → Phase 0 spike with a golden test; mount the fonts; if the template tool fails, revisit the filler behind Claim package (ADR 0007: any other language would join only over HTTP).
 - [paperless webhook lost, or delivered before OCR text is ready] → Inbox sweep; Intake retries with backoff when text is empty before declaring "couldn't read".
 - [~~paperless rejects an identical file~~ — false: paperless-ngx 3.x consumes identical files by default and only logs a warning (`PAPERLESS_CONSUMER_DELETE_DUPLICATES` unset = false; checked in `documents/consumer.py` on the paperless host, 2026-11-20); a second Claimant's copy reaches Dues as its own document and the checksum rule in duplicate-guard raises "same Bill held by two Claimants" path.
 - [Zitadel roles claim shape differs from the docs] → Phase 0 spike records real tokens as fixtures for the mapping function.
 - [Real documents contain personal data; repo is public] → Fixtures synthetic or redacted; real corpus only under `private/`.
 - [Audit payloads hold personal data forever] → Accepted for an internal tool; payloads carry IDs and changed fields, not document text.
 - [No store Seam means tests need Postgres] → Accepted: one container, and the tests then cover the locks and indexes that carry the guarantees.
-- [Stack decision slips] → Phases 0–1 work on Books' pure core and the Extractor contract is stack-neutral in design; only the shell waits.
+- [Framework confirmation slips] → Phases 0–1 work on Books' pure core and the contracts; only the shell waits.
 
 ## Migration Plan
 
@@ -284,7 +314,7 @@ Web process and worker process from the same image; Postgres holds data and queu
 
 ## Open Questions
 
-1. **Stack**: outcome of the invoice-parsing experiment (all-TypeScript vs TypeScript + Python extractor worker). Changes Adapters and the shell only.
+1. **Web framework**: TypeScript only is decided (ADR 0007). Next.js 16 is proposed and awaits the owner's confirmation. Changes the shell only.
 2. ~~Claim name timing~~ **Resolved (maintainer, 2026-11-20):** the name is fixed when the package is built (it is in the email subject), renamed if rebuilt in a later month before submission, frozen once submitted. Was: Does the form or the package file naming carry the Claim name? The name is assigned at first submission, but the package is built before it. If yes, the name must be reserved when the package is built.
 3. ~~Same file from two Claimants~~ **Resolved:** paperless-ngx 3.x consumes identical files by default and only logs a warning (`PAPERLESS_CONSUMER_DELETE_DUPLICATES` unset = false; checked in `documents/consumer.py` on the paperless host, 2026-11-20). Dues receives both copies; duplicate-guard's checksum rule and the payback prompt handle them. Keep `CONSUMER_DELETE_DUPLICATES` off. Was: Two Claimants holding the same file: paperless rejects the second identical upload. How does the second Claimant's copy reach Dues (surface paperless's duplicate error, or link by checksum on request)?
 4. Does the paperless webhook action allow a custom secret header, and does it fire before OCR text is available? (Phase 0 live test.)
