@@ -10,6 +10,8 @@ Bun 1.4 (runtime, package manager, script runner), with Node 24 as the fallback 
 
 **Web framework and runtime (owner, 21 Nov 2026: "nextjs and bun").** Next.js 16 (`docs/research/notes/Tracker stack choice/stack_choice.md`) on Bun. Known Bun risks, checked in task 1.7: `node:crypto` is only partly implemented (web-push VAPID signing), Next.js on Bun is supported by Bun rather than by Next.js's primary target, and onnxruntime-node memory grows per page in one Bun process (the OCR worker already runs a worker per few pages). Anything that fails runs on Node 24 instead; the Module map does not change (design D10).
 
+**Bun compatibility (task 1.7, 21 Nov 2026, Bun 1.4.5, fictional data).** Under `bun --bun` these pass: the Next.js 16 standalone server (SSR page and a route handler reading Postgres via Drizzle), web-push 4.0.0 (ES256 VAPID verified, aes128gcm payload round-trips), pg-boss 12 (including a retry), Drizzle 0.45 and drizzle-kit migrate, openid-client (discovery, PKCE, token exchange, ID token), `@embedpdf/pdfium` char boxes (0 delta against Node), onnxruntime-node PP-OCRv6 small, and docxtemplater (byte-identical to Node). **No production piece needs Node.** Vitest's default forks pool fails under Bun (`child.channel?.unref is not a function`); tests run with `--pool=threads`. OCR peak memory is about 25 to 30% higher on Bun than on Node (about 0.9 GB against 0.7 GB per worker-per-page), so the OCR worker keeps one page per worker.
+
 ## Considered Options
 
 - **TypeScript plus a Python worker** (the earlier leading candidate): rejected; the box bake-off found no field where Python wins by more than 1 to 2 values of 38 (below), and a second language costs an image, a lockfile and a test runner.

@@ -22,8 +22,8 @@ Commands (ADR 0007: Next.js 16 on Bun):
 | Install | `bun install` |
 | Dev, build | `bun --bun next dev`, `bun --bun next build` |
 | Typecheck | `bunx tsc --noEmit` |
-| Unit and golden tests | `bunx vitest run` |
-| Database tests (real Postgres) | `bunx vitest run --project db` |
+| Unit and golden tests | `bunx vitest run --pool=threads` |
+| Database tests (real Postgres) | `bunx vitest run --pool=threads --project db` |
 | End-to-end | `bunx playwright test` |
 | Migrations | `bunx drizzle-kit generate`, `bunx drizzle-kit migrate` |
 | Gold-set gate | `bun evals/run.ts` (private gold set path from env; prints aggregates only) |
@@ -36,7 +36,7 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 1.4 Spike: paperless OIDC login against a Zitadel test client; per-user API token upload owner; webhook payload, custom secret header and whether OCR text is ready when it fires
 - [ ] 1.5 Device test: share the success screen from CRED, Google Pay, PhonePe, Paytm, BHIM and a bank app; record image vs text vs nothing; check HEIC handling in paperless
 - [x] 1.6 Decide the stack from 1.1–1.2; record it as ADR 0007; fill in this file's build/test commands; freeze RawExtraction contract 2 (design §3, ADR 0006). Done: ADR 0007 (TypeScript only); commands above; contract 2 frozen. Web framework (Next.js 16 proposed) is still open, awaiting the owner.
-- [ ] 1.7 Bun compatibility check (fictional data, experiment host): under `bun --bun`, Next.js 16 build and standalone start; web-push VAPID send to a local push endpoint; pg-boss 12 send/work; Drizzle migrate on Postgres 18; openid-client discovery; `@embedpdf/pdfium` char boxes; onnxruntime-node PP-OCRv6 one page with memory bound; docxtemplater fill. Anything failing runs on Node 24; record which in ADR 0007.
+- [x] 1.7 Bun compatibility check (fictional data, experiment host): under `bun --bun`, Next.js 16 build and standalone start; web-push VAPID send to a local push endpoint; pg-boss 12 send/work; Drizzle migrate on Postgres 18; openid-client discovery; `@embedpdf/pdfium` char boxes; onnxruntime-node PP-OCRv6 one page with memory bound; docxtemplater fill. Anything failing runs on Node 24; record which in ADR 0007. Done: all 8 production pieces pass on Bun 1.4.5; only Vitest's forks pool fails, so tests use `--pool=threads` (ADR 0007).
 
 ## 2. Phase 1: foundations, identity, Expense core
 
