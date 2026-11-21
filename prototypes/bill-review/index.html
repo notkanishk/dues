@@ -1,0 +1,1387 @@
+<!doctype html>
+<!-- PROTOTYPE, throwaway: bill review variants, switch with ?variant=A|B|C|D|R -->
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#F6F4EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)">
+<title>Bill review prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F6F4EF;--surface:#FFFFFF;--surface-2:#FBFAF7;--line:#E4E0D6;--line-strong:#8E897D;
+  --ink:#1C1B19;--ink-2:#55524B;--ink-3:#6F6B62;--accent:#2B3A8C;--accent-bg:#E9ECF9;
+  --warn:#7A4F00;--warn-bg:#FBF1D9;--bad:#A8321F;--bad-bg:#FBE9E5;--on-accent:#FFFFFF;
+  --box-accent:#2B3A8C;--box-warn:#B26A00;--box-warn-ink:#8F5500;--box-ink:#1C1B19;--box-bad:#A8321F;--scrim:rgba(20,20,19,.35);
+  --serif:"Source Serif 4",ui-serif,Georgia,serif;--sans:Inter,ui-sans-serif,system-ui,sans-serif;
+  --ease:cubic-bezier(.2,.8,.2,1);
+  --shadow:0 1px 2px rgba(0,0,0,.06),0 8px 24px rgba(0,0,0,.08);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141413;--surface:#1C1C1A;--surface-2:#232320;--line:#33322E;--line-strong:#77736A;
+  --ink:#ECEAE4;--ink-2:#B5B1A7;--ink-3:#8F8B81;--accent:#A9B8FF;--accent-bg:#232A4D;
+  --warn:#E3B341;--warn-bg:#3A2E10;--bad:#FF9A8A;--bad-bg:#3F1D17;--on-accent:#141413;color-scheme:dark}
+  :root:not([data-theme="light"]) .page{filter:brightness(.92)}}
+:root[data-theme="dark"]{
+  --bg:#141413;--surface:#1C1C1A;--surface-2:#232320;--line:#33322E;--line-strong:#77736A;
+  --ink:#ECEAE4;--ink-2:#B5B1A7;--ink-3:#8F8B81;--accent:#A9B8FF;--accent-bg:#232A4D;
+  --warn:#E3B341;--warn-bg:#3A2E10;--bad:#FF9A8A;--bad-bg:#3F1D17;--on-accent:#141413;color-scheme:dark}
+:root[data-theme="dark"] .page{filter:brightness(.92)}
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:400 14px/20px var(--sans);-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* D5: the primary takes focus on arrival; its ring shows once a key is pressed (html.kbd) */
+html:not(.kbd) .btn.pri:focus-visible{outline-color:transparent}
+#app{position:relative;height:calc(100dvh - 64px);overflow:hidden}
+#vroot,#end{position:absolute;inset:0}
+[hidden]{display:none!important}
+.id{font-feature-settings:"tnum","zero","ss02"}
+
+/* ---------- shared atoms ---------- */
+.kh{font:400 12px/16px var(--sans);border:1px solid var(--line-strong);border-radius:4px;padding:0 4px;color:var(--ink-2);display:inline-block;background:none;white-space:nowrap}
+button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.btn{height:44px;border-radius:6px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font:500 15px/20px var(--sans);padding:0 16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:10px;transition:background-color 120ms ease-out}
+.btn:hover{background:var(--surface-2)}
+.btn.pri{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.btn.pri:hover{filter:brightness(1.08)}
+.btn.pri .kh{color:inherit;border-color:currentColor;opacity:.85}
+.btn.wide{width:100%;height:auto;min-height:44px;padding-block:6px}
+.btn.wide>span:first-child{text-wrap:balance}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn.sm{height:32px;font-size:13px;padding:0 12px}
+.lnk{background:none;border:0;padding:0;color:var(--accent);font:500 13px/20px var(--sans);cursor:pointer;display:inline-flex;gap:6px;align-items:center;min-height:24px}
+.lnk:hover{text-decoration:underline}
+.g{width:16px;height:16px;flex:none;display:inline-block;vertical-align:-3px}
+.g.s-located{color:var(--accent)}.g.s-check{color:var(--warn)}.g.s-unlocated,.g.s-missing{color:var(--ink-3)}.g.s-conflict{color:var(--bad)}.g.s-confirmed{color:var(--ink)}
+.skel{display:inline-block;height:14px;width:120px;border-radius:3px;background:var(--line)}
+.skel.hero-skel{height:44px;width:260px;border-radius:6px}
+.none{color:var(--ink-3);font-weight:400}
+.hero{font:500 56px/60px var(--serif);font-size:min(56px,calc(175cqi/var(--n,8)));font-variant-numeric:lining-nums tabular-nums;color:var(--ink);letter-spacing:-.01em;white-space:nowrap}
+.hero .cur{font-size:.6em;color:var(--ink-2);display:inline-block;vertical-align:top;margin:.1em .06em 0 0;line-height:1}
+.hero .pa{font-size:.6em;color:var(--ink-2)}
+button.hero{background:none;border:0;padding:0;cursor:text;text-align:left}
+.amt{font:500 17px/24px var(--serif);font-variant-numeric:lining-nums tabular-nums}
+input.ed{font:500 15px/22px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--accent);border-radius:6px;padding:4px 8px;width:100%;min-width:0;height:36px;font-variant-numeric:tabular-nums}
+input.ed.big{font:500 44px/48px var(--serif);font-size:min(44px,calc(150cqi/var(--n,8)));height:64px;padding:4px 12px}
+.st{font-size:12px;line-height:16px;color:var(--ink-2)}
+.st.s-check{color:var(--warn)}.st.s-conflict{color:var(--bad)}
+.cands{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.cand{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:10px;align-items:center;text-align:left;background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;padding:8px 10px;cursor:pointer;min-height:44px}
+.cand:hover{border-color:var(--box-warn)}
+.cand .kh{grid-row:1/3}
+.cand em{grid-column:2;font-style:normal;color:var(--ink-2);font-size:12px;min-width:0;overflow-wrap:anywhere}
+.cand b{font-weight:500;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acts{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}
+.hint{font-size:13px;line-height:18px;color:var(--ink-2);margin-top:4px}
+.ev,.st,.hint{text-wrap:pretty}
+
+/* rows */
+.row{position:relative;padding:8px 12px;border-radius:6px;min-height:40px;transition:background-color 120ms ease-out;cursor:default;outline-offset:-2px}
+.row .r1{display:flex;align-items:center;gap:12px;min-height:24px}
+.row .rl{font-size:11px;line-height:16px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:500;width:84px;flex:none}
+.row .rv{flex:1;min-width:0;font:500 15px/22px var(--sans);overflow-wrap:anywhere}
+.row .rv .val{cursor:text;font-feature-settings:"tnum","zero","ss02"}
+@media (hover:hover){.row .rv .val:hover,.A-hero button.hero:hover{background:var(--surface-2);border-radius:6px;box-shadow:0 0 0 4px var(--surface-2)}}
+.row .r2{padding-left:96px;margin-top:2px}
+.row.title .rl{display:none}.row.title .r2{padding-left:0}
+.row.title .rv{font:500 20px/26px var(--serif)}
+.row.stop.s-check{background:var(--warn-bg)}
+.row.stop.s-conflict{background:var(--bad-bg)}
+.row.stop.s-unlocated,.row.stop.s-missing{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.row.f,.row.h{background:var(--accent-bg)}
+.row.f .rl,.row.h .rl,.row.stop .rl{color:var(--ink-2)}
+.stop .none,.f .none,.h .none{color:var(--ink-2)}
+.row.f,.A-hero.f,.B-cell.f,.B-hero.f,.B-ven.f{outline:2px solid var(--accent);outline-offset:-2px}
+.row.stop.s-check.f,.row.stop.s-check.h{background:var(--warn-bg)}
+.row.stop.s-conflict.f,.row.stop.s-conflict.h{background:var(--bad-bg)}
+@media (max-width:719px){.row{min-height:56px;padding:12px}.row .rl{width:84px}.row .r2{padding-left:96px}}
+
+/* top bar + marks */
+.bar{height:48px;flex:none;display:flex;align-items:center;gap:16px;padding:0 24px;border-bottom:1px solid var(--line);background:var(--bg);font-size:13px;color:var(--ink-2);overflow:hidden;white-space:nowrap}
+.bar .cnt{color:var(--ink)}
+.bar .ids{margin-left:auto}
+.marks{display:flex;gap:0;min-width:0;overflow-x:auto;scrollbar-width:none;flex:0 1 auto}
+.bar .ids,.bar .q{flex:none}
+@media (max-width:379px){.bar .ids{display:none}}
+.mk{width:26px;height:36px;border:0;background:none;color:var(--ink-2);cursor:pointer;display:grid;place-items:center;border-radius:6px;padding:0}
+.mk.cur{color:var(--accent);background:var(--accent-bg);box-shadow:inset 0 -2px var(--accent)}
+.q{width:28px;height:28px;border-radius:50%;border:1px solid var(--line-strong);background:none;cursor:pointer;color:var(--ink-2);font-size:13px;flex:none}
+@media (max-width:719px){.bar{padding:0 12px;gap:8px}.bar .bk{display:none}.bar .ids{font-size:12px}}
+
+.seg{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap;padding:0 12px}
+.seg button{border:1px solid var(--line-strong);background:none;border-radius:6px;padding:4px 10px;font-size:12px;line-height:16px;cursor:pointer;color:var(--ink-2);min-height:28px}
+.seg button.on{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}
+.tally{font:500 17px/24px var(--serif);font-variant-numeric:lining-nums tabular-nums;color:var(--ink-2);margin-bottom:8px;padding:0 12px}
+.tally small{display:block;font:400 12px/16px var(--sans);color:var(--ink-2)}
+.ev{text-wrap:balance;display:flex;align-items:flex-start;gap:8px;font-size:14px;line-height:20px;color:var(--ink-2);margin-top:4px}
+.ev .g{margin-top:2px}
+.pay{margin-top:16px;padding:0 12px}
+/* D3 Q1: status left, "Undo confirm" right; the primary below keeps its full width */
+.stat{min-height:24px;font-size:12px;line-height:16px;color:var(--ink-2);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.stat .lnk{flex:none;white-space:nowrap}
+
+/* ---------- paper ---------- */
+.page{position:relative;container-type:inline-size;color:#1b1b1b;font-family:var(--sans);box-shadow:var(--shadow);outline:1px solid var(--line);flex:none}
+.page .it{position:absolute;white-space:nowrap;line-height:1.2}
+.page .it.bw{display:flex;align-items:center;overflow:visible}
+.page .rule{position:absolute;height:max(1px,.14cqw);background:#2a2a2a}
+.page .paper{position:absolute;background-image:linear-gradient(135deg,rgba(255,255,255,.3),rgba(0,0,0,.08));box-shadow:0 0 .8cqw rgba(0,0,0,.35)}
+.page .ov{position:absolute;inset:0;pointer-events:none}
+.page .ov svg.scrim{position:absolute;inset:0;width:100%;height:100%;transition:opacity 160ms ease-out}
+.page .ov svg.scrim path{fill:rgba(20,20,19,.35)}
+.bx{position:absolute;border-radius:3px;box-shadow:0 0 0 1px rgba(255,255,255,.75);pointer-events:auto;cursor:pointer;transition:background-color 180ms ease-out,opacity 120ms ease-out,border-color 120ms}
+.bx.total{border:calc(2px*var(--zi,1)) solid var(--box-accent);background:rgb(43 58 140/.12);mix-blend-mode:multiply}
+.bx.other{border:calc(1px*var(--zi,1)) solid var(--box-accent);opacity:.55}
+.bx.cd{border:calc(1.5px*var(--zi,1)) dashed var(--box-warn)}
+.bx.conf,.bx.you{border:calc(1px*var(--zi,1)) solid rgb(28 27 25/.45);background:transparent}
+.bx.bad{border-color:var(--box-bad)}
+.bx.f{border-width:calc(2px*var(--zi,1));opacity:1;background:rgb(43 58 140/.16)}
+.bx.f.cd{background:transparent}
+.bx.dim{opacity:.25}
+.bx.dim .tag,.bx .tag:empty{visibility:hidden}
+.bx .tag{position:absolute;left:calc(-1px*var(--zi,1));bottom:calc(100% + 2px*var(--zi,1));font:600 10px/1 var(--sans);letter-spacing:.05em;text-transform:uppercase;color:#fff;background:var(--box-accent);padding:3px 5px;border-radius:2px;white-space:nowrap;transform:scale(var(--zi,1));transform-origin:0 100%;pointer-events:none;display:flex;gap:3px;align-items:center}
+.bx.cd .tag{background:var(--box-warn-ink)}
+.bx.conf .tag,.bx.you .tag{background:rgb(28 27 25/.75)}
+.bx.bad .tag{background:var(--box-bad)}
+.bx.other:not(.f) .tag{display:none}
+.bx.cd .tag,.bx.conf .tag,.bx.you .tag{left:calc(100% + 4px*var(--zi,1));bottom:auto;top:50%;transform:translateY(-50%) scale(var(--zi,1));transform-origin:0 50%}
+.bx:focus-visible{outline:2px solid var(--box-accent);outline-offset:2px}
+
+/* viewer */
+.vw{position:relative;overflow:hidden;background:var(--bg);touch-action:none;user-select:none;-webkit-user-select:none}
+.vw .cam{position:absolute;left:0;top:0;transform-origin:0 0}
+.B-page.vw:not(.locating){touch-action:pan-y pinch-zoom}
+.vw.locating{cursor:crosshair}
+.vw:focus-visible{outline-offset:-2px}
+.vw.locating .page .it[data-ocr]:focus-visible{outline:2px solid var(--box-accent);outline-offset:2px;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,.75)}
+.vw-corner{position:absolute;width:calc(10px*var(--zi,1));height:calc(10px*var(--zi,1));margin:calc(-5px*var(--zi,1)) 0 0 calc(-5px*var(--zi,1));border:calc(1.5px*var(--zi,1)) solid var(--box-ink);border-radius:50%;background:rgb(28 27 25/.15);pointer-events:none}
+.vw.locating .bx{pointer-events:none}
+.vw.locating .page .it[data-ocr]:hover{text-decoration:underline;text-decoration-style:dotted;text-decoration-color:rgba(43,58,140,.6);text-underline-offset:.3cqw}
+.vw-chip{position:absolute;left:0;right:0;top:auto;bottom:0;background:var(--surface);border:0;border-top:1px solid var(--line);border-radius:0;padding:6px 12px;text-align:center;font-size:12px;line-height:16px;color:var(--ink-2);max-width:none;z-index:3}
+.vw-cap{position:absolute;left:0;right:0;bottom:0;background:var(--ink);color:var(--bg);padding:10px 16px;font-size:14px;z-index:4;text-align:center}
+.vw-ph{position:absolute;inset:0;display:grid;place-content:center;gap:8px;text-align:center;color:var(--ink-2);background:repeating-linear-gradient(135deg,transparent 0 8px,var(--line) 8px 9px);z-index:2;padding:16px}
+.vw-draft{position:absolute;border:1.5px solid var(--box-ink);background:rgb(28 27 25/.08);pointer-events:none}
+@keyframes rise{from{opacity:.4;translate:0 calc(8px*var(--zi,1))}to{opacity:1;translate:0 0}}
+.vw .cam.enter .page{animation:rise 160ms ease-out}
+@keyframes slidein{from{opacity:0;translate:48px 0}to{opacity:1;translate:0 0}}
+.vw.slide .cam.enter .page{animation:slidein 240ms var(--ease)}
+.pages{position:absolute;left:12px;bottom:12px;display:flex;gap:4px;z-index:3}
+.pages button{border:1px solid var(--line-strong);background:var(--surface);border-radius:6px;font-size:12px;padding:2px 10px;cursor:pointer;color:var(--ink)}
+.pages button.dim{opacity:1;color:var(--ink-2);border-color:var(--line)}
+.pages .pg1{border:1px solid var(--line-strong);background:var(--surface);border-radius:6px;font-size:12px;padding:2px 10px;color:var(--ink)}
+
+/* crops */
+.crop{position:relative;overflow:hidden;background:var(--surface-2);border-radius:3px;outline:1px solid var(--line);width:100%}
+.crop .cin{position:absolute;left:0;top:0;transform-origin:0 0}
+.crop .cin .page{box-shadow:none;outline:0}
+.crop .bx:not(.total) .tag{display:none}
+.crop.hatch{width:100%;font-family:inherit;display:flex;align-items:center;gap:12px;padding:6px 12px;background:repeating-linear-gradient(135deg,transparent 0 6px,var(--line) 6px 7px),var(--surface-2);border:1px dashed var(--line-strong);cursor:pointer;color:var(--ink-2);font-size:13px;line-height:18px;text-align:left}
+.crop.hatch .thumb{flex:none;overflow:hidden;border-radius:2px;background:#fff}
+.crop.hatch .thumb .page{box-shadow:none;outline:1px solid var(--line)}
+.crop.hatch b{font-weight:500;color:var(--ink)}
+.crop.hatch u{color:var(--accent)}
+.crop.hatch:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* R3-1: one ring; the tint stays on the field the button acts on */
+html.kbd #vroot:has(.btn.pri:focus-visible) .ft.f,#vroot:has(.crop.hatch:focus-visible) .ft.f{outline-color:transparent}
+/* B5: while pointing, keys go to the page, so the ring is there */
+#vroot:has(.vw.locating:focus-within) .ft.f{outline-color:transparent}
+/* B9: a ringed group holds its crop without a second frame */
+.ft.f .crop:not(.hatch){outline:0}
+
+/* ---------- A ---------- */
+.A,.B,.C,.D{height:100%;display:flex;flex-direction:column;position:relative;background:var(--bg)}
+.A-main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) clamp(360px,38%,440px)}
+.A-pane{min-height:0}
+.A-rail{display:flex;flex-direction:column;min-height:0;background:var(--surface);border-left:1px solid var(--line)}
+.A-scroll{flex:1;overflow:auto;overscroll-behavior:contain;padding:24px 24px 16px;scroll-padding-block:16px}
+.A-foot{padding:12px 24px 16px;border-top:1px solid var(--line)}
+.A-foot .stat{padding:0 12px}
+.A-hero{padding:12px;border-radius:6px;margin:24px 0 16px;position:relative;transition:background-color 120ms;container-type:inline-size}
+.A-hero.f,.A-hero.h{background:var(--accent-bg)}
+.A-hero.stop.s-conflict{background:var(--bad-bg)}
+.A-hero.stop.s-check{background:var(--warn-bg)}
+.A-hero .strip{margin-bottom:12px}
+.A-hero .detail{margin-top:8px}
+.A-lead{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:0;transition:none;z-index:5}
+.A-lead.on{opacity:1;transition:opacity 120ms ease-out}
+.A-lead path{fill:none;stroke:var(--accent);stroke-width:1px}
+.A-lead path.case{stroke:var(--bg);stroke-width:3px}
+.A-lead.dot path{opacity:.4}
+.A-lead circle{fill:var(--accent);stroke:var(--bg);stroke-width:1px}
+@media (max-width:719px){
+  .A-main{grid-template-columns:1fr;grid-template-rows:42% minmax(0,1fr)}
+  .A-rail{border-left:0;border-top:1px solid var(--line)}
+  .A-scroll{padding:16px}.A-foot{padding:8px 16px calc(8px + env(safe-area-inset-bottom))}
+  .btn.pri{height:56px}.btn.pri.wide{height:auto;min-height:56px}.hero{font-size:min(44px,calc(175cqi/var(--n,8)));line-height:48px}.A-lead{display:none}
+  .A-hero{margin:16px 0 8px}
+}
+
+/* ---------- B ---------- */
+.B-scroll{flex:1;overflow:auto;overscroll-behavior:contain;padding:24px 16px 48px;scroll-behavior:smooth;scroll-padding:16px 0 24px}
+.B-col{max-width:680px;margin:0 auto}
+.B-col.enter{animation:colup 200ms ease-out}
+@keyframes colup{from{opacity:.5;transform:translateY(16px)}to{opacity:1;transform:none}}
+.B-page{max-width:680px;margin:0 auto 16px;height:min(46vh,440px);border-radius:10px;border:1px solid var(--line)}
+.B-vendor{font:500 20px/26px var(--serif);margin:0;text-align:left}
+.B-ven{padding:8px 12px;border-radius:6px;text-align:left;margin-bottom:12px}
+.B-ven .vv{display:inline-flex;gap:10px;align-items:center;justify-content:flex-start}
+.B-hero{padding:12px;border-radius:6px;transition:background-color 120ms;container-type:inline-size}
+/* D1: the read total and its evidence end where the printed box ends, 12px inside the strip */
+.B-read{text-align:right;margin-top:6px;padding-right:12px}
+.B-ev{justify-content:flex-end;padding-right:12px}
+.A-hero .B-read{margin-top:0}
+.B-read.L,.A-hero:has(.strip .crop.hatch) .B-read{text-align:left}
+.B-read.L~.B-ev,.A-hero:has(.strip .crop.hatch) .B-ev{justify-content:flex-start}
+.B-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;margin-top:24px}
+.B-cell{padding:8px;border-radius:6px;min-width:0;transition:background-color 120ms}
+.f.B-cell,.f.B-hero,.f.B-ven,.h.B-cell,.h.B-hero{background:var(--accent-bg)}
+.B-cell.stop.s-check,.B-hero.stop.s-check{background:var(--warn-bg)}
+.B-cell.stop.s-conflict,.B-hero.stop.s-conflict{background:var(--bad-bg)}
+.B-cell.stop.s-unlocated,.B-cell.stop.s-missing,.B-hero.stop.s-unlocated,.B-hero.stop.s-missing{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.B-cell.wide{grid-column:1/-1}
+.B-cell .crop{margin-bottom:6px}
+/* B8, R5-15: fade (14px) the half-cut lines at a phone crop's top and bottom; the crop's own background shows, as a mask on .cin would */
+.B-cell .crop:not(.hatch)::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(var(--surface-2),transparent 14px,transparent calc(100% - 14px),var(--surface-2))}
+/* D2: phone "Edit" on the value line; 24px tall, 44px to the touch */
+.B-val .lnk.ed-in{min-height:24px;position:relative;flex:none}.B-val .lnk.ed-in::after{content:"";position:absolute;inset:-10px -8px}
+.B-val{display:flex;align-items:center;gap:8px;font:500 15px/22px var(--sans);min-height:24px}
+.B-val .vtxt{flex:1;min-width:0}
+.B-cs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.B-cn{font-size:13px;margin-top:4px;color:var(--ink-2)}
+.B-foot{display:flex;flex-direction:column;gap:8px;justify-content:flex-end}
+.B-peek{max-width:680px;margin:32px auto 0;cursor:pointer}
+.B-peek [data-slot]{opacity:.3}
+.B-peek small{display:block;font-size:12px;color:var(--ink-2);opacity:1;margin-bottom:4px}
+.B-ovl{position:absolute;inset:0;z-index:20;background:var(--bg);display:flex;flex-direction:column}
+.B-ovl-top{height:56px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line)}
+.B-ovl-top .btn{margin-left:auto;height:36px}
+.B-ovl-pane{flex:1;min-height:0}
+.B-rows{margin-top:16px}
+.B-pin{flex:none;padding:8px 16px calc(8px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--bg)}
+.B-pin .stat{margin-bottom:4px}
+@media (max-width:719px){.B-grid{grid-template-columns:1fr}.hero{font-size:min(44px,calc(175cqi/var(--n,8)));line-height:48px}.B-scroll{padding:16px 16px 32px}.btn.pri{height:56px}.btn.pri.wide{height:auto;min-height:56px}.B-ovl-top .btn{height:44px}}
+
+/* ---------- C ---------- */
+.C-rib{gap:6px;overflow-x:auto}
+.C-rib .back{color:var(--ink-2);margin-right:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:0 12px 0 8px;height:32px;font-size:13px;cursor:pointer;flex:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;transition:background-color 120ms}
+.chip:hover,.chip.h{background:var(--accent-bg)}
+.chip.f{border-color:var(--accent);background:var(--accent-bg)}
+.chip.s-check{border-color:var(--box-warn)}.chip.s-conflict{border-color:var(--bad)}
+.chip .cv{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.C-sum{display:none;font-size:13px}
+.C-stage{flex:1;min-height:0}
+.C-card{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);width:min(520px,calc(100% - 32px));background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:16px 20px;z-index:6}
+.C-top{display:flex;gap:8px;align-items:center;font-size:12px;line-height:16px;color:var(--ink-2);margin-bottom:6px}
+.C-top b{font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:500;color:var(--ink-3)}
+.C-val{font:500 26px/32px var(--serif);font-variant-numeric:lining-nums tabular-nums;overflow-wrap:anywhere}
+.C-val .hero{font-size:44px;line-height:48px}
+.C-val .val{cursor:text}
+.C-sub{font-size:14px;color:var(--ink-2);margin-top:4px}
+.C-act{display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap}
+.C-act .pri{flex:1;min-width:150px}
+@media (max-width:719px){
+  .C-rib .chip,.C-rib .back{display:none}.C-sum{display:block}
+  .C-card{bottom:0;left:0;right:0;width:auto;transform:none;border-radius:10px 10px 0 0;padding:16px 16px calc(12px + env(safe-area-inset-bottom))}
+  .C-act .btn{height:56px;flex:1}.C-act .lnk{width:100%;justify-content:center;height:32px}
+  .C-val .hero{font-size:44px}
+}
+
+/* ---------- D ---------- */
+.D-head{display:flex;align-items:center;gap:16px;padding:12px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.D-head h1{font:500 20px/26px var(--serif);margin:0}
+.D-head .sum{color:var(--ink-2);font-size:13px}
+.D-head .btn{margin-left:auto}
+.D-table{flex:1;overflow:auto;padding:0 24px 24px}
+.D-th,.D-main{display:grid;grid-template-columns:28px 28px minmax(0,1.5fr) 80px 170px 110px 110px 28px;gap:0 12px;align-items:center}
+.D-th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:12px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:2}
+.D-th .r,.D-main .r{text-align:right}
+.D-row{border-bottom:1px solid var(--line);padding:0 12px;transition:background-color 120ms;cursor:pointer}
+.D-row:hover{background:var(--surface-2)}
+.D-row.f{background:var(--accent-bg)}
+.D-main{min-height:48px;padding:8px 0}
+.D-chk{width:16px;height:16px;border:1px solid var(--line-strong);border-radius:3px;display:inline-block;background:var(--surface)}
+.D-chk.on{background:var(--accent);border-color:var(--accent);box-shadow:inset 0 0 0 3px var(--surface)}
+.D-ven{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.D-ven small{color:var(--ink-3);margin-left:6px}
+.D-dt{font-size:14px;white-space:nowrap}
+.D-dt i{font-style:normal;color:var(--warn);font-weight:600}
+.D-tot{font:500 17px/24px var(--serif);font-variant-numeric:lining-nums tabular-nums;text-align:right}
+.D-pay{font-size:13px;color:var(--ink-2)}
+.D-pay.bad{color:var(--bad)}
+.D-nocrop{font-size:12px;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+.D-row.done .D-main>*:not(.g){color:var(--ink-3)}
+.D-row.done .crop{opacity:.5}
+.D-more{display:flex;gap:16px;padding:0 0 12px 68px;flex-wrap:wrap;align-items:flex-end}
+.D-more>div{width:240px}
+.D-open{background:none;border:0;cursor:pointer;color:var(--ink-2);font-size:18px;height:32px;width:28px;padding:0}
+.D-panel{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);height:min(60vh,520px);border-bottom:1px solid var(--line);background:var(--surface);margin:0 -12px;cursor:default}
+.D-pv{min-height:0}
+.D-pf{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line)}
+.D-pfh{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.D-pfh .back{display:none}
+.D-fields{flex:1;overflow:auto;padding:8px}
+.D-pfoot{padding:12px;border-top:1px solid var(--line)}
+.D-empty{padding:48px 0;text-align:center;color:var(--ink-2)}
+.dlg-bg{position:fixed;inset:0;background:rgba(20,20,19,.45);z-index:60;display:grid;place-items:center}
+.dlg{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px;width:min(420px,calc(100% - 32px));box-shadow:var(--shadow)}
+.dlg p{font:500 20px/26px var(--serif);margin:0 0 16px}
+.dlg div{display:flex;gap:8px;justify-content:flex-end}
+@media (max-width:719px){
+  .D-head{padding:12px 16px}.D-head h1{font-size:18px}.D-head .btn{margin-left:0;width:100%}
+  .D-table{padding:0 12px 24px}
+  .D-th{display:none}
+  .D-main{grid-template-columns:24px 1fr auto;grid-template-areas:"g ven pay" ". pr tot";gap:4px 8px;min-height:64px}
+  .D-main>.D-chk,.D-main>.D-dt,.D-main>.D-open{display:none}
+  .D-main>.g{grid-area:g}.D-main>.D-ven{grid-area:ven}.D-main>.D-pay{grid-area:pay;text-align:right}.D-main>.D-pr{grid-area:pr}.D-main>.D-tot{grid-area:tot}
+  .D-more{padding-left:0}.D-more>div{width:100%}
+  .D-panel{position:fixed;inset:0;z-index:30;height:auto;margin:0;grid-template-columns:1fr;grid-template-rows:42% minmax(0,1fr)}
+  .D-pf{border-left:0;border-top:1px solid var(--line)}.D-pfh .back{display:inline-block}
+}
+
+/* ---------- end, toast, help, prototype chrome ---------- */
+#end{display:grid;place-content:center;text-align:center;gap:12px;padding:24px;background:var(--bg)}
+#end h1{font:500 44px/48px var(--serif);margin:0}
+#end p{color:var(--ink-2);margin:0;font-size:15px}
+#end .endd{display:flex;gap:8px;justify-content:center;align-items:flex-start;font-size:14px;line-height:20px}
+#end .endd .g{margin-top:2px}
+#end h1:focus-visible{outline:0} /* R5-8: focus stays on the heading for screen readers; no ring */
+#end .endc{color:var(--ink);font-size:15px;cursor:default;justify-self:center} /* R5-9: inert, but read as the way on, not as disabled */
+#end .endq{color:var(--ink-2)}
+#toast{position:fixed;left:calc((100vw - clamp(360px,38vw,440px))/2);bottom:72px;transform:translateX(-50%);background:var(--ink);color:var(--bg);border-radius:8px;padding:8px 8px 8px 16px;display:flex;gap:12px;align-items:center;font-size:14px;z-index:70;box-shadow:var(--shadow);max-width:calc(100vw - clamp(360px,38vw,440px) - 24px)}
+#toast span{white-space:nowrap}
+@media (max-width:719px){#toast{left:50%;max-width:calc(100% - 24px);bottom:calc(168px + env(safe-area-inset-bottom))}}
+#toast button{background:none;border:1px solid currentColor;border-radius:6px;color:inherit;padding:4px 12px;cursor:pointer;font-weight:500;white-space:nowrap}
+#toast button:focus-visible{outline-color:var(--bg)}
+@media (max-width:719px){body.toast-on .B-pin{padding-top:70px}}
+#help{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:20px 24px;margin:auto;width:min(460px,calc(100% - 24px));max-height:80dvh;overflow:auto;overscroll-behavior:contain;box-shadow:var(--shadow)}
+#help::backdrop{background:rgba(20,20,19,.45)}
+#help .hh{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+#help h2{font:500 20px/26px var(--serif);margin:0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.lnk[disabled]{color:var(--ink-3);cursor:default;text-decoration:none}
+#help dl{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0;font-size:13px}
+#help dt{white-space:nowrap}#help dd{margin:0;color:var(--ink-2)}
+#help .sk{display:flex;gap:8px;align-items:center;margin-top:16px;font-size:13px;min-height:24px;cursor:pointer}
+.proto{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);z-index:90;display:flex;align-items:center;gap:2px;background:#16161a;color:#f3f1ea;border-radius:999px;padding:4px;box-shadow:0 6px 24px rgba(0,0,0,.35);font:500 13px/16px var(--sans);max-width:calc(100% - 12px)}
+.proto button{background:none;border:0;color:inherit;cursor:pointer;height:36px;min-width:36px;border-radius:999px;font-size:16px;padding:0 10px}
+.proto button:hover{background:rgba(255,255,255,.12)}
+.proto button.on{background:rgba(255,255,255,.2)}
+.proto .lab{padding:0 8px;min-width:150px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proto .sep{width:1px;height:20px;background:rgba(255,255,255,.25);margin:0 4px}
+.proto .tx{font-size:12px}
+@media (max-width:719px){.proto .lab{min-width:0;font-size:12px;padding:0 4px}}
+#statebox{position:fixed;right:12px;bottom:64px;z-index:89;width:min(340px,calc(100% - 24px));max-height:60dvh;overflow:auto;background:#16161a;color:#e9e6dc;border-radius:10px;padding:12px;font:12px/18px ui-monospace,Menlo,monospace;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+#statebox b{color:#fff}#statebox select{background:#2a2a30;color:#fff;border:1px solid #555;border-radius:4px;font:inherit;margin-left:6px}
+#statebox .k{color:#9aa}
+@media (max-width:719px),(pointer:coarse){
+  .mk{width:36px;height:44px}
+  .q{position:relative}.q::after{content:"";position:absolute;inset:-8px}
+  .seg button,.pages button,#toast button{min-height:44px}
+  .lnk{min-height:44px}
+  .acts{gap:0 24px;margin-top:0}
+}
+@media (hover:none) and (pointer:coarse){.kh{display:none}.cand .kh,.B-cn .kh{display:inline-block}}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+</style>
+</head>
+<body>
+<div id="app"><div id="vroot"></div><div id="end" hidden></div></div>
+<div id="toast" hidden></div>
+<dialog id="help" aria-label="Keyboard shortcuts"></dialog>
+<div id="live" class="sr" role="status" aria-live="polite"></div>
+<div id="statebox" hidden></div>
+<nav class="proto" aria-label="Prototype switcher">
+  <button id="pv" aria-label="Previous variant">&larr;</button>
+  <span class="lab" id="plab" aria-live="polite"></span>
+  <button id="pn" aria-label="Next variant">&rarr;</button>
+  <span class="sep"></span>
+  <button id="pt" aria-label="Toggle light and dark">&#9680;</button>
+  <button id="ps" class="tx" aria-label="Toggle state readout">state</button>
+</nav>
+<script>
+'use strict';
+/* =====================================================================
+   SHARED: helpers, money, dates
+   ===================================================================== */
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+const isPhone=()=>matchMedia('(max-width:719px)').matches;
+
+/* money: integer paise in, Intl en-IN out, exact two decimals */
+const inrFmt=new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',minimumFractionDigits:2});
+const inr=p=>inrFmt.formatToParts(p/100).map(x=>x.value).join('');
+function heroHTML(p){let i='',f='';for(const x of inrFmt.formatToParts(p/100)){if(x.type==='currency')continue;if(x.type==='decimal'||x.type==='fraction')f+=x.value;else i+=x.value}
+  return `<span class="cur">₹</span>${i}<span class="pa">${f}</span>`}
+const groupIN=s=>s.length<=3?s:s.slice(0,-3).replace(/\B(?=(\d{2})+(?!\d))/g,',')+','+s.slice(-3);
+const numStr=p=>groupIN(String(Math.trunc(p/100)))+'.'+String(p%100).padStart(2,'0');
+function parseMoney(t){t=String(t).replace(/[₹,\s]|Rs\.?|\/-$/gi,'');const m=/^(\d+)(?:\.(\d{1,2}))?$/.exec(t);return m?(+m[1])*100+(+((m[2]||'').padEnd(2,'0')||0)):null}
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const fmtD=iso=>{const[y,m,d]=iso.split('-').map(Number);return `${d} ${MON[m-1]} ${y}`};
+const fmtDs=iso=>{const[y,m,d]=iso.split('-').map(Number);return `${d} ${MON[m-1]}`};
+const dayDiff=(a,b)=>Math.abs((Date.parse(a)-Date.parse(b))/864e5);
+const p2=n=>String(n).padStart(2,'0');
+function dateForms(iso){const[y,m,d]=iso.split('-').map(Number);return [`${p2(d)}-${MON[m-1]}-${y}`,`${p2(d)}/${p2(m)}/${y}`,`${d} ${MONL[m-1]} ${y}`,`${d} ${MON[m-1]} ${y}`,`${p2(d)}/${p2(m)}/${String(y).slice(2)}`].map(s=>s.toLowerCase())}
+function parseDateText(t){t=t.trim();let m;
+  if(m=/^(\d{1,2})[-\/ ]([A-Za-z]{3,9})[-\/ ,]*(\d{4})$/.exec(t)){const i=MONL.findIndex(x=>x.toLowerCase().startsWith(m[2].slice(0,3).toLowerCase()));if(i>=0)return `${m[3]}-${p2(i+1)}-${p2(m[1])}`}
+  if(m=/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2}|\d{4})$/.exec(t)){const y=m[3].length===2?'20'+m[3]:m[3];return `${y}-${p2(m[2])}-${p2(m[1])}`}
+  if(m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(t))return t;return null}
+
+/* =====================================================================
+   SHARED: data (fictional bills, spec section 6)
+   ===================================================================== */
+const T=(id,t,x,y,s,o={})=>({id,t,x,y,s,...o});
+const BX=(id,t,box,s,o={})=>({id,t,box,s,...o});
+const RL=(x,y,w,o={})=>({rule:1,x,y,w,...o});
+const rowOf=(p,y,xs,cells,s,o)=>cells.map((t,i)=>T(p+i,t,xs[i],y,s,o));
+const xs1=[8,12,52,62,70,82];
+const items1=[
+  BX('vendor','TESSARACT COMPONENTS PVT LTD',[8,6,42,2.6],2.6,{b:1}),
+  T('addr','Plot 41, 3rd Cross, Example Industrial Layout, Bengaluru 560000',8,9.4,1.4),
+  T('gstinL','GSTIN:',8,11.4,1.4),BX('gstin','29AAKCT4821M1Z7',[15,11.3,13,1.6],1.4),
+  T('doc','TAX INVOICE',70,6,2.2,{b:1}),
+  T('noL','Invoice No.',62,11,1.4),BX('no','TC/26-27/01847',[76,10.9,12,1.6],1.4,{b:1}),
+  T('dateL','Invoice Date',62,13.4,1.4),BX('date','14-Nov-2026',[76,13.3,9.2,1.6],1.4),
+  T('poL','Order Ref.',62,15.8,1.4),T('po','PO-7731',76,15.8,1.4),
+  T('billto','Bill to: Makerspace, Northfield University, Bengaluru',8,19,1.4),
+  ...rowOf('th',25,xs1,['#','Description','HSN','Qty','Rate','Amount'],1.3,{b:1}),RL(8,27,84),
+  ...rowOf('r1',28.5,xs1,['1','TB6600 stepper driver','8504','4','1,249.50','4,998.00'],1.4),
+  ...rowOf('r2',31.5,xs1,['2','24V 15A switching power supply','8504','1','3,450.00','3,450.00'],1.4),
+  ...rowOf('r3',34.5,xs1,['3','NEMA 23 stepper motor 19 kg-cm','8501','3','2,450.50','7,351.50'],1.4),
+  RL(58,44.5,34),T('taxL','Taxable value',58,46,1.4),T('tax','15,799.50',82,46,1.4),
+  T('cgL','CGST 9%',58,48.6,1.4),T('cg','1,421.96',82,48.6,1.4),
+  T('sgL','SGST 9%',58,51.2,1.4),T('sg','1,421.96',82,51.2,1.4),
+  T('totL','Grand Total',58,56,1.9,{b:1}),BX('total','₹18,643.42',[79.5,55.7,12.5,2.2],1.9,{b:1}),
+  T('words','Rupees Eighteen Thousand Six Hundred Forty-Three and Forty-Two Paise Only',8,61,1.3,{i:1}),
+  T('sign','Authorised signatory',70,84,1.3),
+  T('foot','This is a computer-generated invoice.',8,93,1.2,{c:'#777'})
+];
+const xs2=[14,52,60,72];
+const items2=[
+  {paper:1,x:9,y:6,w:82,h:88,bg:'#F1ECDD'},
+  BX('vendor','MARIGOLD HARDWARE & TOOLS',[18,9.8,54,3.8],3.4,{b:1,c:'#7A1F1F'}),
+  T('addr','Shop 7, Old Market Road, Example Nagar, Bengaluru 560000',18,14.6,1.7),
+  T('doc','CASH / CREDIT BILL',36,19,2,{b:1,u:1}),
+  T('noL','Bill No.',14,25,2),BX('no','1482',[26,24.7,6.5,2.8],2.4,{b:1,c:'#B3261E'}),
+  T('dateL','Date',62,25,2),BX('date','06/11/2026',[70,24.8,12,2.4],2),
+  ...rowOf('th',32,xs2,['Particulars','Qty','Rate','Amount'],1.8,{b:1}),RL(14,35,72),
+  ...rowOf('r1',37,xs2,['M6 x 30 Allen bolts SS','50','6.00','300.00'],1.8),
+  ...rowOf('r2',41,xs2,['Hacksaw frame 12 in','2','280.00','560.00'],1.8),
+  ...rowOf('r3',45,xs2,['Epoxy adhesive 450 g','3','345.00','1,035.00'],1.8),
+  ...rowOf('r4',49,xs2,['Cable ties 200 mm (pkt)','3','155.00','465.00'],1.8),
+  RL(52,60,34),T('totL','TOTAL',52,62,2.6,{b:1}),BX('total','2,360.00',[69.5,61.6,13.5,3.2],2.6,{b:1}),
+  T('note','Goods once sold will not be taken back.',14,80,1.5),
+  T('for','For Marigold Hardware & Tools',52,87,1.6)
+];
+const H='#1B2A6B',items3=[
+  BX('vendor','PEEPAL TREE STATIONERS & XEROX',[12,6.8,59,3.4],3.2,{b:1,c:'#1F3A7A'}),
+  T('addr','Near Gate 2, College Road, Example Nagar, Bengaluru 560000',12,11.5,1.7,{c:'#1F3A7A'}),
+  T('noL','No.',12,18,2),T('dateL','Date',58,18,2),
+  T('date','13/11/26',68,16.8,4,{hand:1,c:H}),
+  ...[26,30,34,38,42,46,50,54,58,62,66].map(y=>RL(8,y,84,{c:'#D9D3C3'})),
+  T('h1','A3 sheets 300gsm x 40',14,27,3.6,{hand:1,c:H}),T('a1','600',78,27,3.6,{hand:1,c:H}),
+  T('h2','Lamination A3 x 10',14,35,3.6,{hand:1,c:H}),T('a2','350',78,35,3.6,{hand:1,c:H}),
+  T('h3','Spiral binding x 2',14,43,3.6,{hand:1,c:H}),T('a3','80',80,43,3.6,{hand:1,c:H}),
+  T('h4','Marker set',14,51,3.6,{hand:1,c:H}),T('a4','150',78,51,3.6,{hand:1,c:H}),
+  RL(56,68,36),T('totL','Total',56,70,4,{hand:1,c:H}),T('total','1180/-',72,70,4.4,{hand:1,c:H,ls:'-0.02em'}),
+  T('sign','~~~',62,86,4,{hand:1,c:H})
+];
+const orbItems=p=>{const two=p===2;return [
+  BX('vendor','ORBITLINE ROBOTICS SUPPLY LLP',[8,5.9,44,2.5],2.4,{b:1}),
+  T('addr','Unit 12, Example Tech Park, Bengaluru 560000',8,9,1.4),
+  T('gstinL','GSTIN',8,11.2,1.4),BX('gstin','29AAGFO7350Q1Z3',[15,11.1,13,1.6],1.4),
+  T('doc','Tax Invoice',74,6,2.2,{b:1}),
+  ...(two?[T('refL','Reference Number',62,10.6,1.4),BX('ref','8830015527',[78,10.5,8.6,1.6],1.4,{b:1})]:[]),
+  T('noL','Invoice #',62,13,1.4),BX('no',two?'ORS-2611-0419':'ORS-2611-0412',[78,12.9,11.2,1.6],1.4),
+  T('dateL','Dated',62,15.4,1.4),BX('date',two?'19 November 2026':'17 November 2026',[78,15.3,12.4,1.6],1.4),
+  T('billto','Bill to: Makerspace, Northfield University, Bengaluru',8,19,1.4),
+  ...rowOf('th',25,[8,60,70,82],['Item','Qty','Rate','Amount'],1.3,{b:1}),RL(8,27,84),
+  ...rowOf('r1',28.5,[8,60,70,82],two?['MG996R servo motor','6','450.00','2,700.00']:['Pico W microcontroller board','10','550.00','5,500.00'],1.4),
+  RL(58,40.5,34),T('cgL','CGST 9%',58,42,1.4),T('cg',two?'243.00':'495.00',82,42,1.4),
+  T('sgL','SGST 9%',58,44.6,1.4),T('sg',two?'243.00':'495.00',82,44.6,1.4),
+  T('totL','Total payable',58,50,1.9,{b:1}),BX('total',two?'₹3,186.00':'₹6,490.00',[80.5,49.7,11.5,2.2],1.9,{b:1}),
+  T('foot',`Page ${p} of 2`,8,93,1.2,{c:'#777'})]};
+const DB=[70,24.8,12,2.4];
+const orbFields=p=>({
+  total:{state:'located',value:p===1?649000:318600,box:[80.5,49.7,11.5,2.2],label:'totL'},
+  date:{state:'located',value:p===1?'2026-11-17':'2026-11-19',box:[78,15.3,12.4,1.6],label:'dateL'},
+  billNo:p===1?{state:'located',value:'ORS-2611-0412',box:[78,12.9,11.2,1.6],label:'noL'}
+   :{state:'check',value:'8830015527',box:null,label:null,hint:'The reader chose the Reference Number. The page also has an Invoice #.',
+     candidates:[{value:'ORS-2611-0419',text:'ORS-2611-0419',sub:'printed as “Invoice #”',pl:'Invoice #',box:[78,12.9,11.2,1.6],labelId:'noL'},
+                 {value:'8830015527',text:'8830015527',sub:'printed as “Reference Number” · the reader’s pick',pl:'Reference Number',box:[78,10.5,8.6,1.6],labelId:'refL'}]},
+  vendor:{state:'located',value:'Orbitline Robotics Supply LLP',box:[8,5.9,44,2.5],label:null},
+  gstin:{state:'located',value:'29AAGFO7350Q1Z3',box:[15,11.1,13,1.6],label:'gstinL'}});
+const BILLS=[
+ {ref:'B-431',expense:'E-213',title:'Stepper drivers and power supply for the CNC router',kind:'invoice',file:'tessaract-inv-01847.pdf',aspect:'210 / 297',bg:'#fff',items:items1,invoiceOf:null,
+  payment:{amountPaise:1864342,date:'2026-11-14',method:'UPI · Savings account'},sum:{lines:[499800,345000,735150],tax:[142196,142196]},
+  fields:{
+   total:{state:'located',value:1864342,box:[79.5,55.7,12.5,2.2],label:'totL'},
+   date:{state:'located',value:'2026-11-14',box:[76,13.3,9.2,1.6],label:'dateL'},
+   billNo:{state:'located',value:'TC/26-27/01847',box:[76,10.9,12,1.6],label:'noL'},
+   vendor:{state:'located',value:'Tessaract Components Pvt Ltd',box:[8,6,42,2.6],label:null},
+   gstin:{state:'located',value:'29AAKCT4821M1Z7',box:[15,11.3,13,1.6],label:'gstinL'}}},
+ {ref:'B-432',expense:'E-214',title:'Fasteners and hand tools',kind:'invoice',file:'IMG_20261106_1842.jpg',aspect:'3 / 4',bg:'#3B3833',rot:-1.2,items:items2,invoiceOf:null,
+  payment:{amountPaise:236000,date:'2026-11-06',method:'UPI · Savings account'},sum:{lines:[30000,56000,103500,46500],tax:[]},
+  fields:{
+   total:{state:'located',value:236000,box:[69.5,61.6,13.5,3.2],label:'totL'},
+   date:{state:'check',value:'2026-11-06',box:null,label:null,hint:'Printed 06/11/2026 · could be 6 Nov or 11 Jun',
+     candidates:[{value:'2026-11-06',text:'6 Nov 2026',sub:'day of the Payment',pl:'Date',box:DB,labelId:'dateL'},{value:'2026-06-11',text:'11 Jun 2026',sub:'month first',pl:'Date',box:DB,labelId:'dateL'}]},
+   billNo:{state:'located',value:'1482',box:[26,24.7,6.5,2.8],label:'noL'},
+   vendor:{state:'located',value:'Marigold Hardware & Tools',box:[18,9.8,54,3.8],label:null},
+   gstin:{state:'missing',value:null,box:null,label:null}}},
+ {ref:'B-433',expense:'E-215',title:'Poster printing for open day',kind:'informal',file:'scan-0031.pdf',aspect:'148 / 210',bg:'#FAF7EE',items:items3,invoiceOf:null,noText:true,printed:118000,
+  payment:{amountPaise:118000,date:'2026-11-13',method:'Cash'},sum:{lines:[60000,35000,8000,15000],tax:[]},
+  fields:{
+   total:{state:'unlocated',value:115000,box:null,label:null,reader:'1150/-'},
+   date:{state:'unlocated',value:'2026-11-13',box:null,label:null,reader:'13/11/26'},
+   billNo:{state:'missing',value:null,box:null,label:null},
+   vendor:{state:'located',value:'Peepal Tree Stationers & Xerox',box:[12,6.8,59,3.4],label:null},
+   gstin:{state:'missing',value:null,box:null,label:null}}},
+ {ref:'B-434',expense:'E-216',title:'Microcontrollers and servos for the robotics workshop',kind:'invoice',file:'orbitline-invoices-nov.pdf',aspect:'210 / 297',bg:'#fff',items:orbItems(1),
+  invoiceOf:{index:1,count:2,page:1,sumPaise:967600},payment:{amountPaise:967600,date:'2026-11-17',method:'Credit card'},sum:{lines:[550000],tax:[49500,49500]},fields:orbFields(1)},
+ {ref:'B-435',expense:'E-216',title:'Microcontrollers and servos for the robotics workshop',kind:'invoice',file:'orbitline-invoices-nov.pdf',aspect:'210 / 297',bg:'#fff',items:orbItems(2),
+  invoiceOf:{index:2,count:2,page:2,sumPaise:967600},payment:{amountPaise:967600,date:'2026-11-17',method:'Credit card'},sum:{lines:[270000],tax:[24300,24300]},fields:orbFields(2)}
+];
+const aspNum=b=>{const[w,h]=b.aspect.split('/').map(Number);return w/h};
+const itemR=(b,id)=>id?b.items.find(i=>i.id===id)?.r:null;
+
+/* =====================================================================
+   SHARED: paper renderer (HTML "pages"), crops, calibration
+   ===================================================================== */
+const Paper={
+  render(b){
+    const pg=document.createElement('div');pg.className='page';pg.style.aspectRatio=b.aspect;pg.style.backgroundColor=b.bg;
+    if(b.rot)pg.style.transform=`rotate(${b.rot}deg)`;
+    let h='';
+    for(const it of b.items){
+      if(it.paper){h+=`<div class="paper" style="left:${it.x}%;top:${it.y}%;width:${it.w}%;height:${it.h}%;background-color:${it.bg}"></div>`;continue}
+      if(it.rule){h+=`<div class="rule" style="left:${it.x}%;top:${it.y}%;width:${it.w}%;${it.c?'background:'+it.c:''}"></div>`;continue}
+      const st=[`font-size:${it.s}cqw`];
+      if(it.b)st.push('font-weight:700');if(it.i)st.push('font-style:italic');if(it.u)st.push('text-decoration:underline');
+      if(it.c)st.push('color:'+it.c);if(it.hand)st.push('font-family:Caveat,cursive;font-weight:500');if(it.ls)st.push('letter-spacing:'+it.ls);
+      if(it.box){const[x,y,w,hh]=it.box;st.push(`left:${x}%;top:${y}%;width:${w}%;height:${hh}%`)}else st.push(`left:${it.x}%;top:${it.y}%`);
+      h+=`<div class="it${it.box?' bw':''}" data-id="${it.id}"${it.hand?'':' data-ocr="1"'} style="${st.join(';')}">${esc(it.t)}</div>`;
+    }
+    pg.innerHTML=h+'<div class="ov"></div>';return pg;
+  },
+  /* one crop slot: crop of the page around a field's box + label, or the hatched placeholder */
+  slot(b,k,o={}){
+    const f=fld(b,k),h=o.h||44;let box=null,lab=null;
+    if(S.sim==='noPreview'&&b===cur())return Paper.hatch(b,h,'<b>Preview unavailable</b>',k,true);
+    if(f.candidates&&!f.confirmed){const c=f.candidates[o.cand||0];box=c.box;lab=c.labelId}
+    else if(f.box){box=f.box;lab=f.label}
+    else if(f.printedBox){box=f.printedBox;lab=f.label}
+    if(!box)return Paper.hatch(b,h,f.state==='missing'?'<b>Nothing read</b>':'<b>Not found on the page</b> · <u>Point to it</u>',k,b!==cur()||!!S.locating);
+    const fr=document.createElement('div');fr.className='crop';fr.style.height=h+'px';if(o.w)fr.style.width=o.w+'px';
+    const cin=document.createElement('div');cin.className='cin';cin.setAttribute('aria-hidden','true');fr.setAttribute('role','img');fr.setAttribute('aria-label',o.cand!=null&&f.candidates?`${NAMES[k]}, candidate ${f.candidates.map((c,i)=>c.box.join()===box.join()?i+1:0).filter(Boolean).join(' or ')}, as printed`:NAMES[k]+' as printed on the page');const pg=Paper.render(b);pg.style.width='1000px';pg.style.height=1000/aspNum(b)+'px';
+    let bl=boxesFor(b).filter(x=>x.key===k);if(o.cand!=null)bl=bl.filter(x=>x.rect.join()===box.join());
+    syncBoxes(pg.querySelector('.ov'),new Map(),bl,{});
+    cin.append(pg);fr.append(cin);
+    fr._c={b,box,lab:o.label===false?null:itemR(b,lab)};ROcrop.observe(fr);return fr;
+  },
+  hatch(b,h,html,k,noLoc){
+    const fr=document.createElement(noLoc?'div':'button');fr.className='crop hatch';fr.style.height=h+'px';
+    if(!noLoc){fr.dataset.act='locate';fr.dataset.key=k;fr.type='button'}
+    const th=document.createElement('div');th.className='thumb';th.setAttribute('aria-hidden','true');const pg=Paper.render(b);const ph=Math.min(44,h-8);pg.style.width=ph*aspNum(b)+'px';th.append(pg);
+    fr.append(th);const sp=document.createElement('span');sp.innerHTML=noLoc?html.replace(/ · .*/,''):h>=60?html+'<span class="sr"> ('+NAMEL[k]+')</span>':'<b>'+NAMES[k]+'</b> · <u>Point to it</u>';fr.append(sp);return fr;
+  }
+};
+function layoutCrop(fr){
+  const c=fr._c;if(!c)return;const fw=fr.clientWidth,fh=fr.clientHeight;if(!fw)return;
+  const b=c.b,asp=aspNum(b),PW=1000,PH=PW/asp;
+  let x0=c.box[0],y0=c.box[1],x1=c.box[0]+c.box[2],y1=c.box[1]+c.box[3];
+  const bh=c.box[3]*PH/100,pad=1.5*bh;
+  if(c.lab){x0=Math.min(x0,c.lab[0]);y0=Math.min(y0,c.lab[1]);x1=Math.max(x1,c.lab[0]+c.lab[2]);y1=Math.max(y1,c.lab[1]+c.lab[3])}
+  const L=x0*10-pad,R=x1*10+pad;
+  let cx=(x0+x1)/2*10,cy=(y0+y1)/2*PH/100;
+  if(b.rot){[cx,cy]=rotPt(cx,cy,PW,PH,b.rot)}
+  const T=y0*PH/100-pad*.6,B=y1*PH/100+pad*.6,k0=Math.min(fw/(R-L),fh/(B-T));
+  const k=Math.max(k0,Math.min(fw/PW,fh*.9/bh));let tx=fw/2-cx*k,ty=fh/2-cy*k;
+  if(fr.closest('.strip,.B-hero')){let rx=(c.box[0]+c.box[2])*10,ry=(c.box[1]+c.box[3]/2)*PH/100;if(b.rot)[rx,ry]=rotPt(rx,ry,PW,PH,b.rot);tx=fw-12-rx*k} /* D1: the printed box ends 12px inside the right edge, over the read total */
+  if(!b.rot){if(PW*k>=fw)tx=clamp(tx,fw-PW*k,0);if(PH*k>=fh)ty=clamp(ty,fh-PH*k,0)}
+  const cin=fr.firstElementChild;cin.style.transform=`translate(${tx}px,${ty}px) scale(${k})`;cin.style.setProperty('--zi',1/k);
+}
+const ROcrop=new ResizeObserver(es=>es.forEach(e=>layoutCrop(e.target)));
+function rotPt(x,y,W,H,deg){const a=deg*Math.PI/180,cx=W/2,cy=H/2,dx=x-cx,dy=y-cy;return[cx+dx*Math.cos(a)-dy*Math.sin(a),cy+dx*Math.sin(a)+dy*Math.cos(a)]}
+
+async function calibrate(){
+  const host=document.createElement('div');host.style.cssText='position:fixed;left:-99999px;top:0;width:1000px;opacity:0;pointer-events:none';document.body.append(host);
+  const pages=BILLS.map(b=>{const p=Paper.render(b);p.style.width='1000px';p.style.height=1000/aspNum(b)+'px';p.style.transform='';host.append(p);return p});
+  void host.offsetHeight; // force style so font loads start even in a background tab
+  await Promise.race([new Promise(r=>{requestAnimationFrame(r);setTimeout(r,60)}).then(()=>document.fonts.ready),new Promise(r=>setTimeout(r,2500))]);
+  await new Promise(r=>{requestAnimationFrame(r);setTimeout(r,60)});
+  pages.forEach((p,bi)=>{const b=BILLS[bi],ph=1000/aspNum(b);
+    for(const it of b.items){if(it.rule||it.paper)continue;const e=p.querySelector(`[data-id="${it.id}"]`);
+      if(it.box){let n=0;while(e.scrollWidth>e.clientWidth+1&&n++<30){it.s*=.96;e.style.fontSize=it.s+'cqw'}}
+      it.r=[e.offsetLeft/10,e.offsetTop/ph*100,e.offsetWidth/10,e.offsetHeight/ph*100]}});
+  host.remove();
+}
+
+/* =====================================================================
+   SHARED: store + state logic (every variant reads and writes this)
+   ===================================================================== */
+const KEYS=['total','date','billNo','vendor','gstin'];
+const NAMES={total:'Total',date:'Date',billNo:'Bill number',vendor:'Vendor',gstin:'GSTIN'};
+const NAMEL={total:'total',date:'date',billNo:'bill number',vendor:'vendor',gstin:'GSTIN'};
+const SL={located:'On the page',check:'Check this',unlocated:'Not found on page',missing:'Nothing read',conflict:'Differs from Payment',confirmed:'Confirmed'};
+let S={bills:[],idx:0,focus:null,hover:null,editing:null,locating:null,sim:null,zoomMode:'field',status:'',undo:[],done:false,viewOpen:false,nav:KEYS,startKey:null,primaryFn:null,toast:null,help:false};
+/* R3-8: every non-empty status is counted (repeats are announced); clearing the status clears the arrival line */
+{let st='';Object.defineProperty(S,'status',{get:()=>st,set:v=>{st=v;if(v)S.statusN=(S.statusN||0)+1;else S.arrive=''},enumerable:true})}
+const subs=[];const on=fn=>subs.push(fn);
+function emit(reason='change'){subs.forEach(fn=>fn(reason))}
+const cur=()=>S.bills[S.idx];
+const mates=b=>S.bills.filter(m=>m.expense===b.expense);
+const required=(b,k)=>k==='total'||k==='date'||k==='vendor'||(k==='billNo'&&b.kind==='invoice');
+/* field as the Claimant currently sees it (the "couldn't read" simulation blanks unconfirmed fields) */
+function fld(b,k){const f=b.fields[k];
+  if(S.sim==='failed'&&b===cur()&&!f.confirmed)return{state:'missing',value:null,box:null,label:null};return f}
+function payRel(b){const p=b.payment.amountPaise,v=fld(b,'total').value;if(v==null)return{k:'none',t:''};
+  const diff=a=>`≠ Payment ${inr(p)} · ${inr(Math.abs(p-a))} ${a<p?'less':'more'}`;
+  if(b.invoiceOf){const sum=mates(b).reduce((a,m)=>a+(m.fields.total.value||0),0);return sum===p?{k:'part',t:'part of Payment'}:{k:'diff',t:diff(sum)}}
+  return v===p?{k:'eq',t:`equals Payment ${fmtDs(b.payment.date)}, ${b.payment.method.split(' · ')[0]}`}:{k:'diff',t:diff(v)}}
+function conflict(b,k){const f=fld(b,k);if(f.value==null)return false;
+  if(k==='total')return payRel(b).k==='diff';if(k==='date')return dayDiff(f.value,b.payment.date)>10;return false}
+/* R5-3: on a reopened bill, fields the bill confirm ticked (byBill) look unconfirmed until it is confirmed again */
+const shownConf=(b,f)=>f.confirmed&&!(b.reopened&&f.byBill);
+function disp(b,k){const f=fld(b,k);return shownConf(b,f)?'confirmed':conflict(b,k)?'conflict':f.state}
+/* R6-1: an open choice (page and reader disagree) is a stop, even on a confirmed field, so no one-key confirm passes it */
+function isStop(b,k){const f=fld(b,k);if(f.pending)return true;if(f.confirmed)return false;const d=disp(b,k);return d==='check'||d==='unlocated'||d==='conflict'||(d==='missing'&&required(b,k))}
+const stops=b=>S.sim==='reading'&&b===cur()?[]:KEYS.filter(k=>isStop(b,k));
+const isClean=b=>!b.confirmed&&stops(b).length===0;
+function valueText(b,k){const f=fld(b,k);if(f.value==null)return shownConf(b,f)&&f.absent?'Not on the bill':null;
+  return k==='total'?inr(f.value):k==='date'?fmtD(f.value):f.value}
+function stateText(b,k){const f=fld(b,k),ds=disp(b,k);
+  if(ds==='unlocated'&&f.userBox)return 'Marked by you';
+  if(ds==='confirmed'){const p=['Confirmed'];if(f.userBox)p.push('marked by you');else if(f.placed)p.push('placed by you');if(f.differs)p.push('differs from the document');if(f.absent)p.push('not on the bill');
+    if(k==='total'){if(payRel(b).k==='eq')p.push('equals Payment')}
+    if(k==='date'&&f.value&&dayDiff(f.value,b.payment.date)>10)p.push(`${Math.round(dayDiff(f.value,b.payment.date))} days from Payment`);
+    return p.join(' · ')}
+  if(ds==='conflict')return 'Differs from Payment · '+(f.userBox?'marked by you':f.state==='unlocated'?'not found on page':f.state==='missing'?'nothing read':'on the page');
+  return SL[ds]}
+function evText(b){const f=fld(b,'total'),ds=disp(b,'total'),r=payRel(b);
+  if(S.sim==='failed'&&!b.fields.total.confirmed)return 'Couldn’t read this bill. Type the total; the page is on the left.';
+  if(S.sim==='reading'&&!f.confirmed)return 'Reading the bill…';
+  if(ds==='confirmed')return stateText(b,'total');
+  if(ds==='conflict')return [r.t,f.userBox?'marked by you':f.state==='unlocated'?'not found on page':'on the page'].join(' · ');
+  if(ds==='missing')return 'Nothing read';
+  return [SL[ds],r.k==='eq'||r.k==='part'?r.t:''].filter(Boolean).join(' · ')}
+const worst=b=>{if(b.confirmed)return'confirmed';const o=['conflict','check','unlocated','missing','located'];const ds=KEYS.filter(k=>!b.fields[k].confirmed&&(b.fields[k].state!=='missing'||required(b,k))).map(k=>disp(b,k));
+  return o.find(x=>ds.includes(x))||'located'};
+
+/* overlay boxes, spec 2.4: only located, check, confirmed-with-location, or placed by you */
+function boxesFor(b){const out=[];
+  for(const k of KEYS){const f=fld(b,k),ds=disp(b,k);
+    if(shownConf(b,f)){if(f.box){const you=f.placed||f.userBox;out.push({id:k,key:k,kind:you?'you':'conf',rect:f.box,tag:you?'you':'tick',aria:`${NAMES[k]}, ${valueText(b,k)}, confirmed`})}
+      else if(f.printedBox)out.push({id:k,key:k,kind:'conf',rect:f.printedBox,tag:'',aria:`${NAMES[k]} as printed on the page`});continue}
+    if(f.state==='check'&&f.candidates){const g=new Map();
+      f.candidates.forEach((c,i)=>{const rk=c.box.join();if(!g.has(rk))g.set(rk,{rect:c.box,n:[],pl:c.pl});g.get(rk).n.push(i+1)});
+      [...g.values()].forEach((x,i)=>out.push({id:`${k}:c${i}`,key:k,kind:'cd',rect:x.rect,tag:x.n.join('/'),aria:`${NAMES[k]}, candidate ${x.n.join(' or ')}, check this`}));continue}
+    if(f.state==='located'&&f.box)out.push({id:k,key:k,kind:k==='total'?'total':'other',bad:ds==='conflict',rect:f.box,tag:k==='total'?'Total':NAMES[k],aria:`${NAMES[k]}, ${valueText(b,k)}, ${stateText(b,k).toLowerCase()}`});
+    else if(f.userBox&&f.box)out.push({id:k,key:k,kind:'you',rect:f.box,tag:'you',aria:`${NAMES[k]}, marked by you`})}
+  return out}
+const PIN='<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><path d="M5 .5a3 3 0 0 1 3 3c0 2-3 6-3 6s-3-4-3-6a3 3 0 0 1 3-3z" fill="currentColor"/></svg>';
+function syncBoxes(ov,map,list,o){
+  const seen=new Set(),hasF=list.some(x=>x.key===o.focus);
+  for(const x of list){seen.add(x.id);let e=map.get(x.id);
+    if(!e){e=document.createElement('div');e.tabIndex=-1;if(o.onBox){e.setAttribute('role','button');e.addEventListener('click',ev=>{ev.stopPropagation();o.onBox(e.dataset.k)});
+        e.addEventListener('mouseenter',()=>setHover(e.dataset.k));e.addEventListener('mouseleave',()=>setHover(null));e.addEventListener('focus',()=>o.onBox(e.dataset.k))}
+      e.innerHTML='<span class="tag"></span>';ov.append(e);map.set(x.id,e)}
+    e.dataset.k=x.key;e.className=`bx ${x.kind}${x.bad?' bad':''}`;
+    const[a,bb,w,h]=x.rect;e.style.cssText=`left:calc(${a}% - 3px*var(--zi,1));top:calc(${bb}% - 3px*var(--zi,1));width:calc(${w}% + 6px*var(--zi,1));height:calc(${h}% + 6px*var(--zi,1))`;
+    e.setAttribute('aria-label',x.aria);
+    const t=e.firstChild;const th=x.tag==='tick'?'✓':x.tag==='you'?PIN+' you':esc(x.tag);if(t.dataset.t!==th){t.dataset.t=th;t.innerHTML=th}
+    const foc=o.focus===x.key||o.hover===x.key;e.classList.toggle('f',!!foc);e.classList.toggle('dim',hasF&&!foc&&o.dim!==false)}
+  for(const[id,e]of map)if(!seen.has(id)){e.remove();map.delete(id)}
+}
+
+function snapshot(b){return{ref:b.ref,f:JSON.stringify(b.fields),c:!!b.confirmed,p:b.pre||null,r:!!b.reopened}}
+/* D3(5): each step carries a label so Cmd+Z can name what it undid */
+function pushUndo(bs,label){S.undo.push({label,snaps:bs.map(snapshot)});if(S.undo.length>50)S.undo.shift()}
+function doUndo(){const e=S.undo.pop();if(!e){S.status='Nothing to undo';emit('change');return}
+  let first=-1;for(const s of e.snaps){const i=S.bills.findIndex(x=>x.ref===s.ref);const b=S.bills[i];b.fields=JSON.parse(s.f);b.confirmed=s.c;b.pre=s.p;b.reopened=s.r;if(first<0)first=i}
+  S.done=false;S.toast=null;openBill(first);S.status=`Undone: ${e.label}`;emit('change')}
+const defaultStart=b=>b.confirmed?'confirm':(stops(b)[0]||'confirm');
+const arrival=b=>{const n=stops(b).length;return `Bill ${b.ref}, ${n?n+' to check':b.confirmed?'confirmed':'ready to confirm'}`};
+function openBill(i,quiet){{const o=cur(),n=clamp(i,0,S.bills.length-1);if(o?.confirmed&&n!==S.idx)KEYS.forEach(k=>o.fields[k].pending=null)} /* R6-1: no confirmed bill keeps an open choice */
+  S.idx=clamp(i,0,S.bills.length-1);const b=cur();{const u=new URL(location.href);u.searchParams.set('bill',b.ref);history.replaceState(null,'',u)}S.sim=null;S.editing=null;S.locating=null;S.zoomMode='field';S.status='';S.viewOpen=false;if(S.toast?.ref===b.ref)S.toast=null; /* R5-5: one Undo per bill */
+  S.focus=S.startKey?S.startKey(b):defaultStart(b);S.arrive=arrival(b);if(!quiet)emit('bill')}
+function setFocus(k){if(S.focus===k)return;S.locating=null;if(S.editing&&S.editing!==k)S.editing=null;S.focus=k;S.zoomMode='field';S.status='';emit('focus')}
+function setHover(k){if(S.hover===k)return;S.hover=k;emit('hover')}
+function blockedReason(b){if(S.sim==='noPreview'&&b===cur())return 'You can’t confirm a bill you can’t see.';if(S.sim==='reading'&&b===cur())return 'Reading the bill…';return ''}
+function confirmField(b,k,choice){const f=b.fields[k];S.status='';pushUndo([b],`${NAMEL[k]} confirm, ${b.ref}`);
+  if(f.candidates&&!f.confirmed){const c=f.candidates[(choice||1)-1];if(!c)return;f.value=c.value;f.box=c.box;f.label=c.labelId;f.state='located';f.candidates=null;f.confirmed=true;return}
+  if(f.pending){const p=f.pending;if(choice===2){f.pending=null}else{f.value=p.value;f.box=p.rect;f.label=null;f.userBox=false;f.placed=true;f.state='located';f.pending=null;reopen(b,k)}f.confirmed=true;return}
+  f.confirmed=true}
+function confirmBill(b){const why=blockedReason(b);if(why){S.status=why;emit('change');return}
+  const st=stops(b);if(st.length){S.focus=st[0];S.zoomMode='field';S.status=`${st.length} to check first`;emit('focus');return}
+  pushUndo([b],`bill confirm, ${b.ref}`);b.pre=JSON.stringify(b.fields);for(const k of KEYS){const f=b.fields[k];if(!f.confirmed){f.confirmed=true;f.byBill=true;if(f.state==='missing'||f.value==null)f.absent=true}}
+  b.confirmed=true;b.reopened=false;S.toast={text:`Confirmed ${b.ref}`,t:Date.now(),ref:b.ref};advance()}
+/* R3-Q3: a reopened confirmed bill can be put back to review (until it is on a submitted Claim; the prototype has no Claims) */
+/* D3(4): the toast's Undo names its bill (i), so a later step on another bill is never the one undone */
+function undoConfirm(i){if(i!=null){if(!S.bills[i]?.confirmed)return;S.done=false;openBill(i,true)}const b=cur();if(!b.confirmed)return;pushUndo([b],`reopen, ${b.ref}`);if(b.pre)b.fields=JSON.parse(b.pre);b.pre=null;b.confirmed=false;b.reopened=false;S.toast=null;
+  S.focus=defaultStart(b);S.zoomMode='field';S.status='Confirm undone';if(i!=null){S.arrive=arrival(b);emit('bill')}else emit('change')}
+function advance(){const n=S.bills.length;let nx=-1;for(let j=1;j<=n;j++){const i=(S.idx+j)%n;if(!S.bills[i].confirmed){nx=i;break}}
+  if(nx<0){S.done=true;S.status='';emit('bill')}else openBill(nx)}
+function doPrimary(){if(S.locating){endLocate();return}const b=cur();
+  if(b.confirmed&&!stops(b).length){advance();return}
+  const why=blockedReason(b);if(why){S.status=why;emit('change');return}
+  const k=S.focus;
+  if(k&&k!=='confirm'&&isStop(b,k)){const fl=fld(b,k);
+    if(fl.state==='missing'){S.editing=k;emit('edit');return}
+    confirmField(b,k,fl.candidates||fl.pending?1:0);const nx=stops(b)[0];S.focus=nx||'confirm';S.zoomMode='field';emit('change');return}
+  confirmBill(b)}
+function primaryInfo(b){
+  if(S.locating)return{label:'Cancel pointing'};
+  if(S.done)return{label:'All bills reviewed',disabled:true};
+  if(b.confirmed&&!stops(b).length)return{label:'Next bill',disabled:false};
+  const why=blockedReason(b);if(why)return{label:S.sim==='reading'?'Reading the bill…':'Confirm bill',disabled:true,hint:why};
+  const k=S.focus,f=k&&k!=='confirm'?fld(b,k):null;
+  if(f&&isStop(b,k)){
+    if(f.state==='missing')return{label:`Type the ${NAMEL[k]}`};
+    if(f.candidates)return{label:`Take 1 · ${f.candidates[0].text}`};
+    if(f.pending)return{label:`Use page value · ${f.pending.text}`};
+    return{label:`Confirm ${NAMEL[k]} · ${valueText(b,k)}`}}
+  const st=stops(b);
+  if(st.length){return{label:`Check ${NAMEL[st[0]]}`,hint:`${st.length} to check first`}}
+  return{label:`Confirm ${b.reopened?'again':'bill'} · ${inr(fld(b,'total').value)}${payRel(b).k==='diff'?' · ≠ Payment':''}`}}
+function startEdit(k){if(S.sim==='reading'&&k!=='total'){return}S.editing=k;S.focus=k;S.zoomMode='field';emit('edit')}
+function cancelEdit(){S.editing=null;S.status='';emit('change')}
+function findOnPage(b,k,v){
+  for(const it of b.items){if(it.rule||it.paper||it.hand||!it.r||!it.t)continue;
+    let ok=false;
+    if(k==='total')ok=/[.₹]|\/-|Rs/.test(it.t)&&parseMoney(it.t)===v;else if(k==='date')ok=dateForms(v).includes(it.t.trim().toLowerCase());else ok=it.t.trim().toLowerCase()===String(v).toLowerCase();
+    if(ok)return it.r}
+  return null}
+/* D3 Q2: changing a value on a confirmed bill takes it back to review; b.pre (the latest confirm's snapshot) is kept for Undo */
+/* R5-1: every path that sets a field (typing, pointing, a choice) comes through here; that field counts as confirmed again */
+function reopen(b,k){b.fields[k].byBill=false;if(!b.confirmed)return;b.confirmed=false;b.reopened=true;if(S.toast?.ref===b.ref)S.toast=null;S.status='Edited after confirming · confirm again'}
+function commitEdit(k,raw){const b=cur(),f=b.fields[k];let v;S.status='';
+  if(k==='total'){v=parseMoney(raw);if(v==null){S.status='Type an amount like 1,180.00';emit('edit');return}}
+  else if(k==='date'){if(!/^\d{4}-\d{2}-\d{2}$/.test(raw)){S.status='Pick a date';emit('edit');return}v=raw}
+  else{v=String(raw).trim();if(!v){cancelEdit();return}}
+  pushUndo([b],`${NAMEL[k]} edit, ${b.ref}`);f.value=v;f.pending=null;f.candidates=null;
+  const r=findOnPage(b,k,v);
+  if(r){f.box=r;f.state='located';f.userBox=false;f.placed=false;f.differs=false;f.printedBox=null}
+  else{f.differs=!(b.noText||f.userBox);if(!f.userBox){if(f.box&&f.state==='located')f.printedBox=f.box;f.box=null}f.state=f.state==='missing'?'unlocated':f.state==='located'||f.state==='check'?'unlocated':f.state}
+  f.absent=false;f.confirmed=true;S.editing=null;
+  const nx=stops(b)[0];S.focus=nx||'confirm';S.status='';reopen(b,k);S.zoomMode='field';emit('change')}
+function notOnBill(k){const b=cur(),f=b.fields[k];if(fld(b,k).state!=='missing'||required(b,k))return;S.status='';pushUndo([b],`${NAMEL[k]} not on the bill, ${b.ref}`);f.confirmed=true;f.absent=true;f.state='missing';f.value=null;
+  const nx=stops(b)[0];S.focus=nx||'confirm';emit('change')}
+function pick(k,n){const b=cur(),f=b.fields[k];if(!f)return;S.status='';
+  if((f.candidates&&!f.confirmed&&f.candidates[n-1])||(f.pending&&(n===1||n===2))){confirmField(b,k,n);const nx=stops(b)[0];S.focus=nx||'confirm';S.zoomMode='field';emit('change')}}
+function startLocate(k){if(S.sim==='noPreview')return;S.locating=k;S.focus=k;S.editing=null;S.zoomMode='page';emit('locate')}
+function endLocate(){if(S.locating){S.locating=null;emit('locate')}}
+/* pointing: text from the OCR layer (or just a region when there is no text layer) */
+function finishLocate(k,text,rect){const b=cur(),f=b.fields[k];S.locating=null;
+  if(text==null){pushUndo([b],`${NAMEL[k]} mark, ${b.ref}`);f.userBox=true;f.box=rect;S.status='Marked on the page. The value stays as read.';reopen(b,k);S.zoomMode='field';emit('change');return}
+  let v=null;if(k==='total')v=parseMoney(text);else if(k==='date')v=parseDateText(text);
+  else if(k==='gstin'){const t=text.replace(/\s/g,'').toUpperCase();v=/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/.test(t)?t:null} /* R6-4 */
+  else v=text.trim()||null;
+  if(v==null){S.status=k==='total'?'That isn’t an amount':k==='date'?'That isn’t a date':k==='gstin'?'That isn’t a GSTIN':'Nothing there';emit('change');return}
+  pushUndo([b],`${NAMEL[k]} from the page, ${b.ref}`);const same=f.value!=null&&String(f.value).toLowerCase()===String(v).toLowerCase();
+  if(same||f.value==null){const was=b.confirmed;f.value=v;f.box=rect;f.label=null;f.userBox=false;f.placed=true;f.state='located';f.confirmed=true;f.candidates=null;f.pending=null;
+    const nx=stops(b)[0];S.focus=nx||'confirm';reopen(b,k);S.status=`${NAMES[k]} set from the page: ${valueText(b,k)}${was?' · confirm again':''}`} /* R6-3: say what was taken */
+  else{f.pending={value:v,text:k==='total'?inr(v):k==='date'?fmtD(v):v,rect,readerText:valueText(b,k)};S.focus=k;S.status='Page and reader disagree. Nothing was overwritten.'}
+  S.zoomMode='field';emit('change')}
+function go(d){const i=clamp(S.idx+d,0,S.bills.length-1);if(i===S.idx&&!S.done)return;S.done=false;openBill(i)}
+function skip(){const b=cur();const n=S.bills.length;for(let j=1;j<n;j++){const i=(S.idx+j)%n;if(!S.bills[i].confirmed){S.done=false;openBill(i);S.status=`Skipped ${b.ref} for later`;emit('change');return}}}
+function bulkTargets(sel){const c=S.bills.map((b,i)=>[b,i]).filter(([b])=>isClean(b));const t=sel&&sel.size?c.filter(([,i])=>sel.has(i)):c;return t.slice(0,25).map(x=>x[0])}
+function bulkConfirm(bs){pushUndo(bs,`confirm ${bs.length} bills`);for(const b of bs){b.pre=JSON.stringify(b.fields);for(const k of KEYS){const f=b.fields[k];if(!f.confirmed){f.confirmed=true;f.byBill=true;if(f.value==null)f.absent=true}}b.confirmed=true}
+  S.toast={text:`Confirmed ${bs.length} bills`,t:Date.now()};if(S.bills.every(b=>b.confirmed)){S.done=true;emit('bill')}else{const i=S.bills.findIndex(b=>!b.confirmed);openBill(i)}}
+
+/* self-check, spec 6.7 */
+function selfCheck(){
+  for(const b of BILLS){const lines=b.sum.lines.reduce((a,x)=>a+x,0)+b.sum.tax.reduce((a,x)=>a+x,0);
+    console.assert(lines===(b.printed??b.fields.total.value),`${b.ref}: lines+tax ${lines} != printed total ${b.printed??b.fields.total.value}`);
+    for(const k of KEYS){const f=b.fields[k];
+      if(f.state==='located')console.assert(!!f.box,`${b.ref}.${k} located without box`);
+      if(f.state==='unlocated'||f.state==='missing')console.assert(!f.box,`${b.ref}.${k} ${f.state} with a box`)}}
+  const o=BILLS.filter(b=>b.invoiceOf);console.assert(o.reduce((a,b)=>a+b.fields.total.value,0)===o[0].payment.amountPaise,'Orbitline totals != Payment');
+  console.assert(BILLS[0].payment.amountPaise===BILLS[0].fields.total.value&&BILLS[1].payment.amountPaise===BILLS[1].fields.total.value,'single-bill totals != Payment');
+}
+
+/* =====================================================================
+   SHARED: viewer (page + camera + boxes + leader anchors + locate mode)
+   ===================================================================== */
+class Viewer{
+  constructor(host,o={}){this.host=host;this.o=o;this.c={s:1,tx:0,ty:0};this.map=new Map();this.ptrs=new Map();
+    host.classList.add('vw');if(o.slide)host.classList.add('slide');
+    host.innerHTML='<div class="cam"></div><div class="vw-chip" hidden></div><div class="vw-cap" hidden></div><div class="vw-ph" hidden></div><div class="pages" hidden></div>';this.pgEl=host.children[4];
+    this.cam=host.children[0];this.cam.addEventListener('transitionend',e=>{if(e.propertyName==='transform'&&this.o.onCamera)this.o.onCamera()});this.chip=host.children[1];this.cap=host.children[2];this.ph=host.children[3];
+    host.addEventListener('wheel',e=>{e.preventDefault();this.zoomAt(e.clientX,e.clientY,Math.exp(-e.deltaY*.0015))},{passive:false});
+    host.addEventListener('pointerdown',e=>this.down(e));
+    /* R3-Q2a: while pointing on a page with a text layer, Tab walks the printed words and Enter or Space takes one */
+    host.addEventListener('keydown',e=>{const w=e.target.closest?.('.it[data-ocr]');if(!w||!S.locating||(e.key!=='Enter'&&e.key!==' '))return;e.preventDefault();e.stopPropagation();
+      finishLocate(S.locating,this.bill.items.find(i=>i.id===w.dataset.id).t,itemR(this.bill,w.dataset.id))});
+    host.addEventListener('focusin',e=>{const w=e.target.closest?.('.it[data-ocr]');if(!w)return;host.scrollTop=host.scrollLeft=0;
+      const hr=host.getBoundingClientRect(),wr=w.getBoundingClientRect();if(wr.left<hr.left||wr.right>hr.right||wr.top<hr.top||wr.bottom>hr.bottom){this.c.tx+=hr.left+hr.width/2-(wr.left+wr.width/2);this.c.ty+=hr.top+hr.height/2-(wr.top+wr.height/2);this.apply(false)}});
+    /* R5-11: focus leaving the pane by key ends pointing, said aloud; Tab keeps its destination */
+    host.addEventListener('focusout',e=>{const was=S.locating;if(!was||viaPtr||host.contains(e.relatedTarget))return;
+      setTimeout(()=>{const ae=document.activeElement;if(host.contains(ae))return;
+        const sel=ae&&ae!==document.body&&ae.dataset?.act?`[data-act="${ae.dataset.act}"]`+(ae.dataset.i!=null?`[data-i="${ae.dataset.i}"]`:''):null;
+        if(S.locating){S.locating=null;S.zoomMode='field';emit('locate')}
+        say('Pointing ended');if(sel&&!document.activeElement?.matches(sel))$$(sel).find(x=>x.getClientRects().length&&!x.closest('[inert]'))?.focus()},0)});
+    host._v=this;this.mv=e=>this.move(e);this.up=e=>this.release(e);
+    this.ro=new ResizeObserver(()=>this.layout());this.ro.observe(host);this.ro.observe(this.chip);
+  }
+  destroy(){this.ro.disconnect();removeEventListener('pointermove',this.mv);removeEventListener('pointerup',this.up);removeEventListener('pointercancel',this.up)}
+  show(b){this.bill=b;this.cam.innerHTML='';this.corner=null;this.cornerEl=null;this._kw=undefined;this.page=Paper.render(b);this.ov=this.page.querySelector('.ov');
+    this.ov.insertAdjacentHTML('afterbegin','<svg class="scrim" viewBox="0 0 100 100" preserveAspectRatio="none" style="opacity:0"><path fill-rule="evenodd" d=""/></svg>');
+    this.scrim=this.ov.firstChild;this.cam.append(this.page);this.map.clear();this.layout()}
+  enter(){this.cam.classList.remove('enter');void this.cam.offsetWidth;this.cam.classList.add('enter')}
+  layout(){const ch=this.chip.hidden?0:this.chip.offsetHeight,hw=this.host.clientWidth,hh=this.host.clientHeight-ch;if(!hw||hh<=0||!this.page)return;this.pgEl.style.bottom=(ch+12)+'px';
+    const asp=aspNum(this.bill),pad=this.o.pad??16;let w=Math.max(50,Math.min(hw-2*pad,(hh-2*pad)*asp));
+    this.page.style.width=w+'px';this.page.style.height=w/asp+'px';this.pw=w;this.ph_=w/asp;this.hw=hw;this.hh=hh;this.go(false)}
+  apply(anim){const s=this.c.s;if(this.pw){this.c.tx=clamp(this.c.tx,this.hw*.25-this.pw*s,this.hw*.75);this.c.ty=clamp(this.c.ty,this.hh*.25-this.ph_*s,this.hh*.75)}const{tx,ty}=this.c;this.cam.style.transition=anim&&!reduced()?`transform ${this.o.ms||240}ms cubic-bezier(.2,.8,.2,1)`:'none';
+    this.cam.style.transform=`translate(${tx}px,${ty}px) scale(${s})`;this.cam.style.setProperty('--zi',1/s);
+    if(this.o.onCamera&&!(anim&&!reduced())){clearTimeout(this._t);this._t=setTimeout(this.o.onCamera,30)}}
+  fit(anim=true){if(!this.pw)return;this.c={s:1,tx:(this.hw-this.pw)/2,ty:(this.hh-this.ph_)/2};this.apply(anim)}
+  go(anim=true){if(S.locating&&this.c.s>1)return; /* R3-12: pointing keeps a zoomed-in page */
+    if(S.zoomMode==='field'&&S.focus&&S.focus!=='confirm'&&!S.locating)this.focusKey(S.focus,anim);else this.fit(anim)}
+  rectsFor(key){const b=this.bill,f=fld(b,key);if(!f)return null;let out=[];
+    if(f.candidates&&!f.confirmed)f.candidates.forEach(c=>out.push({r:c.box,l:itemR(b,c.labelId)}));
+    else if(f.box)out.push({r:f.box,l:itemR(b,f.label)});return out.length?out:null}
+  focusKey(key,anim=true){if(!this.pw)return;const rs=this.rectsFor(key);if(!rs)return this.fit(anim);
+    const px=r=>[r[0]/100*this.pw,r[1]/100*this.ph_,r[2]/100*this.pw,r[3]/100*this.ph_];
+    let bx0=1e9,by0=1e9,bx1=-1e9,by1=-1e9,ux0,uy0,ux1,uy1;
+    for(const{r,l}of rs){const a=px(r);bx0=Math.min(bx0,a[0]);by0=Math.min(by0,a[1]);bx1=Math.max(bx1,a[0]+a[2]);by1=Math.max(by1,a[1]+a[3])}
+    ux0=bx0;uy0=by0;ux1=bx1;uy1=by1;
+    for(const{l}of rs)if(l){const a=px(l);ux0=Math.min(ux0,a[0]);uy0=Math.min(uy0,a[1]);ux1=Math.max(ux1,a[0]+a[2]);uy1=Math.max(uy1,a[1]+a[3])}
+    let cx=(ux0+ux1)/2,cy=(uy0+uy1)/2;if(this.bill.rot)[cx,cy]=rotPt(cx,cy,this.pw,this.ph_,this.bill.rot);
+    const bw=bx1-bx0,uw=ux1-ux0,uh=Math.max(uy1-uy0,1);
+    const s=clamp(Math.min(.35*this.hw/bw,.85*this.hw/uw,.8*this.hh/uh),1,3);
+    this.c={s,tx:this.hw/2-s*cx,ty:this.hh*(.5+(this.o.yBias||0))-s*cy};this.apply(anim)}
+  zoomAt(x,y,f){const r=this.host.getBoundingClientRect(),px=x-r.left,py=y-r.top,s2=clamp(this.c.s*f,1,6),k=s2/this.c.s;
+    this.c={s:s2,tx:px-(px-this.c.tx)*k,ty:py-(py-this.c.ty)*k};this.apply(false)}
+  pct(e){const r=this.page.getBoundingClientRect();return[(e.clientX-r.left)/r.width*100,(e.clientY-r.top)/r.height*100]}
+  down(e){if(!this.page||e.target.closest('.bx')||e.target.closest('.pages,.vw-chip'))return;
+    if(e.button!==undefined&&e.button!==0)return;
+    if(e.pointerType==='touch'&&this.c.s===1&&!S.locating&&this.host.classList.contains('B-page'))return; /* R3-13: let the column scroll */
+    this.ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(this.drag){this.drag.pinch=true;if(this.draft){this.draft.remove();this.draft=null}return} /* R3-12: a second finger is a pinch */
+    this.drag={x:e.clientX,y:e.clientY,moved:false,word:e.target.closest('.it[data-ocr]'),p0:S.locating?this.pct(e):null,s0:{...this.c}};
+    addEventListener('pointermove',this.mv);addEventListener('pointerup',this.up);addEventListener('pointercancel',this.up)}
+  move(e){const d=this.drag;if(!d)return;const p=this.ptrs.get(e.pointerId);if(!p)return;
+    if(Math.hypot(e.clientX-d.x,e.clientY-d.y)>4)d.moved=true;
+    if(this.ptrs.size!==2&&S.locating&&!d.pinch){if(d.moved){const[x,y]=this.pct(e),[a,b]=d.p0;if(!this.draft){this.draft=document.createElement('div');this.draft.className='bx you vw-draft';this.ov.append(this.draft)}
+        this.draft.style.cssText=`left:${Math.min(a,x)}%;top:${Math.min(b,y)}%;width:${Math.abs(x-a)}%;height:${Math.abs(y-b)}%`}return}
+    if(this.ptrs.size===2){if(this.draft){this.draft.remove();this.draft=null}const o=[...this.ptrs.values()];const q=[...this.ptrs.keys()].find(i=>i!==e.pointerId),op=this.ptrs.get(q);
+      const d0=Math.hypot(o[0].x-o[1].x,o[0].y-o[1].y);this.ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      const d1=Math.hypot(this.ptrs.get(e.pointerId).x-op.x,this.ptrs.get(e.pointerId).y-op.y);if(d0>0)this.zoomAt((e.clientX+op.x)/2,(e.clientY+op.y)/2,d1/d0);return}
+    this.c.tx+=e.clientX-p.x;this.c.ty+=e.clientY-p.y;this.ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});if(d.moved)this.apply(false)}
+  release(e){const d=this.drag;this.ptrs.delete(e.pointerId);if(this.ptrs.size)return;
+    removeEventListener('pointermove',this.mv);removeEventListener('pointerup',this.up);removeEventListener('pointercancel',this.up);this.drag=null;if(!d)return;
+    if(this.draft){this.draft.remove();this.draft=null}
+    if(S.locating&&!d.pinch&&e.type!=='pointercancel'){const k=S.locating;
+      /* R3-Q2b: two clicks or taps mark a region, first corner then the opposite one */
+      if(!d.moved&&this.corner){const[a,b]=this.corner,[x,y]=this.pct(e);if(Math.abs(x-a)<.5||Math.abs(y-b)<.3){this.setCorner([x,y]);return}this.clearCorner();this.region(k,[Math.min(a,x),Math.min(b,y),Math.abs(x-a),Math.abs(y-b)]);return}
+      if(!d.moved&&d.word){const r=itemR(this.bill,d.word.dataset.id);this.fin(k,this.bill.items.find(i=>i.id===d.word.dataset.id).t,r);return}
+      if(!d.moved){this.setCorner(this.pct(e));return}
+      {const[x,y]=this.pct(e),[a,b]=d.p0;this.clearCorner();this.region(k,[Math.min(a,x),Math.min(b,y),Math.abs(x-a),Math.abs(y-b)])}}}
+  setCorner(p){this.corner=p;if(!this.cornerEl){this.cornerEl=document.createElement('div');this.cornerEl.className='vw-corner';this.ov.append(this.cornerEl)}
+    this.cornerEl.style.left=p[0]+'%';this.cornerEl.style.top=p[1]+'%';this.caption()}
+  clearCorner(){this.corner=null;this.cornerEl?.remove();this.cornerEl=null;if(S.locating)this.caption(false)}
+  /* B3: the caption is the pane's name and is spoken when it changes */
+  caption(speak=true){const t=this.capText();this.cap.textContent=t;this.host.setAttribute('aria-label',t);if(speak&&this._said!==t){this._said=t;say(t)}}
+  /* R5-7: keyboard users get the word keys; touch has no Esc (the primary reads "Cancel pointing") */
+  capText(){const k=NAMEL[S.locating],coarse=matchMedia('(pointer:coarse)').matches,c=coarse?'Tap':'Click',cl=c.toLowerCase(),esc_=coarse?'':' · Esc to cancel';
+    if(this.corner)return `${c} the opposite corner of the ${k}`+esc_;
+    return (this.bill.noText?`No text layer here. Drag around the ${k}, or ${cl} two corners, to mark it`:`${c} the ${k} on the bill, or ${cl} two corners around it`+(document.documentElement.classList.contains('kbd')?' · arrows to move, Enter to take':''))+esc_}
+  region(k,rc){{
+        const ws=this.bill.items.filter(i=>i.r&&!i.hand&&!i.rule&&!i.paper&&i.t&&i.r[0]<rc[0]+rc[2]&&i.r[0]+i.r[2]>rc[0]&&i.r[1]<rc[1]+rc[3]&&i.r[1]+i.r[3]>rc[1]);
+        if(ws.length&&!this.bill.noText){const x0=Math.min(...ws.map(i=>i.r[0])),y0=Math.min(...ws.map(i=>i.r[1])),x1=Math.max(...ws.map(i=>i.r[0]+i.r[2])),y1=Math.max(...ws.map(i=>i.r[1]+i.r[3]));
+          this.fin(k,ws.map(i=>i.t).join(' '),[x0,y0,x1-x0,y1-y0])}
+        else this.fin(k,null,rc)}}
+  /* finish after the tap's own click has landed, so it cannot hit what the closing overlay uncovers */
+  fin(k,...a){setTimeout(()=>{if(S.locating===k)finishLocate(k,...a)},0)}
+  boxEl(key){for(const[id,e]of this.map)if(e.dataset.k===key)return e;return null}
+  refresh(){const b=cur();if(!this.page||this.bill!==b)this.show(b);
+    const list=boxesFor(b),loc=!!S.locating;
+    this.host.classList.toggle('locating',loc);if(!loc)this.clearCorner();
+    const kw=loc&&!b.noText;if(this._kw!==kw){this._kw=kw;if(kw)readingLines(b,$$('.it[data-ocr]',this.page)).flat().forEach(w=>this.ov.before(w)); /* R5-10: Tab order is reading order */
+      $$('.it[data-ocr]',this.page).forEach(w=>{if(kw){w.tabIndex=0;w.setAttribute('role','button')}else{w.removeAttribute('tabindex');w.removeAttribute('role')}})}
+    /* D4: pointing starts on the field's printed label word, else the first word, else the pane */
+    if(loc&&!this._locF&&this.host.offsetParent){this._locF=true;this.host.tabIndex=-1;const f=fld(b,S.locating),lab=f.label||f.candidates?.[0]?.labelId;
+      (kw&&(this.page.querySelector(`.it[data-ocr][data-id="${lab}"]`)||this.page.querySelector('.it[data-ocr]'))||this.host).focus({preventScroll:true})}
+    else if(!loc&&this._locF){this._locF=false;this.host.removeAttribute('tabindex')}
+    syncBoxes(this.ov,this.map,list,{focus:S.focus,hover:S.hover,onBox:k=>{if(!S.locating)setFocus(k)}});
+    const noP=S.sim==='noPreview';this.ph.hidden=!noP;this.cam.style.visibility=noP?'hidden':'';
+    if(noP)this.ph.innerHTML='<b>Preview unavailable</b><span>Open in paperless</span>';
+    this.chip.hidden=!b.noText||noP;this.chip.textContent=b.noText?'No text layer for handwriting · only the printed heading could be boxed':'';
+    this.cap.hidden=!loc;if(loc){this.host.setAttribute('role','group');this.caption()}else{this._said=null;this.host.removeAttribute('aria-label');this.host.removeAttribute('role')}
+    if(this.o.scrim&&this.scrim){const rs=!loc&&S.zoomMode==='field'&&S.focus&&S.focus!=='confirm'?this.rectsFor(S.focus):null;
+      this.scrim.firstChild.setAttribute('d',rs?'M0 0H100V100H0Z '+rs.map(({r})=>{const g=.5,x=r[0]-g,y=r[1]-g,w=r[2]+2*g,h=r[3]+2*g;return `M${x} ${y}h${w}v${h}h${-w}Z`}).join(' '):'');
+      this.scrim.style.opacity=rs?1:0}
+    if(this.o.pages){const el=this.pgEl;el.hidden=false;el.innerHTML=b.invoiceOf?mates(b).map(m=>`<button tabindex="-1" class="${m===b?'':'dim'}" data-act="openbill" data-i="${S.bills.indexOf(m)}">p.${m.invoiceOf.page}</button>`).join(''):'<span class="pg1">p.1</span>'}
+  }
+}
+/* =====================================================================
+   SHARED: small render fragments (glyphs, rows, editors). Layout lives in each variant.
+   ===================================================================== */
+const GL={
+  located:'<rect x="2" y="4" width="12" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  check:'<path d="M8 1.5 14.5 8 8 14.5 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><text x="8" y="11.2" text-anchor="middle" font-size="9" font-weight="700" fill="currentColor" font-family="Inter,sans-serif">?</text>',
+  unlocated:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="1.4 2.6" stroke-linecap="round"/>',
+  missing:'<rect x="1.5" y="4.5" width="13" height="7" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="1.4 2.4" stroke-linecap="round"/><path d="M5.5 8h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+  conflict:'<circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 6.6h6M5 9.4h6M9.6 4.6l-3.2 6.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>',
+  confirmed:'<path d="M3 8.6 6.6 12 13 4.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>'};
+const glyph=ds=>`<svg class="g s-${ds}" viewBox="0 0 16 16" aria-hidden="true">${GL[ds]}</svg>`;
+function markSvg(b){const w=worst(b);
+  if(b.confirmed)return'<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.5" fill="currentColor"/></svg>';
+  if(w==='located')return'<svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
+  return'<svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1 11 6 6 11 1 6Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>'}
+function barSet(bar,b){bar.innerHTML=barHTML(b);$('.mk.cur',bar)?.scrollIntoView({block:'nearest',inline:'nearest'})} /* R3-17 */
+function barHTML(b,extra=''){const done=S.bills.filter(x=>x.confirmed).length;
+  return `<h1 class="sr">Review bill ${b.ref}</h1><button class="lnk bk" disabled title="The bill list is not part of this prototype">‹ Bills</button><span class="cnt">${S.idx+1} of ${S.bills.length}</span><span class="marks" role="group" aria-label="Bills">${S.bills.map((x,i)=>`<button class="mk ${i===S.idx?'cur':''}"${i===S.idx?' aria-current="true"':''} data-act="openbill" data-i="${i}" aria-label="${x.ref}, ${x.confirmed?'confirmed':worst(x)==='located'?'to review':'has things to check'}">${markSvg(x)}</button>`).join('')}</span>${extra}<span class="ids id">${b.ref} · ${b.expense}</span><button class="q" data-act="help" aria-label="Keyboard shortcuts">?</button>`}
+function segHTML(b){if(!b.invoiceOf)return'';return `<div class="seg" role="group" aria-label="Invoices in this file">${mates(b).map(m=>`<button class="${m===b?'on':''}"${m===b?' aria-current="true"':''} data-act="openbill" data-i="${S.bills.indexOf(m)}">Invoice ${m.invoiceOf.index} of ${m.invoiceOf.count} · p.${m.invoiceOf.page}</button>`).join('')}</div>`}
+function tallyHTML(b){if(!b.invoiceOf)return'';const vs=mates(b).map(m=>fld(m,'total').value),all=vs.every(v=>v!=null),sum=all?vs.reduce((a,v)=>a+v,0):0,p=b.payment.amountPaise;
+  return `<div class="tally">${vs.map(v=>v==null?'—':inr(v)).join(' + ')}${all?` = ${inr(sum)} <small>${sum===p?'equals Payment':'≠ Payment '+inr(p)}</small>`:' <small>one total missing</small>'}</div>`}
+const payHTML=b=>`<div class="st pay">Payment · ${inr(b.payment.amountPaise)} · ${fmtD(b.payment.date)} · ${esc(b.payment.method)}</div>`;
+function editorHTML(b,k,big){const f=fld(b,k),c=big?' big':'';
+  if(k==='total')return `<input class="ed${c}" data-edit="total" name="total" style="--n:${Math.max(8,(f.value!=null?numStr(f.value):'').length+1)}" type="text" inputmode="decimal" lang="en-IN" aria-label="Total in rupees" autocomplete="off" value="${f.value!=null?numStr(f.value):''}" placeholder="0.00">`;
+  if(k==='date')return `<input class="ed${c}" data-edit="date" name="date" type="date" aria-label="Bill date" value="${f.value||''}">`;
+  return `<input class="ed${c}" data-edit="${k}" type="text" name="${k}" spellcheck="false"${k==='gstin'?' autocapitalize="characters"':''} aria-label="${NAMES[k]}" autocomplete="off" value="${esc(f.value||'')}">`}
+function valHTML(b,k){const f=fld(b,k);
+  if(S.editing===k)return editorHTML(b,k);
+  if(S.sim==='reading'&&!f.confirmed&&k!=='total')return'<span class="skel"></span>';
+  if(f.candidates&&!f.confirmed){const n=f.candidates.map((c,i)=>i+1);return `<span class="none">Choose ${n.slice(0,-1).join(', ')} or ${n.slice(-1)}</span>`}
+  const t=valueText(b,k);if(t==null)return `<span class="none">${f.state==='missing'?'Nothing read':'—'}</span>`;
+  return `<span class="val${k==='billNo'||k==='gstin'?' id':''}" data-act="edit" data-key="${k}">${esc(t)}</span>`}
+function detail(b,k,noState){const f=fld(b,k),ds=disp(b,k);let h='';
+  if(S.sim==='reading'&&!f.confirmed&&k!=='total')return'<span class="st">Reading the bill…</span>';
+  if(!noState)h+=`<span class="st s-${f.confirmed&&conflict(b,k)?'conflict':ds}">${esc(stateText(b,k)+(f.confirmed&&k==='total'&&conflict(b,k)?' · '+payRel(b).t:''))}</span>`;
+  if(f.candidates&&!f.confirmed){if(f.hint)h+=`<div class="hint">${esc(f.hint)}</div>`;
+    h+='<div class="cands">'+f.candidates.map((c,i)=>`<button class="cand" data-act="pick" data-n="${i+1}" data-key="${k}"><span class="kh">${i+1}</span><span class="sr">, </span><b>${esc(c.text)}</b><span class="sr">, </span><em>${esc(c.sub)}</em></button>`).join('')+'</div>'}
+  if(f.pending)h+=`<div class="hint">Page says <b>${esc(f.pending.text)}</b> · reader said <b>${esc(f.pending.readerText)}</b></div><div class="cands"><button class="cand" data-act="pick" data-n="1" data-key="${k}"><span class="kh">1</span><span class="sr">, </span><b>Use the page value</b><span class="sr">, </span><em>${esc(f.pending.text)}</em></button><button class="cand" data-act="pick" data-n="2" data-key="${k}"><span class="kh">2</span><span class="sr">, </span><b>Keep the reader’s value</b><span class="sr">, </span><em>${esc(f.pending.readerText)}</em></button></div>`;
+  const acts=[];
+  if(!f.confirmed&&!f.pending){
+    if(!S.locating&&(ds==='unlocated'||ds==='missing'||(ds==='conflict'&&!f.box)))acts.push(`<button class="lnk" data-act="locate" data-key="${k}">Point to it <span class="kh" aria-hidden="true">L</span></button>`);
+    if(isStop(b,k)&&f.value!=null&&!f.candidates)acts.push(`<button class="lnk" data-act="edit" data-key="${k}">Edit <span class="kh" aria-hidden="true">E</span></button>`);
+    if(f.state==='missing'&&!required(b,k))acts.push(`<button class="lnk" data-act="notbill" data-key="${k}">Not on the bill <span class="kh" aria-hidden="true">N</span></button>`)}
+  if(acts.length)h+=`<div class="acts">${acts.join('')}</div>`;return h}
+function groupLabel(b,k){const f=fld(b,k),t=f.candidates&&!f.confirmed?'choose between candidates':(valueText(b,k)??'nothing read');return `${NAMES[k]}, ${t}, ${stateText(b,k)}`+(k==='total'&&conflict(b,k)?', '+payRel(b).t.replace('≠','differs from'):'')}
+/* D2: focus alone opens the detail line only when there is no value to click */
+const noVal=(b,k)=>{const f=fld(b,k);return f.value==null&&!f.confirmed};
+/* R5-2: what the Claimant did to a confirmed value is always said, at rest too, so focus moves nothing */
+const noted=(b,k)=>{const f=fld(b,k);return disp(b,k)==='confirmed'&&!!(f.differs||f.placed||f.userBox)};
+const r2On=(b,k)=>{const f=fld(b,k);return isStop(b,k)||(S.focus===k&&noVal(b,k))||!!f.pending||(f.confirmed&&conflict(b,k))||noted(b,k)};
+const detailR=(b,k)=>detail(b,k,valueText(b,k)==null); /* R5-14: an empty value already says "Nothing read" */
+/* D2 phone: a focused clean cell offers Edit on its value line */
+const edIn=(b,k)=>{const f=fld(b,k);return S.focus===k&&!isStop(b,k)&&!f.confirmed&&!f.pending&&!f.candidates&&f.value!=null&&S.editing!==k?`<button class="lnk ed-in" data-act="edit" data-key="${k}">Edit</button>`:''};
+function rowHTML(b,k,o={}){const ds=disp(b,k),stop=isStop(b,k),foc=S.focus===k,f=fld(b,k);
+  return `<div class="row ft s-${ds}${stop?' stop':''}${foc?' f':''}${o.title?' title':''}" data-key="${k}" data-hover="${k}" tabindex="0" role="group" aria-label="${esc(groupLabel(b,k))}">
+  <div class="r1"><span class="rl">${NAMES[k]}</span><span class="rv">${valHTML(b,k)}</span>${glyph(ds)}</div>
+  ${r2On(b,k)?`<div class="r2">${detailR(b,k)}</div>`:''}</div>`}
+function evExtra(b,cls=''){const r=payRel(b);return disp(b,'total')==='confirmed'&&r.k==='diff'?`<div class="ev${cls}"><span style="flex:none">${glyph('conflict')}</span><span class="st s-conflict" style="font-size:14px;line-height:20px">${esc(r.t)}</span></div>`:''}
+function evHTML(b,cls=''){const ds=disp(b,'total');return `<div class="ev${cls}"><span style="flex:none">${glyph(ds)}</span><span>${esc(evText(b))}</span></div>${evExtra(b,cls)}`}
+function heroValHTML(b){const f=fld(b,'total');
+  if(S.editing==='total')return editorHTML(b,'total',true);
+  if(S.sim==='reading'&&!f.confirmed)return `<button class="hero" data-act="edit" data-key="total" aria-label="Total"><span class="skel hero-skel"></span></button>`;
+  if(f.value==null)return `<button class="hero none" data-act="edit" data-key="total" aria-label="Total, nothing read">—</button>`;
+  return `<button class="hero" style="--n:${inr(f.value).length}" data-act="edit" data-key="total" aria-label="Edit total, ${inr(f.value)}">${heroHTML(f.value)}</button>`}
+function footHTML(b){const p=primaryInfo(b),pri=`<button class="btn pri wide ft" data-key="confirm" data-act="confirm"${p.disabled?' disabled':''}><span>${esc(p.label)}</span><span class="kh" aria-hidden="true">↵</span></button>`;
+  return `<div class="stat"><span>${esc(S.status||p.hint||'')}</span>${b.confirmed&&!S.done?'<button class="lnk" data-act="undoconfirm">Undo confirm</button>':''}</div>`+pri}
+function endHTML(){const n=S.bills.filter(b=>b.confirmed).length,d=S.bills.filter(b=>b.confirmed&&payRel(b).k==='diff');
+  return `<h1 tabindex="-1">All bills reviewed.</h1><p>${n} ${n===1?'bill is':'bills are'} ready for a Claim</p>${d.length?`<div class="endd">${glyph('conflict')}<span class="st s-conflict" style="font-size:14px;line-height:20px">${esc(`${d.length} ${d.length===1?'differs from its Payment':'differ from their Payments'}: ${d.map(b=>b.ref+' '+payRel(b).t.split(' · ')[1]).join(', ')}`)}</span></div>`:''}<button class="lnk endc" disabled title="Claims are not part of this prototype">Build a Claim <span aria-hidden="true">→</span></button><div style="display:flex;gap:16px;justify-content:center;align-items:center;margin-top:12px"><button class="lnk endq" data-act="undo">Undo the last change</button><button class="lnk endq" data-act="reset">Start over (prototype)</button></div>`}
+
+const moneyChars=t=>t.replace(/rs\.?|inr|₹|\/-\s*$/gi,'').replace(/[^\d.]/g,'');
+/* B1: regroup, then put the caret back after the same number of digits and points */
+function liveGroup(inp){const c=inp.selectionStart??inp.value.length,n=moneyChars(inp.value.slice(0,c)).length;let v=moneyChars(inp.value);const i=v.indexOf('.');let ip=i<0?v:v.slice(0,i),fp=i<0?null:v.slice(i+1).replace(/\./g,'').slice(0,2);
+  ip=ip.replace(/^0+(?=\d)/,'');const out=(ip===''&&fp===null?'':groupIN(ip||'0'))+(fp!==null?'.'+fp:'');if(out===inp.value)return;
+  inp.value=out;let q=0;for(let m=0;q<out.length&&m<n;q++)if(/[\d.]/.test(out[q]))m++;inp.setSelectionRange(q,q)}
+function bindEditor(root){$$('input.ed',root).forEach(inp=>{if(inp._b)return;inp._b=1;const k=inp.dataset.edit;
+  if(k==='total'){const regroup=()=>{liveGroup(inp);inp.style.setProperty('--n',Math.max(8,inp.value.length+1))};inp.addEventListener('input',regroup);
+    /* R5-6: Delete or Backspace onto a separator takes the digit beyond it */
+    inp.addEventListener('keydown',e=>{const c=inp.selectionStart,v=inp.value;if(c!==inp.selectionEnd||e.metaKey||e.ctrlKey||e.altKey)return;
+      if(e.key==='Delete'&&v[c]===','&&c+1<v.length){inp.value=v.slice(0,c)+v.slice(c+2);inp.setSelectionRange(c,c)}
+      else if(e.key==='Backspace'&&v[c-1]===','&&c>=2){inp.value=v.slice(0,c-2)+v.slice(c);inp.setSelectionRange(c-2,c-2)}else return;
+      e.preventDefault();regroup()});inp.addEventListener('blur',()=>{const p=parseMoney(inp.value);if(p!=null)inp.value=numStr(p)})}
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.stopPropagation();commitEdit(k,inp.value)}else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();cancelEdit()}});
+  requestAnimationFrame(()=>{inp.focus();try{inp.select()}catch(_){}})})}
+function fillSlots(root){$$('[data-slot]',root).forEach(el=>{if(el.firstChild)return;const b=el.dataset.b!=null?S.bills[+el.dataset.b]:cur();
+  const fr=Paper.slot(b,el.dataset.k,{h:+el.dataset.h||44,w:el.dataset.w?+el.dataset.w:0,cand:el.dataset.cand!=null?+el.dataset.cand:undefined,label:el.dataset.label!=='0'});
+  if(el.dataset.act&&!fr.dataset.act){fr.dataset.act=el.dataset.act;fr.style.cursor='zoom-in'}el.append(fr)})}
+function syncDomFocus(root){if(S.editing||S.locating)return;const ae=document.activeElement;if(ae&&ae.closest&&ae.closest('.proto,input,#statebox,#help,.dlg-bg,.B-ovl'))return;
+  const t=root.querySelector(`.ft[data-key="${S.focus}"]`);if(t&&t!==ae){t.focus({preventScroll:true});t.scrollIntoView({block:'nearest'})}}
+const Fx={after(root){bindEditor(root);fillSlots(root);syncDomFocus(root)}};
+
+/* =====================================================================
+   VARIANT A: Margin Notes (page left, quiet notes right, leader line between)
+   ===================================================================== */
+function makeA(opt={}){
+  let root,main,pane,scroll,foot,bar,svg,vw,tm;
+  function railHTML(b){
+    const f=fld(b,'total'),ds=disp(b,'total'),stop=isStop(b,'total'),foc=S.focus==='total';
+    return segHTML(b)+rowHTML(b,'vendor',{title:true})+
+    `<section class="A-hero ft s-${ds}${stop?' stop':''}${foc?' f':''}" data-key="total" data-hover="total" tabindex="0" role="group" aria-label="${esc(groupLabel(b,'total'))}">
+      ${opt.strip?'<div class="strip" data-slot data-k="total" data-h="72" data-act="view"></div>':''}
+      ${opt.strip?`<div class="B-read">${heroValHTML(b)}</div>${evHTML(b,' B-ev')}`:`<div>${heroValHTML(b)}</div>${evHTML(b)}`}
+      ${(stop||(foc&&noVal(b,'total'))||f.pending)?`<div class="detail">${detail(b,'total',true)}</div>`:''}
+    </section>${tallyHTML(b)}`+
+    ['date','billNo','gstin'].map(k=>rowHTML(b,k)).join('')+payHTML(b)}
+  function lead(delay=280){clearTimeout(tm);svg.classList.remove('on');if(isPhone()||S.done||S.sim==='noPreview')return;tm=setTimeout(draw,reduced()?0:delay)}
+  function draw(){if(vw.page&&[...vw.page.getAnimations(),...vw.cam.getAnimations()].some(a=>a.playState==='running')){clearTimeout(tm);tm=setTimeout(draw,50);return}svg.innerHTML='';const key=S.hover||S.focus,has=key&&vw.boxEl(key),k=has?key:'total',be=vw.boxEl(k),row=$(`.ft[data-key="${k}"]`,scroll);if(!be||!row)return;
+    {const f=fld(cur(),k);if(!f.box&&f.printedBox)return} /* B6: no leader for a value that is not on the page */
+    const A=main.getBoundingClientRect(),br=be.getBoundingClientRect(),rr=row.getBoundingClientRect(),pr=pane.getBoundingClientRect();
+    const tg=be.matches('.cd,.conf,.you')&&be.querySelector('.tag'),tr=tg&&tg.getBoundingClientRect();const bx=tr?tr.right:br.right,by=br.top+br.height/2;if(bx<pr.left||bx>pr.right||by<pr.top||by>pr.bottom||rr.bottom<0)return;
+    const x0=rr.left-A.left,y0=clamp(rr.top+Math.min(rr.height/2,28),rr.top,rr.bottom)-A.top,x1=bx-A.left+2,y1=by-A.top;
+    svg.setAttribute('viewBox',`0 0 ${A.width} ${A.height}`);const dd=`M${x0} ${y0}C${x0-70} ${y0} ${x1+70} ${y1} ${x1} ${y1}`;svg.innerHTML=`<path class="case" d="${dd}"/><path d="${dd}"/><circle cx="${x1}" cy="${y1}" r="2.5"/>`;
+    svg.classList.toggle('dot',!has);svg.getBoundingClientRect();svg.classList.add('on')}
+  const V={nav:['vendor','total','date','billNo','gstin'],
+    mount(r){root=r;r.innerHTML=`<div class="A"><header class="bar"></header><main class="A-main"><div class="A-pane"></div><section class="A-rail" aria-label="Fields"><div class="A-scroll"></div><footer class="A-foot"></footer></section></main><svg class="A-lead" aria-hidden="true"></svg></div>`;
+      main=r.firstElementChild;bar=$('.bar',r);pane=$('.A-pane',r);scroll=$('.A-scroll',r);foot=$('.A-foot',r);svg=$('.A-lead',r);vw=new Viewer(pane,{pages:true,onCamera:()=>lead(0)});scroll.addEventListener('scroll',()=>lead(0),{passive:true})},
+    update(reason){const b=cur();
+      if(reason==='hover'){vw.refresh();$$('.ft[data-hover]',scroll).forEach(e=>e.classList.toggle('h',e.dataset.hover===S.hover));lead(0);return}
+      if(reason==='zoom'){vw.go(true);lead();return}
+      barSet(bar,b);scroll.innerHTML=railHTML(b);foot.innerHTML=footHTML(b);Fx.after(root);
+      vw.refresh();if(reason==='bill')vw.enter();vw.go(reason!=='bill'&&reason!=='sim');lead()},
+    onAct(act,el){if(act==='view'){S.zoomMode='page';emit('zoom');return true}},
+    destroy(){vw.destroy();clearTimeout(tm)}};
+  return V}
+
+/* =====================================================================
+   VARIANT B: Proof Strips (no page, a column of evidence crops)
+   ===================================================================== */
+function makeB(){
+  let root,scroll,ovl,vwi,ovw,pageEl,col,rz,openedByLoc=false;
+  function cellHTML(b,k,wide){const f=fld(b,k),ds=disp(b,k),stop=isStop(b,k),foc=S.focus===k;
+    const cands=f.candidates&&!f.confirmed;
+    const grp=new Map();if(cands)f.candidates.forEach((c,i)=>{const r=c.box.join();if(!grp.has(r))grp.set(r,{i,c,n:[]});grp.get(r).n.push(i+1)});const gs=[...grp.values()];
+    const crops=cands?`<div class="B-cs" style="grid-template-columns:1fr">${gs.map(g=>`<div><div data-slot data-k="${k}" data-cand="${g.i}" data-h="56" data-act="view"></div>${gs.length>1?`<div class="B-cn"><span class="kh">${g.n.join('/')}</span> ${esc(g.c.pl)}</div>`:''}</div>`).join('')}</div>`
+      :`<div data-slot data-k="${k}" data-h="44" data-act="view"></div>`;
+    return `<div class="B-cell ft${wide||cands?' wide':''} s-${ds}${stop?' stop':''}${foc?' f':''}" data-key="${k}" data-hover="${k}" tabindex="0" role="group" aria-label="${esc(groupLabel(b,k))}">${crops}
+      <div class="B-val"><span class="vtxt">${valHTML(b,k)}</span>${edIn(b,k)}${glyph(ds)}</div>${r2On(b,k)?`<div class="r2" style="padding:0">${detailR(b,k)}</div>`:''}</div>`}
+  function colHTML(b){const nt=b.noText,f=fld(b,'total'),ds=disp(b,'total'),stop=isStop(b,'total'),foc=S.focus==='total',vds=disp(b,'vendor');
+    const hero=`<section class="B-hero ft s-${ds}${stop?' stop':''}${foc?' f':''}" data-key="total" data-hover="total" tabindex="0" role="group" aria-label="${esc(groupLabel(b,'total'))}">
+      ${nt?'':`<div data-slot data-k="total" data-h="96" data-act="view"></div>`}
+      <div class="B-read${b.noText?' L':''}">${heroValHTML(b)}</div><div class="B-ev ev">${esc('')}<span style="flex:none">${glyph(ds)}</span><span>${esc(evText(b))}</span></div>${evExtra(b,' B-ev')}
+      ${(stop||(foc&&noVal(b,'total'))||f.pending)?`<div class="detail" style="text-align:${nt?'left':'right'}">${detail(b,'total',true)}</div>`:''}</section>`;
+    const ven=`<div class="B-ven ft s-${vds}${isStop(b,'vendor')?' stop':''}${S.focus==='vendor'?' f':''}" data-key="vendor" data-hover="vendor" tabindex="0" role="group" aria-label="${esc(groupLabel(b,'vendor'))}"><span class="vv B-val"><span class="B-vendor">${valHTML(b,'vendor')}</span>${edIn(b,'vendor')}${glyph(vds)}</span>${r2On(b,'vendor')?`<div class="r2" style="padding:0">${detailR(b,'vendor')}</div>`:''}</div>`;
+    const p=primaryInfo(b);
+    const ph=isPhone();
+    const foot=`<div class="B-foot">${ph?'':`<div class="stat">${esc(S.status||p.hint||'')}</div>`}${nt?'':`<button class="btn" data-act="view">View whole bill <span class="kh" aria-hidden="true">Space</span></button>`}${ph?'':`<button class="btn pri ft" data-key="confirm" data-act="confirm"${p.disabled?' disabled':''}><span>${esc(p.label)}</span><span class="kh" aria-hidden="true">↵</span></button>`}</div>`;
+    const body=nt?`${hero}${tallyHTML(b)}<div class="B-rows">${['date','billNo','gstin'].map(k=>rowHTML(b,k)).join('')}</div><div style="margin-top:16px">${foot}</div>`
+      :`${hero}${tallyHTML(b)}<div class="B-grid">${cellHTML(b,'date')}${cellHTML(b,'billNo')}${cellHTML(b,'gstin')}${foot}</div>`;
+    const nx=S.bills[S.idx+1];
+    return ven+segHTML(b)+body+payHTML(b)+(nx?`<div class="B-peek" aria-hidden="true" data-act="openbill" data-i="${S.idx+1}"><small>Next · ${nx.ref}</small><div data-slot data-b="${S.idx+1}" data-k="total" data-h="64"></div></div>`:'')}
+  const V={nav:['vendor','total','date','billNo','gstin'],
+    mount(r){root=r;r.innerHTML=`<div class="B"><header class="bar"></header><main class="B-scroll"><div class="B-page" hidden></div><div class="B-col"></div></main><div class="B-pin" hidden></div>
+      <div class="B-ovl" role="dialog" aria-modal="true" aria-label="Whole bill" hidden><div class="B-ovl-top"><b>Whole bill</b><span class="st B-ovn"></span><button class="btn" data-act="view">Close <span class="kh" aria-hidden="true">Esc</span></button></div><div class="B-ovl-pane"></div></div></div>`;
+      scroll=$('.B-scroll',r);pageEl=$('.B-page',r);col=$('.B-col',r);ovl=$('.B-ovl',r);
+      vwi=new Viewer(pageEl);ovw=new Viewer($('.B-ovl-pane',r),{pad:24});
+      let was=isPhone();rz=()=>{if(isPhone()!==was){was=isPhone();V.update('change')}};addEventListener('resize',rz)},
+    update(reason){const b=cur();
+      if(S.locating&&!b.noText&&!S.viewOpen){S.viewOpen=true;openedByLoc=true}
+      if(!S.locating&&openedByLoc){S.viewOpen=false;openedByLoc=false}
+      if(b.noText)S.viewOpen=false;
+      const showInline=b.noText;
+      if(reason==='hover'){$$('.ft[data-hover]',col).forEach(e=>e.classList.toggle('h',e.dataset.hover===S.hover));if(S.viewOpen)ovw.refresh();if(showInline)vwi.refresh();return}
+      if(reason==='zoom'){if(S.viewOpen)ovw.go();if(showInline)vwi.go();return}
+      barSet($('.bar',root),b);
+      col.innerHTML=colHTML(b);col.classList.remove('enter');if(reason==='bill'){void col.offsetWidth;col.classList.add('enter');scroll.scrollTop=0}
+      const pin=$('.B-pin',root);pin.hidden=!isPhone();pin.innerHTML=isPhone()?footHTML(b):'';
+      scroll.inert=$('.bar',root).inert=pin.inert=!!S.viewOpen;
+      Fx.after(root);
+      pageEl.hidden=!showInline;if(showInline){vwi.refresh();if(reason==='bill')vwi.enter();vwi.go(reason!=='bill'&&reason!=='sim')}
+      ovl.hidden=!S.viewOpen;if(!S.viewOpen&&ovw.host.classList.contains('locating'))ovw.refresh(); /* R5-11: a closed overlay keeps no pointing state, so the next L starts fresh */
+      if(!S.viewOpen&&(ovl.contains(document.activeElement)||document.activeElement===document.body)){document.activeElement.blur();syncDomFocus(root)} /* R6-2: the hidden overlay may already have dropped focus to body */
+      if(S.viewOpen){$('.B-ovn',root).textContent=S.locating?`Point to the ${NAMEL[S.locating]}`:S.focus&&S.focus!=='confirm'?NAMES[S.focus]:'';ovw.refresh();ovw.go(reason!=='bill')}
+      if(S.viewOpen&&!ovl.contains(document.activeElement))$('.B-ovl-top .btn',root).focus()},
+    onKey(e){if(e.key===' '&&!e.target.closest('button,input')&&!cur().noText){e.preventDefault();openedByLoc=false;S.viewOpen=!S.viewOpen;emit('view');return true}
+      if(e.key==='Escape'&&S.viewOpen&&!S.locating){S.viewOpen=false;emit('view');return true}return false},
+    onAct(act){if(act==='view'&&!cur().noText){openedByLoc=false;S.viewOpen=!S.viewOpen;emit('view');return true}},
+    destroy(){removeEventListener('resize',rz);vwi.destroy();ovw.destroy()}};
+  return V}
+
+/* =====================================================================
+   VARIANT C: Spotlight (the camera takes you to each question)
+   ===================================================================== */
+function makeC(){
+  let root,rib,card,vw;
+  const otherCount=(b,k)=>KEYS.filter(x=>x!==k&&['located','confirmed'].includes(disp(b,x))).length;
+  function cardHTML(b){
+    let k=S.focus;if(!k||k==='confirm')k='total';
+    const f=fld(b,k),ds=disp(b,k),stop=isStop(b,k),st=stops(b),reading=S.sim==='reading'&&!f.confirmed&&k!=='total';
+    const val=S.editing===k?editorHTML(b,k,k==='total'):k==='total'?heroValHTML(b).replace('button class="hero"','button class="hero"'):`<span class="val" data-act="edit" data-key="${k}">${f.value!=null?esc(valueText(b,k)):'<span class="none">'+(f.state==='missing'?'Nothing read':'—')+'</span>'}</span>`;
+    let sub='',acts='';
+    const p=primaryInfo(b);
+    if(b.confirmed)sub=esc(stateText(b,k));
+    else if(f.candidates){sub=`${esc(f.hint||'')}<div class="cands">${f.candidates.map((c,i)=>`<button class="cand" data-act="pick" data-n="${i+1}" data-key="${k}"><span class="kh">${i+1}</span><b>${esc(c.text)}</b><em>${esc(c.sub)}</em></button>`).join('')}</div>`}
+    else if(f.pending)sub=detail(b,k,true);
+    else if(ds==='unlocated'||(ds==='conflict'&&!f.box)){const rv=f.reader||valueText(b,k);sub=`The reader says <b>${esc(valueText(b,k)||'nothing')}</b> but it wasn’t found on the page. Click it on the bill, or check by eye.${ds==='conflict'?`<div class="st s-conflict" style="margin-top:4px">${esc(payRel(b).t)}</div>`:''}`}
+    else if(f.state==='missing')sub=required(b,k)?'The reader found nothing. Type it, or point to it on the bill.':'Nothing was read. Most bills have none.';
+    else sub=esc(k==='total'?[payRel(b).t.replace(/^equals/,'equals'),`${otherCount(b,k)} other values found`,st.length&&!stop?`${st.length} to check`:''].filter(Boolean).join(' · '):stateText(b,k));
+    const main=f.candidates||f.pending?'':`<button class="btn pri ft" data-key="confirm" data-act="confirm"${p.disabled||reading?' disabled':''}><span>${esc(k==='total'||ds==='unlocated'||ds==='conflict'?(stop&&ds!=='located'?'It’s right':'Yes, confirm'):'Yes')}</span><span class="kh">↵</span></button>`;
+    const edit=f.candidates||f.pending||b.confirmed?'':`<button class="btn" data-act="edit" data-key="${k}">Edit <span class="kh">E</span></button>`;
+    const loc=!S.locating&&!f.candidates&&!f.pending&&!b.confirmed&&(ds==='unlocated'||ds==='missing'||(ds==='conflict'&&!f.box))?`<button class="lnk" data-act="locate" data-key="${k}">Point to it <span class="kh">L</span></button>`:'';
+    const nb=f.state==='missing'&&!required(b,k)&&!f.confirmed?`<button class="lnk" data-act="notbill" data-key="${k}">Not on the bill <span class="kh">N</span></button>`:'';
+    const why=blockedReason(b);
+    if(b.confirmed)acts=`<button class="btn pri ft" data-key="confirm" data-act="confirm"><span>Next bill</span><span class="kh">↵</span></button>`;
+    else acts=main+edit+loc+nb;
+    return `<div class="C-top">${glyph(ds)}<b>${NAMES[k]}</b><span>${esc(stateText(b,k))}</span></div>
+      <div class="C-val">${S.sim==='reading'&&reading?'<span class="skel"></span>':val}</div>
+      <div class="C-sub">${sub}</div>${why?`<div class="st" style="margin-top:6px">${esc(why)}</div>`:''}${S.status?`<div class="st" style="margin-top:6px">${esc(S.status)}</div>`:''}
+      <div class="C-act">${acts}</div>`}
+  function ribHTML(b){const st=stops(b).length;
+    return `<span class="bk back">‹ ${S.idx+1} of ${S.bills.length}</span>`+KEYS.map(k=>{const ds=disp(b,k),f=fld(b,k),t=valueText(b,k);
+      return `<button class="chip ft s-${ds}${S.focus===k?' f':''}" data-key="${k}" data-hover="${k}" data-act="chip" aria-label="${NAMES[k]}, ${esc(stateText(b,k))}">${glyph(ds)}<span class="cv">${esc(t||(f.state==='missing'?'none':'—'))}</span></button>`}).join('')+
+      `<span class="C-sum">${S.idx+1} of ${S.bills.length} · ${5-st} found${st?` · ${st} to check`:''}</span><span class="marks" style="margin-left:auto">${S.bills.map((x,i)=>`<button class="mk ${i===S.idx?'cur':''}" data-act="openbill" data-i="${i}" aria-label="${x.ref}">${markSvg(x)}</button>`).join('')}</span><span class="ids id" style="margin-left:8px">${b.ref}</span><button class="q" data-act="help" aria-label="Keyboard shortcuts">?</button>`}
+  function cPrimary(){const b=cur();if(b.confirmed){advance();return}
+    const why=blockedReason(b);if(why){S.status=why;emit('change');return}
+    const k=S.focus;if(!k||k==='confirm')return confirmBill(b);
+    const fl=fld(b,k);if(fl.state==='missing'&&isStop(b,k)){S.editing=k;emit('edit');return}
+    confirmField(b,k,fl.candidates||fl.pending?1:0);const nx=stops(b)[0];
+    if(nx){S.focus=nx;S.zoomMode='field';S.status='';emit('focus')}else confirmBill(b)}
+  const V={nav:['total','date','billNo','vendor','gstin'],
+    mount(r){root=r;r.innerHTML=`<div class="C"><header class="bar C-rib"></header><div class="C-stage"></div><div class="C-card" role="group" aria-label="Question"></div></div>`;
+      rib=$('.C-rib',r);card=$('.C-card',r);vw=new Viewer($('.C-stage',r),{scrim:true,ms:280,yBias:isPhone()?-.12:-.1,pad:8,slide:true});
+      S.startKey=b=>b.confirmed?'confirm':'total';S.primaryFn=cPrimary},
+    update(reason){const b=cur();
+      if(reason==='hover'){vw.refresh();$$('.chip',rib).forEach(e=>e.classList.toggle('h',e.dataset.hover===S.hover));return}
+      if(reason==='zoom'){vw.go(true);return}
+      rib.innerHTML=ribHTML(b);card.innerHTML=cardHTML(b);Fx.after(root);
+      vw.refresh();if(reason==='bill')vw.enter();vw.go(reason!=='bill'&&reason!=='sim')},
+    onAct(act,el){if(act==='chip'){setFocus(el.dataset.key);return true}},
+    destroy(){vw.destroy();S.startKey=null;S.primaryFn=null}};
+  return V}
+
+/* =====================================================================
+   VARIANT D: Tally Sheet (a table of bills; open one only if it has a stop)
+   ===================================================================== */
+function makeD(){
+  let root,body,head,panel,vw,open=false,sel=new Set(),dlg=null;
+  const payCell=b=>{const r=payRel(b),p=b.payment.amountPaise;if(r.k==='eq')return['equals',''];if(r.k==='part')return['part',''];if(r.k==='none')return['—',''];return[`${inr(p).replace(/\.00$/,'')} ≠`,'bad']};
+  function rowHTML_D(b,i){const ds=worst(b),f=b.fields,focus=i===S.idx,pc=payCell(b),tv=f.total.value;
+    const dateQ=!b.confirmed&&f.date.state==='check'&&!f.date.confirmed;const noCrop=!f.total.box&&!f.total.confirmed||(S.sim==='failed'&&focus&&!f.total.confirmed);
+    const reading=S.sim==='failed'&&focus&&!b.confirmed;
+    const stopsN=stops(b).length;
+    return `<div class="D-row${focus?' f':''}${b.confirmed?' done':''}" data-i="${i}" role="row" tabindex="0" aria-label="${esc(f.vendor.value)}, ${b.confirmed?'confirmed':stopsN?stopsN+' to check':'clean'}">
+      <div class="D-main"><span class="D-chk${sel.has(i)?' on':''}" data-act="dsel" data-i="${i}" role="checkbox" aria-checked="${sel.has(i)}" aria-label="Select ${b.ref}"></span>${glyph(ds)}
+      <span class="D-ven">${esc(f.vendor.value)}${b.invoiceOf?` · ${b.invoiceOf.index} of ${b.invoiceOf.count}`:''}<small class="id">${b.ref}</small></span>
+      <span class="D-dt">${f.date.value?fmtDs(f.date.value):'—'}${dateQ?' <i>?</i>':''}</span>
+      <span class="D-pr">${reading?'<span class="D-nocrop">Couldn’t read · open to type the total</span>':noCrop?`<span class="D-nocrop">${glyph('unlocated')} no crop</span>`:`<div data-slot data-b="${i}" data-k="total" data-h="28" data-w="160" data-label="0"></div>`}</span>
+      <span class="D-tot">${tv!=null&&!reading?inr(tv):'—'}</span><span class="D-pay ${pc[1]}">${esc(pc[0])}</span>
+      <button class="D-open" data-act="dopen" data-i="${i}" aria-label="Open ${b.ref}">›</button></div>
+      ${focus&&!open&&!b.confirmed?`<div class="D-more"><div data-slot data-b="${i}" data-k="date" data-h="36"></div><div data-slot data-b="${i}" data-k="billNo" data-h="36"></div><span class="st" style="align-self:center">${esc(stateText(b,'total'))} · ${stopsN?stopsN+' to check':'clean'}</span></div>`:''}
+    </div>`}
+  function render(reason){const b=cur();
+    const clean=S.bills.filter(isClean).length,chk=S.bills.filter(x=>!x.confirmed&&stops(x).length).length,tg=bulkTargets(sel).length;
+    head.innerHTML=`<h1>Bills to review · ${S.bills.filter(x=>!x.confirmed).length}</h1><span class="sum">${clean} clean · ${chk} to check</span><button class="btn pri" data-act="dbulk"${tg?'':' disabled'}><span>Confirm ${tg} clean</span><span class="kh">⌘↵</span></button>`;
+    body.innerHTML=`<div class="D-th" role="row"><span></span><span></span><span>Vendor</span><span>Date</span><span>As printed</span><span class="r">Total</span><span>Payment</span><span></span></div>`+S.bills.map(rowHTML_D).join('')+(S.bills.every(x=>x.confirmed)?'<div class="D-empty">All bills reviewed.</div>':'');
+    const row=$(`.D-row[data-i="${S.idx}"]`,body);
+    if(open&&!b.confirmed&&row){row.after(panel);panel.hidden=false;fillPanel(b)}else{panel.hidden=true;panel.remove()}
+    Fx.after(root);if(open&&row)row.scrollIntoView({block:'nearest'});
+    dlgEl()}
+  function fillPanel(b){
+    $('.D-pfh span',panel).textContent=`${b.ref} · ${b.file}`;
+    $('.D-fields',panel).innerHTML=segHTML(b)+tallyHTML(b)+KEYS.map(k=>rowHTML(b,k)).join('')+payHTML(b);
+    $('.D-pfoot',panel).innerHTML=footHTML(b);
+    vw.refresh();vw.go(true)}
+  function dlgEl(){let d=$('.dlg-bg',root);if(!dlg){d?.remove();return}
+    const tg=dlg.map(b=>b),sum=tg.reduce((a,b)=>a+b.fields.total.value,0);
+    if(!d){d=document.createElement('div');d.className='dlg-bg';root.append(d)}
+    d.innerHTML=`<div class="dlg" role="dialog" aria-modal="true"><p>Confirm ${tg.length} bills, ${inr(sum)} in all?</p><div><button class="btn" data-act="dcancel">Cancel <span class="kh">Esc</span></button><button class="btn pri" data-act="dok">Confirm <span class="kh">↵</span></button></div></div>`;$('.pri',d).focus()}
+  const V={nav:KEYS,
+    mount(r){root=r;r.innerHTML=`<div class="D"><header class="D-head"></header><div class="D-table" role="grid"></div></div>`;
+      head=$('.D-head',r);body=$('.D-table',r);
+      panel=document.createElement('div');panel.className='D-panel';panel.hidden=true;
+      panel.innerHTML='<div class="D-pv"></div><div class="D-pf"><div class="D-pfh"><button class="btn sm back" data-act="dclose">‹ Bills</button><span></span></div><div class="D-fields"></div><div class="D-pfoot"></div></div>';
+      vw=new Viewer($('.D-pv',panel),{pad:12})},
+    update(reason){
+      if(reason==='bill'){open=false}
+      if(reason==='hover'){if(open){vw.refresh();$$('.ft[data-hover]',panel).forEach(e=>e.classList.toggle('h',e.dataset.hover===S.hover))}return}
+      if(reason==='zoom'){if(open)vw.go(true);return}
+      render(reason)},
+    onKey(e){
+      if(dlg){if(e.key==='Enter'){dlgOk();return true}if(e.key==='Escape'){dlg=null;render();return true}return true}
+      if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){const t=bulkTargets(sel);if(!t.length){S.status='No clean bills to confirm';emit('change');return true}dlg=t;dlgEl();return true}
+      if((e.metaKey||e.ctrlKey)||e.altKey)return false;
+      if(open){if(e.key==='Escape'&&!S.locating&&S.zoomMode==='page'){open=false;emit('change');return true}return false}
+      const k=e.key;
+      if(k==='ArrowDown'||k==='ArrowUp'||k==='j'||k==='k'){S.done=false;openBill(S.idx+(k==='ArrowDown'||k==='j'?1:-1));return true}
+      if(k==='Enter'){const b=cur();if(b.confirmed)return true;if(isClean(b)){confirmBill(b);return true}openPanel();return true}
+      if(k==='x'||k==='X'){sel.has(S.idx)?sel.delete(S.idx):sel.add(S.idx);render();return true}
+      return false},
+    onAct(act,el){
+      if(act==='dsel'){const i=+el.dataset.i;sel.has(i)?sel.delete(i):sel.add(i);render();return true}
+      if(act==='dopen'){S.openBill(+el.dataset.i);return true}
+      if(act==='dclose'){open=false;emit('change');return true}
+      if(act==='dbulk'){const t=bulkTargets(sel);if(t.length){dlg=t;dlgEl()}return true}
+      if(act==='dcancel'){dlg=null;render();return true}
+      if(act==='dok'){dlgOk();return true}
+      return false},
+    onRow(i){if(i!==S.idx)openBill(i);if(isPhone()||false)openPanel()},
+    destroy(){vw.destroy()}};
+  function openPanel(){const b=cur();if(b.confirmed)return;open=true;S.zoomMode='field';emit('change')}
+  function dlgOk(){const t=dlg;dlg=null;sel.clear();bulkConfirm(t)}
+  S.openBill=i=>{if(i!==S.idx)openBill(i);openPanel()};
+  return V}
+
+/* =====================================================================
+   VARIANT R: recommended blend = A structure + B's crop over the total + C's stop-to-stop Enter flow
+   (laptop: A with the proof strip; phone: B's column; the Enter flow is the store's default)
+   ===================================================================== */
+function makeR(){
+  let root,sub,mq=matchMedia('(max-width:719px)'),h=()=>build();
+  function build(){if(sub)sub.destroy();root.innerHTML='';sub=mq.matches?makeB():makeA({strip:true});S.nav=sub.nav;sub.mount(root);sub.update('bill')}
+  return{get nav(){return sub?.nav},
+    mount(r){root=r;mq.addEventListener('change',h);build()},
+    update(reason){sub.update(reason)},onKey(e){return sub.onKey?.(e)},onAct(a,el,e){return sub.onAct?.(a,el,e)},
+    destroy(){mq.removeEventListener('change',h);sub.destroy()}}}
+/* =====================================================================
+   SHARED: prototype chrome (switcher, theme, state readout, help, toast) and global input
+   ===================================================================== */
+const VARIANTS={A:{name:'Margin Notes',make:makeA},B:{name:'Proof Strips',make:makeB},C:{name:'Spotlight',make:makeC},D:{name:'Tally Sheet',make:makeD},R:{name:'Recommended blend',make:makeR}};
+const ORDER=Object.keys(VARIANTS);
+let V=null,vkey=null;
+function setVariant(k,silent){if(!VARIANTS[k])k='A';
+  if(V)V.destroy();$('#vroot').innerHTML='';S.startKey=null;S.primaryFn=null;S.openBill=null;S.viewOpen=false;S.sim=null;S.editing=null;S.locating=null;
+  vkey=k;V=VARIANTS[k].make();V.mount($('#vroot'));S.nav=V.nav||KEYS;
+  $('#plab').textContent=`${k} · ${VARIANTS[k].name}`;
+  const u=new URL(location.href);u.searchParams.set('variant',k);history.replaceState(null,'',u);
+  document.title=`Bill review · ${k}`;
+  S.openBill=S.openBill||null;
+  openBill(S.idx)}
+const cycle=d=>setVariant(ORDER[(ORDER.indexOf(vkey)+d+ORDER.length)%ORDER.length]);
+
+function render(reason){
+  const end=$('#end'),vr=$('#vroot');
+  if(S.done){const first=end.hidden,ae=document.activeElement,had=first||end.contains(ae)||ae===document.body;vr.hidden=true;end.hidden=false;
+    if(first||reason!=='hover'){end.innerHTML=endHTML();if(had)$('h1',end).focus()} /* R3-9 */
+    if(first)$('#live').textContent=[...end.querySelectorAll('h1,p,.endd')].map(x=>x.textContent).join(' ')}else{end.hidden=true;vr.hidden=false;V.update(reason)}
+  renderToast();renderLive();renderState(reason);renderHelp()}
+on(render);
+/* chrome renderers */
+let toastT=0,toastShown=null;
+function renderToast(){const el=$('#toast'),t=S.done?null:S.toast; /* the end screen has its own Undo */
+  document.body.classList.toggle('toast-on',!!t);
+  if(!t){el.hidden=true;toastShown=null;el.style.bottom='';return}
+  if(toastShown!==t.t){toastShown=t.t;el.hidden=false;el.innerHTML=`<span>${esc(t.text)}</span><button data-act="${t.ref?'toastundo':'undo'}">Undo</button>`; /* R5-16: no ⌘Z hint; the toast undoes its own bill, ⌘Z the latest change */
+    /* R3-5: waits while hovered or focused */
+    const hide=()=>{if(el.matches(':hover')||el.contains(document.activeElement)){toastT=setTimeout(hide,2000);return}S.toast=null;el.hidden=true;el.style.bottom='';document.body.classList.remove('toast-on')};
+    clearTimeout(toastT);toastT=setTimeout(hide,6000)}
+  /* phone: the toast sits in the room the pinned footer makes for it, measured so a taller footer still fits */
+  const pin=isPhone()&&$('.B-pin:not([hidden])');el.style.bottom=pin?(innerHeight-pin.getBoundingClientRect().top-el.offsetHeight-5)+'px':''}
+function renderHelp(){const el=$('#help');if(!S.help){if(el.open){el.close();const f=()=>{if(document.activeElement?.closest?.('#help'))document.activeElement.blur();syncDomFocus($('#vroot'))};f();setTimeout(f,0)}return}
+  if(el.open)return;
+  const rows=[['Enter','Do the next obvious thing'],['⌘/Ctrl Enter','Confirm bill from anywhere, if clean'],['↑ ↓  Tab','Move between fields'],['1 2 3','Take a candidate'],['E  F2','Edit the focused value'],['L','Point to it on the page'],['N','Not on the bill'],['Z','Fit page / fit field'],['J  K','Next / previous bill'],['S','Skip for later'],['⌘/Ctrl Z','Undo the last change'],['Space','Whole bill (B)'],['X','Select a row (D)'],['← →','Prototype: switch variant'],['?','This list'],['Esc','Cancel edit, leave locate, zoom out']];
+  el.innerHTML=`<div class="hh"><h2>Keys</h2><button class="btn sm" data-act="closehelp">Close <span class="kh" aria-hidden="true">Esc</span></button></div><dl>${rows.filter(r=>vkey!=='R'||!['Space','X','← →'].includes(r[0])).map(r=>`<dt><span class="kh">${esc(r[0])}</span></dt><dd>${esc(r[1])}</dd>`).join('')}</dl><label class="sk"><input type="checkbox" id="sk"${S.singleKeys===false?'':' checked'}> Single-key shortcuts</label>`;el.showModal()}
+$('#help').addEventListener('close',()=>{if(S.help){S.help=false;emit('help')}});
+/* R3-8: speak each new status (even repeated words), each new toast and each arrival; never re-speak on a plain re-render */
+let liveSeen={};
+function renderLive(){if(S.done)return;const n={s:S.statusN,t:S.toast?.t,a:S.arrive};
+  const fresh=(S.status&&n.s!==liveSeen.s)||(n.t&&n.t!==liveSeen.t)||(n.a&&n.a!==liveSeen.a);liveSeen=n;if(!fresh)return;
+  say([S.status||(S.toast&&S.toast.text),S.arrive].filter(Boolean).map(x=>x.replace(/\.$/,'')).join('. '));S.arrive=''} /* B4: an arrival is spoken once */
+function say(m){const el=$('#live');el.textContent=m+(el.textContent===m?'\u00A0':'')}
+function renderState(reason){const box=$('#statebox');if(box.hidden||reason==='hover')return;const b=cur();if(!b)return;
+  const rows=KEYS.map(k=>{const f=b.fields[k],d=disp(b,k);return `<div><span class="k">${NAMES[k].padEnd(11)}</span> ${d}${isStop(b,k)?' · STOP':''}${f.box?' · box':''}${f.differs?' · differs':''}${f.placed?' · placed':''}<br>&nbsp;&nbsp;<span class="k">${esc(String(valueText(b,k)??'none')).slice(0,34)}</span></div>`}).join('');
+  box.innerHTML=`<b>${b.ref}</b> ${S.idx+1}/${S.bills.length} · ${b.kind}${b.confirmed?' · CONFIRMED':''}${S.done?' · ALL DONE':''}<br>
+  <span class="k">stops</span> ${stops(b).join(', ')||'none (clean)'}<br><span class="k">focus</span> ${S.focus} <span class="k">edit</span> ${S.editing||'-'} <span class="k">locate</span> ${S.locating||'-'}<br>
+  <span class="k">zoom</span> ${S.zoomMode} <span class="k">undo</span> ${S.undo.length} <span class="k">variant</span> ${vkey}<br><br>${rows}<br>
+  <span class="k">bills</span> ${S.bills.map(x=>x.ref.slice(2)+(x.confirmed?'✓':worst(x)==='located'?'○':'◇')).join(' ')}<br><br>
+  simulate <select id="sim" aria-label="Simulate"><option value="">normal</option><option value="reading"${S.sim==='reading'?' selected':''}>still reading</option><option value="failed"${S.sim==='failed'?' selected':''}>couldn’t read</option><option value="noPreview"${S.sim==='noPreview'?' selected':''}>preview failed</option></select>
+  <button id="rst" style="margin-left:6px">reset all</button>`}
+function resetAll(){S.bills=JSON.parse(JSON.stringify(BILLS));S.undo=[];S.done=false;S.toast=null;openBill(0)}
+document.addEventListener('change',e=>{if(e.target.id==='sk'){S.singleKeys=e.target.checked;return}if(e.target.id==='sim'){S.sim=e.target.value||null;if(!S.sim)S.editing=null;if(S.sim==='failed'){S.editing='total';S.focus='total'}
+  if(S.sim==='reading'&&S.focus!=='total'){S.focus='total'}emit('sim')}});
+
+/* global clicks */
+document.addEventListener('click',e=>{const t=e.target;
+  if(t.id==='rst'){resetAll();return}
+  const a=t.closest('[data-act]');
+  const dr=t.closest('.D-row');
+  if(a){const act=a.dataset.act,key=a.dataset.key||a.closest('[data-key]')?.dataset.key||S.focus;
+    if(V.onAct&&V.onAct(act,a,e))return;
+    switch(act){
+      case'edit':startEdit(key);break;
+      case'locate':startLocate(key);break;
+      case'notbill':S.focus=key;notOnBill(key);break;
+      case'pick':pick(key,+a.dataset.n);break;
+      case'confirm':(S.primaryFn||doPrimary)();break;
+      case'openbill':S.done=false;openBill(+a.dataset.i);break;
+      case'help':S.help=true;emit('help');break;
+      case'closehelp':S.help=false;emit('help');break;
+      case'undo':doUndo();break;
+      case'undoconfirm':undoConfirm();break;
+      case'toastundo':undoConfirm(S.bills.findIndex(x=>x.ref===S.toast?.ref));break;
+      case'reset':resetAll();break}
+    return}
+  if(dr&&V.onRow){V.onRow(+dr.dataset.i);return}
+  const ft=t.closest('.ft[data-key]');if(ft&&ft.dataset.key!==S.focus)setFocus(ft.dataset.key);
+  if(S.help&&t.id==='help'){const r=t.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){S.help=false;emit('help')}}});
+/* R3-1: a pointer press must not rebuild the control under it; the click handler moves the field focus, and the primary acts on the field it names */
+/* D5: html.kbd from the first real key until the next pointer press */
+const capSync=()=>$('.vw.locating')?._v?.caption(false); /* R5-7: the caption's key hint follows html.kbd */
+let viaPtr=false;addEventListener('pointerdown',()=>{viaPtr=true;if(document.documentElement.classList.contains('kbd')){document.documentElement.classList.remove('kbd');capSync()}},true);
+addEventListener('keydown',e=>{viaPtr=false;if(!['Shift','Control','Alt','Meta'].includes(e.key)&&!document.documentElement.classList.contains('kbd')){document.documentElement.classList.add('kbd');capSync()}},true);
+document.addEventListener('focusin',e=>{if(viaPtr)return;const ft=e.target.closest?.('.ft[data-key]');
+  if(ft?.dataset.key==='confirm'){if(!S.done&&S.focus!=='confirm'&&!stops(cur()).length)setFocus('confirm');return} /* B7: on a clean bill the primary acts on the whole bill */
+  if(ft&&ft.dataset.key!==S.focus&&!e.target.closest('.proto'))setFocus(ft.dataset.key)});
+document.addEventListener('mouseover',e=>{const h=e.target.closest?.('[data-hover]');const k=h?h.dataset.hover:null;if(k!==S.hover)setHover(k)});
+
+/* global keys: the spec's laptop map (2.8) */
+addEventListener('keydown',e=>{
+  const t=e.target;if(t.closest&&t.closest('input,textarea,select,[contenteditable="true"]'))return;
+  if(S.help){if(e.key==='Escape'||e.key==='?'){S.help=false;emit('help')}return}
+  if(V&&V.onKey&&V.onKey(e)){e.preventDefault();return}
+  const k=e.key;
+  if(S.locating&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(k)){e.preventDefault();walkWord(k);return}
+  if((k==='ArrowLeft'||k==='ArrowRight')&&vkey!=='R'){e.preventDefault();cycle(k==='ArrowRight'?1:-1);return}
+  if(e.metaKey||e.ctrlKey){if(k==='Enter'){e.preventDefault();confirmBill(cur())}else if(k.toLowerCase()==='z'){e.preventDefault();doUndo()}return}
+  if(e.altKey)return;
+  if(k==='Enter'){if(t.closest&&t.closest('button,a,[role="button"]')&&!t.closest('[data-act="confirm"]'))return;if(t.closest&&t.closest('[data-act="confirm"]'))return;e.preventDefault();(S.primaryFn||doPrimary)();return}
+  if(S.done)return;
+  const field=S.focus&&S.focus!=='confirm'?S.focus:null;
+  if(k==='ArrowDown'||k==='ArrowUp'){e.preventDefault();const o=[...(S.nav||KEYS),'confirm'];let i=o.indexOf(S.focus);if(i<0)i=k==='ArrowDown'?-1:o.length;setFocus(o[clamp(i+(k==='ArrowDown'?1:-1),0,o.length-1)]);return}
+  if(S.singleKeys===false&&k.length===1)return; /* R3-16 */
+  if(k==='1'||k==='2'||k==='3'){if(field)pick(field,+k);return}
+  if(k==='e'||k==='E'||k==='F2'){e.preventDefault();startEdit(field||'total');return}
+  if(k==='l'||k==='L'){startLocate(field||'total');return}
+  if(k==='n'||k==='N'){if(field)notOnBill(field);return}
+  if(k==='z'||k==='Z'){S.zoomMode=S.zoomMode==='field'?'page':'field';emit('zoom');return}
+  if(k==='Escape'){if(S.locating)endLocate();else{S.zoomMode='page';emit('zoom')}return}
+  if(k==='j'||k==='J'){go(1);return}
+  if(k==='k'||k==='K'){go(-1);return}
+  if(k==='s'||k==='S'){skip();return}
+  if(k==='?'){S.help=true;emit('help')}});
+
+/* D4: while pointing, ←/→ walk the printed words in reading order, ↑/↓ go a line, Home/End to the ends */
+/* R5-10: one reading order (lines top to bottom, words left to right) for Tab and the arrows */
+function readingLines(b,ws){const R=w=>itemR(b,w.dataset.id),cy=w=>R(w)[1]+R(w)[3]/2,lines=[];
+  for(const w of [...ws].sort((a,c)=>cy(a)-cy(c))){const l=lines.at(-1);if(l&&cy(w)-cy(l[0])<R(l[0])[3]/2)l.push(w);else lines.push([w])}
+  lines.forEach(l=>l.sort((a,c)=>R(a)[0]-R(c)[0]));return lines}
+function walkWord(k){const host=$('.vw.locating');if(!host)return;const b=cur(),ws=$$('.it[data-ocr]',host);if(!ws.length)return;
+  const R=w=>itemR(b,w.dataset.id),cx=w=>R(w)[0]+R(w)[2]/2,lines=readingLines(b,ws);const flat=lines.flat(),w0=document.activeElement?.closest?.('.it[data-ocr]'),i=flat.indexOf(w0);let t;
+  if(k==='Home')t=flat[0];else if(k==='End')t=flat.at(-1);else if(i<0)t=flat[0];
+  else if(k==='ArrowLeft'||k==='ArrowRight')t=flat[clamp(i+(k==='ArrowRight'?1:-1),0,flat.length-1)];
+  else{const li=lines.findIndex(l=>l.includes(w0));t=lines[clamp(li+(k==='ArrowDown'?1:-1),0,lines.length-1)].reduce((a,c)=>Math.abs(cx(c)-cx(w0))<Math.abs(cx(a)-cx(w0))?c:a)}
+  t.focus({preventScroll:true})}
+
+/* switcher, theme, state toggle */
+$('#pv').onclick=()=>cycle(-1);$('#pn').onclick=()=>cycle(1);
+$('#pt').onclick=()=>{const r=document.documentElement;const dark=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme:dark)').matches;r.dataset.theme=dark?'light':'dark'};
+$('#ps').onclick=()=>{const b=$('#statebox');b.hidden=!b.hidden;$('#ps').classList.toggle('on',!b.hidden);renderState('change')};
+
+/* boot */
+(async()=>{
+  await calibrate();selfCheck();
+  S.bills=JSON.parse(JSON.stringify(BILLS));
+  const qp=new URLSearchParams(location.search),bi=S.bills.findIndex(b=>b.ref===qp.get('bill'));if(bi>0)S.idx=bi;
+  setVariant(qp.get('variant')?.toUpperCase()||'A');
+  window.__dues={S,setVariant,cur};
+})();
+</script>
+</body>
+</html>
