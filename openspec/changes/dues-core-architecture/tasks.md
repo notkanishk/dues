@@ -37,10 +37,11 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 1.5 Device test: share the success screen from CRED, Google Pay, PhonePe, Paytm, BHIM and a bank app; record image vs text vs nothing; check HEIC handling in paperless
 - [x] 1.6 Decide the stack from 1.1–1.2; record it as ADR 0007; fill in this file's build/test commands; freeze RawExtraction contract 2 (design §3, ADR 0006). Done: ADR 0007 (TypeScript only); commands above; contract 2 frozen. Web framework (Next.js 16 proposed) is still open, awaiting the owner.
 - [x] 1.7 Bun compatibility check (fictional data, experiment host): under `bun --bun`, Next.js 16 build and standalone start; web-push VAPID send to a local push endpoint; pg-boss 12 send/work; Drizzle migrate on Postgres 18; openid-client discovery; `@embedpdf/pdfium` char boxes; onnxruntime-node PP-OCRv6 one page with memory bound; docxtemplater fill. Anything failing runs on Node 24; record which in ADR 0007. Done: all 8 production pieces pass on Bun 1.4.5; only Vitest's forks pool fails, so tests use `--pool=threads` (ADR 0007).
+- [ ] 1.8 Rerun the 1.7 checks on the versions pinned in ADR 0007 (Bun 1.4.5, Node 26 LTS fallback, Postgres 19.0, TypeScript 7.0, Next.js 16.4, Gotenberg 9.9.1); add a TypeScript 7 typecheck of the Next.js app and a Gotenberg 9.9.1 docx-to-PDF conversion. Record any piece that fails and its fallback in ADR 0007.
 
 ## 2. Phase 1: foundations, identity, Expense core
 
-- [ ] 2.1 Scaffold the repo (app, worker, Postgres 18, Gotenberg in Docker Compose); CI runs tests against a real Postgres; `<APP_HOST>` deploy notes stay in `private/`
+- [ ] 2.1 Scaffold the repo (app, worker, Postgres 19, Gotenberg 9.9 in Docker; versions as pinned in ADR 0007 Compose); CI runs tests against a real Postgres; `<APP_HOST>` deploy notes stay in `private/`
 - [ ] 2.2 test: money — paise in, paise out; sums exact; no float path (platform-foundations)
 - [ ] 2.3 Money type and formatting (₹ Indian grouping, two decimals, paise kept as printed)
 - [ ] 2.4 test: Keys and References — UUIDv7 keys; `E-`/`B-`/`R-`/`O-` References global, unpadded, immutable (ADR 0005)

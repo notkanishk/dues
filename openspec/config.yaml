@@ -8,7 +8,7 @@ context: |
   Functional source of truth before specs existed: docs/spec/FUNCTIONAL.md. Decisions: docs/adr/.
   Integrations: paperless-ngx 3.x (documents, OCR, webhook, REST API), Zitadel OIDC
   (roles claim, Syndra grants roles), Gotenberg (docx -> PDF).
-  Stack: TypeScript only, Next.js 16 on Bun, Node 24 as fallback (ADR 0007): Drizzle, pg-boss, docxtemplater, onnxruntime-node.
+  Stack: TypeScript only, Next.js 16 on Bun 1.4, Node 26 LTS as fallback, Postgres 19, latest pinned versions (ADR 0007): Drizzle, pg-boss, docxtemplater, onnxruntime-node.
   Other languages or GPU
   models join only as HTTP Adapters. Postgres.
   Deployment: Docker Compose in a Proxmox LXC behind Caddy (placeholders only: <APP_HOST>,

@@ -6,9 +6,25 @@ Dues is one TypeScript app: Next.js 16 on Bun. Any other language, and any GPU m
 
 ## Stack
 
-Bun 1.4 (runtime, package manager, script runner), with Node 24 as the fallback runtime for any piece that fails the Bun compatibility check (task 1.7); Next.js 16 (App Router); Drizzle 0.45 on `pg` (Postgres 18); Vitest (unit, db, golden) and Playwright; pg-boss 12; `@modelcontextprotocol/sdk`; `web-push` 4.0.0 (pin 3.x if the ESM major bites); docxtemplater plus Gotenberg; `sharp` plus `@embedpdf/pdfium`; `onnxruntime-node` for OCR; Zod for the RawExtraction contract 2 (JSON Schema is generated from it).
+Latest stable releases as of 21 Nov 2026 (owner: "use the latest versions of all"), pinned exactly in the lockfile and image tags, and raised deliberately rather than floated:
 
-**Web framework and runtime (owner, 21 Nov 2026: "nextjs and bun").** Next.js 16 (`docs/research/notes/Tracker stack choice/stack_choice.md`) on Bun. Known Bun risks, checked in task 1.7: `node:crypto` is only partly implemented (web-push VAPID signing), Next.js on Bun is supported by Bun rather than by Next.js's primary target, and onnxruntime-node memory grows per page in one Bun process (the OCR worker already runs a worker per few pages). Anything that fails runs on Node 24 instead; the Module map does not change (design D10).
+| Piece | Version |
+|---|---|
+| Runtime, package manager, script runner | Bun 1.4.5 (fallback runtime: Node 26.13 LTS) |
+| Web framework | Next.js 16.4.6, React 19.3.1 |
+| Language | TypeScript 7.0.2 |
+| Database | Postgres 19.0; `pg` 8.23.1; Drizzle ORM 0.45.4, drizzle-kit 0.31.11 |
+| Jobs | pg-boss 12.38.2 |
+| Contract | Zod 4.6.7 (JSON Schema generated from it) |
+| Tests | Vitest 5.1.1 (`--pool=threads`), Playwright 1.65.1 |
+| Identity | openid-client 6.9.1 |
+| Push | web-push 4.0.0 |
+| Assistant API | `@modelcontextprotocol/sdk` 1.32.2 |
+| Claim form | docxtemplater 3.71.1 with PizZip 3.3.0; Gotenberg 9.9.1 |
+| Images and PDF text | sharp 0.35.5; `@embedpdf/pdfium` 2.15.1 |
+| OCR | onnxruntime-node 1.31.1 with PP-OCRv6 (denormal weights zeroed); `@gutenye/ocr-node` 1.4.9 if it fits the worker |
+
+**Web framework and runtime (owner, 21 Nov 2026: "nextjs and bun").** Next.js 16 (`docs/research/notes/Tracker stack choice/stack_choice.md`) on Bun. Known Bun risks, checked in task 1.7: `node:crypto` is only partly implemented (web-push VAPID signing), Next.js on Bun is supported by Bun rather than by Next.js's primary target, and onnxruntime-node memory grows per page in one Bun process (the OCR worker already runs a worker per few pages). Anything that fails runs on Node 26 LTS instead; the Module map does not change (design D10).
 
 **Bun compatibility (task 1.7, 21 Nov 2026, Bun 1.4.5, fictional data).** Under `bun --bun` these pass: the Next.js 16 standalone server (SSR page and a route handler reading Postgres via Drizzle), web-push 4.0.0 (ES256 VAPID verified, aes128gcm payload round-trips), pg-boss 12 (including a retry), Drizzle 0.45 and drizzle-kit migrate, openid-client (discovery, PKCE, token exchange, ID token), `@embedpdf/pdfium` char boxes (0 delta against Node), onnxruntime-node PP-OCRv6 small, and docxtemplater (byte-identical to Node). **No production piece needs Node.** Vitest's default forks pool fails under Bun (`child.channel?.unref is not a function`); tests run with `--pool=threads`. OCR peak memory is about 25 to 30% higher on Bun than on Node (about 0.9 GB against 0.7 GB per worker-per-page), so the OCR worker keeps one page per worker.
 

@@ -11,7 +11,7 @@ Dues follows every Payment a Claimant makes for the lab until the university rei
 Constraints that shape the design:
 
 - **One maintainer.** Few moving parts; boring technology; every rule in one place.
-- **TypeScript only (ADR 0007, 2026-11-21).** One TypeScript app, Next.js 16 on Bun with Node 24 as fallback (Drizzle, pg-boss, docxtemplater, Gotenberg, onnxruntime-node). Another language or a GPU model joins only as an HTTP Adapter behind an existing port. The web framework (Next.js 16 proposed) awaits the owner's confirmation, so the design stays in Modules and Interfaces, not files and frameworks.
+- **TypeScript only (ADR 0007, 2026-11-21).** One TypeScript app, Next.js 16 on Bun with Node 26 LTS as fallback (Drizzle, pg-boss, docxtemplater, Gotenberg, onnxruntime-node). Another language or a GPU model joins only as an HTTP Adapter behind an existing port. The web framework (Next.js 16 proposed) awaits the owner's confirmation, so the design stays in Modules and Interfaces, not files and frameworks.
 - **The app is the only gate.** The network does not isolate hosts; every read and write is scoped by Claimant inside the app.
 - **Money rules.** Integer paise; moments as UTC `timestamptz`; business dates as plain `date`; suggest, then confirm; append-only audit log.
 - **Scale is small.** Tens of Claimants, hundreds of Expenses each, a few Claims a month. Correctness and Locality beat throughput everywhere.
@@ -178,7 +178,7 @@ The rendering half of capability `claims`.
 - **Tested through its Interface**: golden test on filled `word/document.xml` and page count; a field-by-field text check of the PDF from real Gotenberg (every row's date, bill no, description, amount, receipt and remark, plus total and amount in words, against the Claim data); the fake converter for everything else.
 - **Direction (spike 1.2, 21 Nov 2026; results in `docs/research/notes/Claim form PDF/results.md`)**:
   - **The .docx is always generated and kept** with the Claim. Owner, 21 Nov 2026: "it is good to have a docx version always".
-  - **The PDF is made from that same .docx by Gotenberg 9 (LibreOffice) with its default fonts.** There is one template, so the .docx and the PDF cannot drift apart. Measured: same page count and page-break row as Word, 0 of 112 fields missing, 104 MiB, 0.1 s warm.
+  - **The PDF is made from that same .docx by Gotenberg 9.9 (LibreOffice) with its default fonts.** There is one template, so the .docx and the PDF cannot drift apart. Measured: same page count and page-break row as Word, 0 of 112 fields missing, 104 MiB, 0.1 s warm.
   - **The PDF must keep the form's general format and structure with no information loss.** Owner, 21 Nov 2026: "the pdf should just have the same general format and structure with no information loss". Pixel match with Word is not required. A golden test checks the text, field by field.
   - **Typst and HTML (Chromium) were considered and not chosen**, because each needs a second template, which means drift. Typst passed the no-information-loss check (0 of 112 fields missing, 2 pages, header row repeated), so the rejection is about drift, not about loss.
   - The filler is docxtemplater (ADR 0007).
@@ -314,7 +314,7 @@ Web process and worker process from the same image; Postgres holds data and queu
 
 ## Open Questions
 
-1. ~~Web framework~~ **Resolved (owner, 2026-11-21):** Next.js 16 on Bun (ADR 0007); Bun compatibility checked in task 1.7, Node 24 as fallback.
+1. ~~Web framework~~ **Resolved (owner, 2026-11-21):** Next.js 16 on Bun (ADR 0007); Bun compatibility checked in task 1.7, Node 26 LTS as fallback.
 2. ~~Claim name timing~~ **Resolved (maintainer, 2026-11-20):** the name is fixed when the package is built (it is in the email subject), renamed if rebuilt in a later month before submission, frozen once submitted. Was: Does the form or the package file naming carry the Claim name? The name is assigned at first submission, but the package is built before it. If yes, the name must be reserved when the package is built.
 3. ~~Same file from two Claimants~~ **Resolved:** paperless-ngx 3.x consumes identical files by default and only logs a warning (`PAPERLESS_CONSUMER_DELETE_DUPLICATES` unset = false; checked in `documents/consumer.py` on the paperless host, 2026-11-20). Dues receives both copies; duplicate-guard's checksum rule and the payback prompt handle them. Keep `CONSUMER_DELETE_DUPLICATES` off. Was: Two Claimants holding the same file: paperless rejects the second identical upload. How does the second Claimant's copy reach Dues (surface paperless's duplicate error, or link by checksum on request)?
 4. Does the paperless webhook action allow a custom secret header, and does it fire before OCR text is available? (Phase 0 live test.)
