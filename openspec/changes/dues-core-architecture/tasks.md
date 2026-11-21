@@ -78,7 +78,7 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 3.2j Validators as named pure functions `(proposal, readings, located) → Signal`; the fold takes the configured list
 - [ ] 3.2k `evals/` gold-set gate (a box is right only if it covers the whole value: text layer characters, or hand-checked reference boxes on raster bills; a box that merely exists, such as a sliver, never scores as right): runs any PageText x Extractor x Locator combination on the private gold set (outside the repo), prints the per-field table, fails if a swap scores below the current one on any field; only aggregates recorded
 - [ ] 3.2l test: PP-OCR worker bounds — thread cap (`intraOpNumThreads` 2), memory stays flat over many pages, one failed page does not stop the rest
-- [ ] 3.2m PP-OCR worker: one page per worker, tier config (tiny | small | medium, default small; medium reruns only raster fields left not located, as a background job), subtract the page pad from word boxes; check the ONNX files' licence before shipping
+- [ ] 3.2m PP-OCR worker: one page per worker, tier config (tiny | small | medium, default small; medium reruns only raster fields left not located, as a background job), subtract the page pad from word boxes, start a word box one character width left of its first CTC position, copy the line transform before freeing it; check the ONNX files' licence before shipping
 - [ ] 3.3 test: Paperless Adapter against a recorded-response fake (get, download, annotate, upload, findByChecksum)
 - [ ] 3.4 Paperless HTTP Adapter (service-account token)
 - [ ] 3.5 test: Matching `propose` — one clear match, several candidates (Check), none; ±₹1 / ±10 days; one Payment for 2–3 invoices from one vendor; four invoices get no suggestion

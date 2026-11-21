@@ -42,7 +42,7 @@ Latest stable releases as of 21 Nov 2026 (owner: "use the latest versions of all
 Box bake-off, 21 Nov 2026: 38 single-invoice real bills (14 text PDFs, 24 raster). Data stays private; only aggregate counts are recorded here.
 
 - **Field locations** (total / date / bill number / GSTIN located, out of 38 / 38 / 30 / 26):
-  - TypeScript text layer plus PP-OCRv6 small: 34 / 28 / 28 / 26.
+  - TypeScript text layer plus PP-OCRv6 small: 34 / 28 / 28 / 26 (boxes found; scored strictly against whole-value reference boxes, see design §3).
   - Best Python (PP-OCRv6 medium through RapidOCR): 35 / 30 / 28 / 26.
   - Old baseline (paperless's text layer, strict matcher): 26 / 25 / 24 / 17.
 - **Text layer parity:** `@embedpdf/pdfium` character boxes equal pypdfium2's on 38 PDFs (0.0000 pt delta), at about 0.01 s a page.
