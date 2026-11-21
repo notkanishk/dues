@@ -49,6 +49,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 | fulfilled | bool + `fulfilled_on` |
 | paperless_id | Document ID; required before the Bill can be claimed |
 | status | `expected` · `ready` · `claimed` · `reimbursed` · `cancelled` (§3.2) |
+| review | `in review` (not every field confirmed) · `confirmed`; alongside `status`, not part of it (§3.2) |
 | claim_id | Set when added to a Claim |
 | remarks | e.g. "Informal/raw bill attached" (auto for `informal`) |
 
@@ -91,11 +92,17 @@ draft ──confirm──▶ open ──Open amount = 0 and all Bills reimbursed
 expected ──goods arrive / service done──▶ fulfilled? ──document attached──▶ ready ──added to Claim──▶ claimed ──Reimbursement──▶ reimbursed
    │                                          (ready requires both fulfilled AND paperless_id)
    └──cancelled before fulfilment──▶ cancelled  (creates an expected Refund of the same amount)
+
+review, alongside status:  in review ──Claimant confirms every field──▶ confirmed
+                           in review ◀──any value changes, or Undo confirm──┘
 ```
 - `shop` and `service` Expenses create their Bill already fulfilled.
 - A bill arriving first creates its Expense and a fulfilled, `ready` Bill (you can only scan what you have); no payment record is needed to claim it.
-- Only `ready` Bills can be added to a Claim. Also blocked: a Bill matching a Ledger line (§7); a Bill with an open "Check" match (W4.3, one tap to confirm or move); a Bill held by two Claimants with no Payback link (W9.5); a Bill whose Expense has no "what for" (it can be typed inline while building the Claim, W7).
-- **Corrections after a document is attached:** amount, bill no and date stay editable (e.g. the reader got them wrong). The Bill then shows "differs from the document" until the Claimant confirms the document says so; every edit goes to the audit log. Locked once the Bill is on a submitted Claim.
+- Only `ready` Bills can be added to a Claim. Also blocked: a Bill in review (not every field confirmed); a Bill matching a Ledger line (§7); a Bill with an open "Check" match (W4.3, one tap to confirm or move); a Bill held by two Claimants with no Payback link (W9.5); a Bill whose Expense has no "what for" (it can be typed inline while building the Claim, W7).
+- **Field confirmation.** The fields read from a Bill's document (bill no, bill date, amount, and the like) are each confirmed by the Claimant; the reader only proposes. A Bill is **confirmed** when every one of its fields is; until then it is **in review**. How a Claimant reviews a Bill is designed in [`docs/research/notes/Bill review UX/design.md`](../research/notes/Bill%20review%20UX/design.md) §7 (variant R, approved 21 Nov 2026); see ADRs [0008](../adr/0008-region-marking-has-no-keyboard-only-path.md) and [0009](../adr/0009-bill-confirm-reopen-undo-model.md).
+- **Confirmed → back in review.** Any change to a value on a confirmed Bill, by any path, reopens it: it is in review until confirmed again. Keeping the reader's value changes nothing and does not reopen. Undo is allowed until the Bill is on a submitted Claim: one "Undo confirm" per Bill restores the values from before the confirm and puts the Bill back in review. Every confirm, reopen, edit and undo goes to the audit log (ADR 0009).
+- **Recall unlocks.** When a Claim is recalled (§3.3), its Bills become editable again. Each Bill stays confirmed until one of its values changes; then it goes back to review and must be confirmed again (ADR 0009). "Undo confirm" is offered again, because the Bill is no longer on a submitted Claim.
+- **Corrections after a document is attached:** amount, bill no and date stay editable (e.g. the reader got them wrong). An edit reopens review (above); once the value is confirmed again it carries the label "differs from the document". Every edit goes to the audit log. Locked once the Bill is on a submitted Claim.
 
 ### 3.3 Claim
 ```

@@ -9,8 +9,14 @@ Bills are read by vision-language models, not by OCR plus rules (an experiment o
 - **Dues calling the Claimant's Claude Code**: impossible (it runs on their machine); Claude Code calls Dues instead, as another driving Adapter beside the web UI.
 - **Provider-reported confidence**: rejected; not comparable across models.
 
+## Evidence
+
+Prototype on 42 real bills (aggregates only; data stays private), GLM vision model: text PDF as text layer plus 100 dpi image gave 0 broken fields and 55% fewer prompt tokens than the text layer plus a 200 dpi image; text only, a 1280 px cap (broke GSTINs), crop, 2048 px upscale, region bands, and paperless OCR text for raster images were dropped (no gain or worse). The second-reading triggers caught only 5 of 8 bills with a wrong key field (the keep rule needed ≥ 80%). Agreement across model families works for totals but not for dates and bill numbers (6 cases where both agree on the wrong value). Detail: design §3.
+
 ## Consequences
 
+- Paperless adds nothing before the model. After it: OCR text grounds values (ambiguous numeric date does not count, total > 0, bill number label risk), archive-PDF word positions give highlight boxes (located: totals 26 of 38, date 24, bill number 21 located and right, GSTIN 17; photos and handwriting often not, shown as "not located"), and its checksum catches duplicates. Its own date is not a Reading (15 right, 6 wrong, 17 none).
+- Agreement between families raises confidence but never replaces confirmation by the Claimant (ADR 0009).
 - External providers send document content outside the internal network. Each provider is marked `internal` or `external`; external ones are used for a Claimant's documents only if that Claimant has opted in (off by default). A Claimant using their own Claude Code makes that choice themselves.
 - A provider that answers `refused` (expired or revoked key, plan ended) is skipped until reconfigured; the next provider in the list takes over.
 - Books accepts a revised extraction for a document and updates only unconfirmed fields.

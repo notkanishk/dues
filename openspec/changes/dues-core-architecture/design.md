@@ -99,10 +99,24 @@ One contract, two kinds of reader. A provider is `Document → RawExtraction`, c
   - **Error modes**: `unavailable` (retry later), `refused` (expired/revoked: skip this provider until reconfigured), `contract_mismatch`.
 - **Adapters**: one `openai-compatible` Adapter (BharatCode `glm-5.3-flash` and vLLM Gemma 4 are config rows) and a `canned` fake. Two Adapters, a real Seam. No rules Adapter.
 - **Config**: `extractors: [{name, baseUrl, model, keyEnv, privacy: internal|external}]`, tried in order; external rows are skipped for Claimants who have not opted in.
-- **Hides**: prompt, page rendering (PDF 200 dpi, photos ≤ 2048 px, ≤ 4 pages), text layer, schema request, retries, provider quirks.
+- **Hides**: prompt, page rendering (text PDF: text layer + 100 dpi image; other PDFs 200 dpi; photos ≤ 2048 px; ≤ 4 pages), text layer, schema request, retries, provider quirks.
 - **Tested through its Interface**: contract tests on fictional fixtures against the fake; a recorded smoke test per configured provider.
 
-**Readings.** Every result, pulled or pushed, is stored as a Reading `{documentRef, checksum, extractor{name, model, version}, by: provider|claude-code, actor, raw, at}`: append-only, unique on (document, extractor name, model, version). The proposal is an order-independent fold over a document's Readings: Intake converts printed values (paise, ISO dates with plausibility checks, handwritten `2270-00` = ₹2,270.00), runs validators (subtotal + tax = total, GSTIN check digit, 12-digit UPI reference, value present in the text layer) and derives confidence from validators plus agreement across model families. Handwritten bills never auto-accept.
+**Readings.** Every result, pulled or pushed, is stored as a Reading `{documentRef, checksum, extractor{name, model, version}, by: provider|claude-code, actor, raw, at}`: append-only, unique on (document, extractor name, model, version). The proposal is an order-independent fold over a document's Readings: Intake converts printed values (paise, ISO dates with plausibility checks, handwritten `2270-00` = ₹2,270.00), runs validators (subtotal + tax = total, GSTIN check digit, 12-digit UPI reference, value present in the text layer) and derives confidence from validators plus agreement across model families. Handwritten bills never auto-accept. Reviewing the folded proposal field by field is designed in `docs/research/notes/Bill review UX/design.md` §7 (variant R, approved 21 Nov 2026); see ADRs 0008 and 0009.
+
+**Extraction approach and verdict (task 1.1; prototype on branch `prototype/explorations`, data stays in `private/`).** Scored on a gold set of 42 real bills with a GLM vision model, through the one provider Adapter. Only aggregate counts and verdicts are recorded here.
+
+- **Keep.** For text PDFs, send the PDF text layer plus a 100 dpi page image: 0 broken fields and 55% fewer prompt tokens than the text layer plus a 200 dpi image.
+- **Drop.** Text only (no image); a 1280 px cap (it broke GSTINs); document crop; a 2048 px upscale (worse); region bands; paperless OCR text added to the prompt for raster images (no gain, +18% tokens over the raster baseline).
+- **No second reading by trigger.** Triggers that call for a second reading caught only 5 of 8 bills with a wrong key field (the keep rule needed ≥ 80%). Agreement between two model families works for totals but not for dates and bill numbers: 6 cases where both families agree on the wrong value. Agreement raises confidence; it never replaces review (ADR 0009).
+- **Paperless's role: nothing before the model; three jobs after it.**
+  - Its OCR text grounds the model's values, as a validator in the fold: an ambiguous numeric date does not count as grounded; a total must be > 0; a bill number carries label risk (a "Reference Number" read as the bill number).
+  - Word positions in paperless's archive PDF give the highlight boxes shown in review.
+  - Its checksum catches duplicate uploads.
+  - Its own created date is dropped as a Reading (15 right, 6 wrong, 17 none of 38).
+- **Box coverage** (single-invoice bills, 38): totals located 26 (12 with more than one box); date 24; bill number 21 located and right; GSTIN 17. Photos and handwriting are often not located; the review UI then shows "not located" with no box.
+- **Review.** What the Claimant sees and does with these boxes and values is in `docs/research/notes/Bill review UX/design.md` §7 (variant R, approved 21 Nov 2026) and ADRs 0008 and 0009; not restated here.
+- **Rendering is now:** text PDF = text layer + 100 dpi image; other PDFs and photos = images as above. The contract (`RawExtraction`, contract 2) is not frozen here (task 1.6).
 
 ### 4. Paperless (Adapter Module)
 

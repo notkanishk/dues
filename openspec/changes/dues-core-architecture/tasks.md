@@ -15,7 +15,7 @@ Stack-specific commands are filled in at task 1.6.
 
 ## 1. Phase 0: stack decision and spikes
 
-- [ ] 1.1 Finish the invoice-parsing experiment (branch `prototype/explorations`); score all variants against the gold set; write the verdict and the extraction approach (local rules, Python worker, or LLM/vision) into this change
+- [x] 1.1 Finish the invoice-parsing experiment (branch `prototype/explorations`); score all variants against the gold set; write the verdict and the extraction approach (local rules, Python worker, or LLM/vision) into this change. Verdict: LLM/vision through the provider adapter; see design §3 "Extraction approach and verdict" and ADR 0006.
 - [ ] 1.2 Spike: fill the real form template with the chosen docx library from one fictionalised Claim; convert with Gotenberg; compare page count, table, fonts (Arial / Arial Narrow) against the Word-exported PDF
 - [ ] 1.3 Spike: decode a real Zitadel token for a test user; record the exact roles-claim shape as a fixture (no secrets) for task 2.6
 - [ ] 1.4 Spike: paperless OIDC login against a Zitadel test client; per-user API token upload owner; webhook payload, custom secret header and whether OCR text is ready when it fires

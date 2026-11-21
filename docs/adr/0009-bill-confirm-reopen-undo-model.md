@@ -10,6 +10,6 @@ Reviewing a Bill ends with one confirm. Three rules govern what happens after it
 
 ## Consequences
 
-- The Bill state machine has a transition from confirmed back to review. **`docs/spec/FUNCTIONAL.md` §3.2 does not describe field confirmation or this transition and needs it** (not edited here).
+- The Bill state machine has a transition from confirmed back to review. `docs/spec/FUNCTIONAL.md` §3.2 describes field confirmation and this transition.
 - Every confirm, reopen, edit and undo is an audit log entry with the Bill Reference and the field, so Cmd+Z labels come from the log.
-- Once a Bill is on a submitted Claim, none of this applies: its values are locked (FUNCTIONAL §3.2) and Undo confirm is no longer offered. Whether a recalled Claim (§3.3) makes its Bills editable again is for FUNCTIONAL to say.
+- Once a Bill is on a submitted Claim, none of this applies: its values are locked (FUNCTIONAL §3.2) and Undo confirm is no longer offered. A recalled Claim (§3.3) makes its Bills editable again; each stays confirmed until a value changes (FUNCTIONAL §3.2). Owner, 21 Nov 2026: "yes".
