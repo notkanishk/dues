@@ -7,3 +7,6 @@ Because any Claimant can use the tracker, filling the Contingency Reimbursement 
 - The form template (today `Template/Reimbursement Form Template.docx`, filled via Word on the Mac) must be reproducible server-side, e.g. by filling the docx with a library and converting with LibreOffice in the container, or by generating the PDF directly. Output must match the current form exactly.
 - The email cannot be sent from the Claimant's Gmail by the app without OAuth scopes; v1 produces a ready-to-send package (PDF, bills, subject, body) that the Claimant sends themselves.
 - The "hand-off to Claude" buttons in `mockup/DESIGN.md` become app actions; only browser-scraping jobs stay as optional hand-offs.
+
+
+*22 Nov 2026:* Reading by a Claimant's own Claude Code over MCP, reading only, stays optional: nothing in the core path depends on it. The token-based Assistant API is withdrawn, maintainer included; MCP is the only door. The maintainer's helpers (Back-fill, folder sync) return later as their own decision.

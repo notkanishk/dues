@@ -172,19 +172,58 @@ The system SHALL read documents through an ordered list of configured providers,
 - **THEN** new documents are read by it with no code change
 
 ### Requirement: Readings and proposals
-The system SHALL store each extractor's result for a document as an append-only Reading recording the extractor name, model, version, whether it was pulled or pushed and by whom, SHALL treat a repeated submission from the same extractor version as the same Reading, and SHALL build the proposal shown to the Claimant from all Readings of the document, with confidence from validators and agreement between model families. Readings MUST only propose: a value the Claimant confirmed, or a Bill on a submitted Claim, MUST NOT change.
+The system SHALL store each extractor's result for a document as an append-only Reading recording the extractor name, model, version, whether it was pulled or pushed and by whom, SHALL treat a repeated submission from the same extractor version as the same Reading, and SHALL build the proposal shown to the Claimant from all Readings of the document. Readings MUST only propose: a value the Claimant confirmed, or a Bill on a submitted Claim, MUST NOT change. A second Reading only adds care: it MUST NOT remove a stop or confirm anything. Where the provider could not read a field, a Claude Code Reading fills it like any single Reading.
 
 #### Scenario: Two readers agree
 - **WHEN** a provider and the Claimant's Claude Code both read total 1180.25/- and Bill number SI-0042 for a document
-- **THEN** both fields are proposed with high confidence
+- **THEN** both fields are proposed with the value both read, carry no mark of who read them, and still wait for the Claimant's confirmation
+
+#### Scenario: Agreement removes no stop
+- **WHEN** two Readings agree on a total that the validators already flag
+- **THEN** the total still stops for the Claimant
 
 #### Scenario: Two readers differ
 - **WHEN** they read totals of ₹700.00 and ₹7,000.00
-- **THEN** the total is flagged for the Claimant to check and neither value is accepted automatically
+- **THEN** the total stops showing both values, each named by who read it ("your Claude Code" for the Claimant's own), and neither is accepted automatically
+
+#### Scenario: Only four fields stop on a difference
+- **WHEN** two Readings differ on total, date, bill number or GSTIN
+- **THEN** that field stops
+- **AND WHEN** they differ on vendor or description
+- **THEN** nothing stops: the value found on the page is shown and the other is kept on record (Readings and audit log)
+
+#### Scenario: Compared after conversion
+- **WHEN** one Reading has total "2270-00" and the other ₹2,270.00, or bill numbers "SI 0042" and "si0042"
+- **THEN** they are equal and nothing stops
+
+#### Scenario: Differing total with a default
+- **WHEN** two totals differ and exactly one equals the Payment or is found on the page
+- **THEN** that value is choice 1 and Enter takes it
+
+#### Scenario: Differing total with no default
+- **WHEN** two totals differ and both or neither equal the Payment or are found on the page
+- **THEN** Enter chooses nothing, the line reads "Choose 1 or 2", and the Claimant presses 1 or 2 or types the value
+
+#### Scenario: Date and bill number ordering
+- **WHEN** two dates or two bill numbers differ
+- **THEN** the candidates are ordered as in the approved review design, with no new default rule
+
+#### Scenario: Two readings agree, on a total that stops
+- **WHEN** a printed bill's total already stops and the two readers are of different model families and agree on it
+- **THEN** the line "Two readings agree" shows beside the total
+
+#### Scenario: Two readings agree, nowhere else
+- **WHEN** the readers agree on a date, a bill number, a handwritten bill's field, or a field that does not stop
+- **THEN** no "Two readings agree" line shows
 
 #### Scenario: Late Reading never overwrites
 - **WHEN** a Reading arrives after the Claimant confirmed the total
 - **THEN** the confirmed total stays and the Reading is kept only as history
+
+#### Scenario: Reading arrives while the Bill is open
+- **WHEN** a Reading arrives for a Bill the Claimant has open
+- **THEN** the values on screen stay as they are and nothing changes under their hand
+- **AND** if the Reading differs on a field that stops, one line says so and that field becomes a stop before the Bill can be confirmed
 
 #### Scenario: Handwritten bills
 - **WHEN** a document is classified as a handwritten bill
@@ -194,17 +233,134 @@ The system SHALL store each extractor's result for a document as an append-only 
 - **WHEN** a Reading has grand total "2270-00"
 - **THEN** the proposed total is ₹2,270.00
 
-### Requirement: Claimant's Claude Code as a reader
-The system SHALL let a Claimant connect their own Claude Code to Dues through an MCP server authorised through Zitadel with an `extraction` scope, offering tools to list their documents still to read, fetch a document's pages, submit what was read and get an upload link, and SHALL let that connection see and submit only the Claimant's own documents.
+### Requirement: Claimant's Claude Code as a reader, over MCP, reading only
+The system SHALL let every Claimant connect their own Claude Code to Dues through an MCP server authorised through Zitadel with an `extraction` scope, and this MCP server MUST be the only way a Claude Code reaches Dues. It SHALL offer tools to list the Claimant's unconfirmed Bills still to read, fetch a Bill's pages and submit a Reading, and SHALL let the connection see and submit only the Claimant's own Bills that are not confirmed. The connection MUST NOT confirm a Bill, build or send a Claim, or change anything but add a Reading. The sentence that starts a run is "read my bills"; near wordings work and there is no second command. A Claimant's Bills are read by a run only while unconfirmed; undoing a confirmation puts a Bill back.
 
-#### Scenario: File my pending bills
-- **WHEN** a Claimant types "file my pending bills" into Claude Code with the Dues plugin installed
-- **THEN** Claude Code reads each pending document, submits a Reading for it, and the Claimant confirms the proposals in Dues
+#### Scenario: Read my bills
+- **WHEN** a Claimant types "read my bills" into Claude Code with the Dues plugin installed and connected
+- **THEN** Claude Code reads each unconfirmed Bill, submits a Reading for it, and the Claimant confirms in Dues
+
+#### Scenario: Confirmed Bills are not re-read
+- **WHEN** a Claimant has confirmed a Bill and runs "read my bills"
+- **THEN** that Bill is not offered to the run
+
+#### Scenario: Undo puts a Bill back
+- **WHEN** the Claimant undoes a Bill's confirmation
+- **THEN** the next run offers it again
+
+#### Scenario: Any Claimant, including the maintainer
+- **WHEN** the maintainer connects their Claude Code
+- **THEN** the connection has the same tools and the same limits as any Claimant's
 
 #### Scenario: Another Claimant's document
 - **WHEN** the connection asks for a document owned by another Claimant
 - **THEN** the answer is not found
 
+#### Scenario: Nothing but a Reading
+- **WHEN** the connection tries to confirm a Bill or build or send a Claim
+- **THEN** the system has no such tool and refuses
+
+#### Scenario: Repeat run
+- **WHEN** a run is repeated or resumed after it was cut short
+- **THEN** a Reading already made by the same extractor version is the same Reading and nothing doubles
+
 #### Scenario: Model name is self-declared
 - **WHEN** the same Claimant submits two Readings claiming different models of the same family
 - **THEN** they count as one vote for agreement
+
+### Requirement: One connection per Claimant, ended by Disconnect on the server
+The system SHALL keep one connection per Claimant, shown in Settings as connected since and the last read (date and count), and SHALL end it with one Disconnect that applies to every computer at once: Dues records a cut-off time and its MCP server MUST refuse every token issued before it. Readings already made MUST stay. The Claimant gets no run log; the audit log holds it.
+
+#### Scenario: Connected once, on many computers
+- **WHEN** a Claimant connects a second computer
+- **THEN** Settings still shows one connection
+
+#### Scenario: Disconnect cuts off every computer
+- **WHEN** the Claimant presses Disconnect
+- **THEN** a cut-off time is recorded, a token issued before it is refused, and Settings says "Disconnected. Your Claude Code can no longer read your bills. Readings it already made stay."
+
+#### Scenario: Removing the server on the computer is not Disconnect
+- **WHEN** the Claimant only removes the MCP server from one computer
+- **THEN** the tokens already issued still work until Disconnect
+
+#### Scenario: Readings survive
+- **WHEN** the Claimant disconnects
+- **THEN** the Readings already made stay on their Bills
+
+#### Scenario: Connecting again
+- **WHEN** the Claimant connects after a Disconnect
+- **THEN** tokens issued after the cut-off are accepted
+
+#### Scenario: Phone
+- **WHEN** a Claimant is not connected and opens Settings on a phone
+- **THEN** it shows "Connect from your computer." with no line to copy
+
+### Requirement: Dues' own consent page
+The system SHALL show its own consent page around the sign-in redirect when a Claude Code connects, apart from the external-reading opt-in, because Zitadel has no per-application consent screen. The page SHALL say in plain words that Claude Code sends the pages of the Claimant's bills to Anthropic under their own account, that it can read their unconfirmed bills and propose values, that it cannot confirm a bill or build or send a Claim, and that they can disconnect any time in Settings, and SHALL offer "Allow" and "Don't allow". A computer that was allowed MUST NOT be asked again until Disconnect.
+
+#### Scenario: Allow
+- **WHEN** the Claimant presses Allow
+- **THEN** the page says "Connected. Go back to your terminal." and the connection exists
+
+#### Scenario: Don't allow
+- **WHEN** the Claimant presses Don't allow
+- **THEN** the page says "Not connected. Nothing was shared. Nothing for you to do." and no token is issued
+- **AND** the terminal says "Dues wasn't connected. Nothing was read. Say 'read my bills' to try again."
+
+#### Scenario: Sign-in first
+- **WHEN** the Claimant is not signed in when the consent page opens
+- **THEN** they sign in and return to the consent page
+
+#### Scenario: Not asked again
+- **WHEN** an allowed computer runs "read my bills" again before Disconnect
+- **THEN** no consent page opens
+
+### Requirement: A run reports in the terminal only
+The system SHALL show no in-progress or failure state for a run anywhere in Dues; each Reading lands on its Bill, and Settings shows only the last read with date and count. A run SHALL end in the terminal with one plain line and one link, printed and never opened by itself, reporting only what needs care; the link opens review on the first Bill in review in the queue's own order, and sign-in returns to the same Bill. A failed run SHALL say in the terminal what happened, what was kept and the next step. Dues sends no push and adds no attention item for a run, and offers no button to start one; the one mention is a line with the sentence to type on a "Couldn't read" Bill of a connected Claimant.
+
+#### Scenario: Run with values to check
+- **WHEN** a run reads 7 Bills and 2 have differing values
+- **THEN** the terminal says "7 bills read. 2 have values to check. Review: <link>"
+
+#### Scenario: Nothing new, some waiting
+- **WHEN** a run finds nothing unread and 3 Bills wait for review
+- **THEN** the terminal says "No new bills to read. 3 are waiting for your review: <link>"
+
+#### Scenario: Nothing at all
+- **WHEN** a run finds no Bills to read and none waiting
+- **THEN** the terminal says "No bills to read. Nothing for you to do."
+
+#### Scenario: One could not be read
+- **WHEN** a run reads 6 of 7 Bills
+- **THEN** the terminal says "6 of 7 read. 1 couldn't be read; type its values in review: <link>"
+
+#### Scenario: Not connected on this computer
+- **WHEN** a run starts on a computer that is not connected
+- **THEN** the terminal says "Dues isn't connected on this computer. Nothing was read. Connect: <link>"
+
+#### Scenario: Dues unreachable
+- **WHEN** Dues cannot be reached during a run
+- **THEN** the terminal says "Couldn't reach Dues. Nothing was changed. Try again in a while."
+
+#### Scenario: Plugin out of date
+- **WHEN** the plugin is older than Dues accepts
+- **THEN** the terminal says "This Dues plugin is out of date. Nothing was read. Update it: <line>"
+
+#### Scenario: Run cut short by Claude Code
+- **WHEN** Claude Code stops the run itself (usage limit, closed window)
+- **THEN** Claude Code's own message shows, and every Reading made so far is kept
+
+#### Scenario: Nothing in progress in Dues
+- **WHEN** a run is under way
+- **THEN** Dues shows no "in progress" state; each Reading simply appears on its Bill
+
+#### Scenario: No push or button
+- **WHEN** a run finishes
+- **THEN** Dues sends no push and adds no attention item
+
+### Requirement: One line to connect and read
+The system SHALL show in Settings one line to copy that installs the Dues plugin (the remote MCP server and a skill) and starts the first run, so connecting and the first run are one move: copy, paste, Allow. See the design for its shape.
+
+#### Scenario: Copy, paste, Allow
+- **WHEN** the Claimant pastes the line in a terminal and presses Allow on the consent page
+- **THEN** the plugin is installed, the connection exists, and the terminal carries on with the first run

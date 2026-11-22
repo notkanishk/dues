@@ -19,7 +19,7 @@ Latest stable releases as of 21 Nov 2026 (owner: "use the latest versions of all
 | Tests | Vitest 5.1.1 (`--pool=threads`), Playwright 1.65.1 |
 | Identity | openid-client 6.9.1 |
 | Push | web-push 4.0.0 |
-| Assistant API | `@modelcontextprotocol/sdk` 1.32.2 |
+| MCP server (Claude Code reading) | `@modelcontextprotocol/sdk` 1.32.2 |
 | Claim form | docxtemplater 3.71.1 with PizZip 3.3.0; Gotenberg 9.9.1 |
 | Images and PDF text | sharp 0.35.5; `@embedpdf/pdfium` 2.15.1 |
 | OCR | onnxruntime-node 1.31.1 with PP-OCRv6 (denormal weights zeroed); `@gutenye/ocr-node` 1.4.9 if it fits the worker |

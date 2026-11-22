@@ -2,7 +2,7 @@
 
 Roadmap phase: this design covers the whole core (Phases 0–5, see Roadmap); the change itself targets **Phase 0–1**.
 
-Related: [proposal](proposal.md) · capability specs under `specs/<capability>/spec.md` (`platform-foundations`, `identity-access`, `expense-tracking`, `document-intake`, `bill-matching`, `paybacks`, `claims`, `duplicate-guard`, `reminders`, `assistant-api`; written in parallel, this design follows the proposal's capability list, not their exact text) · [FUNCTIONAL.md](../../../docs/spec/FUNCTIONAL.md) · [GLOSSARY.md](../../../GLOSSARY.md) · ADRs [0001](../../../docs/adr/0001-tracker-db-owns-status-paperless-owns-documents.md), [0002](../../../docs/adr/0002-additive-folder-paperless-sync-by-checksum.md), [0003](../../../docs/adr/0003-app-builds-claims-claude-optional.md), [0004](../../../docs/adr/0004-documents-on-dedicated-nfs-dataset.md) · stack research in `docs/research/notes/Tracker stack choice/`. No other changes exist yet.
+Related: [proposal](proposal.md) · capability specs under `specs/<capability>/spec.md` (`platform-foundations`, `identity-access`, `expense-tracking`, `document-intake`, `bill-matching`, `paybacks`, `claims`, `duplicate-guard`, `reminders`; written in parallel, this design follows the proposal's capability list, not their exact text) · [FUNCTIONAL.md](../../../docs/spec/FUNCTIONAL.md) · [GLOSSARY.md](../../../GLOSSARY.md) · ADRs [0001](../../../docs/adr/0001-tracker-db-owns-status-paperless-owns-documents.md), [0002](../../../docs/adr/0002-additive-folder-paperless-sync-by-checksum.md), [0003](../../../docs/adr/0003-app-builds-claims-claude-optional.md), [0004](../../../docs/adr/0004-documents-on-dedicated-nfs-dataset.md) · stack research in `docs/research/notes/Tracker stack choice/`. No other changes exist yet.
 
 ## Context
 
@@ -26,7 +26,7 @@ Vocabulary used below: **Module**, **Interface** (everything a caller must know:
 - A change of framework changes Adapters and the shell, not the Module map.
 - Reading a bill is a pipeline of swappable parts (PageText, Extractor, Locator, validators) behind language-agnostic contracts; a part in another language or on a GPU joins as an HTTP Adapter (ADR 0007).
 - Authorization is enforced at one Seam; no query can forget the Claimant scope.
-- Webhooks and assistant API calls are safe to repeat; concurrent documents for one Expense cannot corrupt the Open amount or create twin Expenses.
+- Webhooks and Reading submissions are safe to repeat; concurrent documents for one Expense cannot corrupt the Open amount or create twin Expenses.
 - External systems (paperless, Gotenberg, Zitadel, Web Push) can be down without losing or corrupting money state.
 
 **Non-Goals**
@@ -41,7 +41,7 @@ Vocabulary used below: **Module**, **Interface** (everything a caller must know:
 ```
  driving Adapters (no rules of their own)
  ┌────────┐ ┌───────────────┐ ┌──────────────────┐ ┌──────┐
- │ Web UI │ │ Assistant API │ │ paperless webhook│ │ cron │
+ │ Web UI │ │ MCP (read)    │ │ paperless webhook│ │ cron │
  └───┬────┘ └──────┬────────┘ └────────┬─────────┘ └──┬───┘
      │ Actor       │ Actor             │ doc id       │
      ▼             ▼                   ▼              ▼
@@ -93,7 +93,7 @@ Named **Books**, not "ledger", because GLOSSARY reserves **Ledger** for the reco
 
 ### 3. Extractor (pulled providers) and Readings (ADR 0006)
 
-One contract, two kinds of reader. A provider is `Document → RawExtraction`, called by Dues; the Claimant's Claude Code is the same function turned around: it asks Intake what is pending and hands back what it read.
+One contract, two kinds of reader. A provider is `Document → RawExtraction`, called by Dues; the Claimant's Claude Code is the same function turned around: it asks Intake which of the Claimant's unconfirmed Bills are still to read and hands back what it read, over MCP, which only reads and proposes.
 
 - **Port** `Extractor.extract({images[], textLayer?, schema}) → RawExtraction | unavailable | refused | contract_mismatch`.
   - `RawExtraction` (contract 2): `{ invoices: [{ kind, vendor_name, vendor_gstin, bill_number, bill_date, grand_total, …, each with its printed label }] }`, values **as printed**. The same JSON Schema is sent to providers as `response_format: json_schema`, is the MCP tool input, and is the fixture format.
@@ -104,7 +104,7 @@ One contract, two kinds of reader. A provider is `Document → RawExtraction`, c
 - **Hides**: prompt, page rendering (text PDF: text layer + 100 dpi image; other PDFs 200 dpi; photos ≤ 2048 px; ≤ 4 pages), text layer, schema request, retries, provider quirks.
 - **Tested through its Interface**: contract tests on fictional fixtures against the fake; a recorded smoke test per configured provider.
 
-**Readings.** Every result, pulled or pushed, is stored as a Reading `{documentRef, checksum, extractor{name, model, version}, by: provider|claude-code, actor, raw, at}`: append-only, unique on (document, extractor name, model, version). The proposal is an order-independent fold over a document's Readings: Intake converts printed values (paise, ISO dates with plausibility checks, handwritten `2270-00` = ₹2,270.00), runs validators (subtotal + tax = total, GSTIN check digit, 12-digit UPI reference, value grounded in the page text, via the Locator; the list is §3a) and derives confidence from validators plus agreement across model families. Handwritten bills never auto-accept. Reviewing the folded proposal field by field is designed in `docs/research/notes/Bill review UX/design.md` §7 (variant R, approved 21 Nov 2026); see ADRs 0008 and 0009.
+**Readings.** Every result, pulled or pushed, is stored as a Reading `{documentRef, checksum, extractor{name, model, version}, by: provider|claude-code, actor, raw, at}`: append-only, unique on (document, extractor name, model, version). The proposal is an order-independent fold over a document's Readings: Intake converts printed values (paise, ISO dates with plausibility checks, handwritten `2270-00` = ₹2,270.00), runs validators (subtotal + tax = total, GSTIN check digit, 12-digit UPI reference, value grounded in the page text, via the Locator; the list is §3a) and derives confidence from validators. A second Reading only adds care: Readings that differ stop total, date, bill number and GSTIN (compared after conversion; vendor and description never stop, the page value shows and the other stays on record); agreement removes no stop and never confirms, and "Two readings agree" shows only on a total that already stops, on a printed bill, when the readers are of different model families. Handwritten bills never auto-accept. Reviewing the folded proposal field by field is designed in `docs/research/notes/Bill review UX/design.md` §7 (variant R, approved 21 Nov 2026); see ADRs 0008 and 0009.
 
 **Extraction approach and verdict (task 1.1; prototype on branch `prototype/explorations`, data stays in `private/`).** Scored on a gold set of 42 real bills with a GLM vision model, through the one provider Adapter. Only aggregate counts and verdicts are recorded here.
 
@@ -115,7 +115,7 @@ One contract, two kinds of reader. A provider is `Document → RawExtraction`, c
 - **Paperless's role: nothing before the model; two jobs after it.** It keeps the archive file (the page source for PageText) and the checksum, which catches duplicate uploads. Its OCR text is no longer used for grounding: it found 40 of 77 values on raster bills against 66 for PP-OCRv6 (ADR 0007). Its own created date is dropped as a Reading (15 right, 6 wrong, 17 none of 38).
 - **Grounding rules** (validator rules, unchanged): an ambiguous numeric date does not count as grounded; a total must be > 0; a bill number carries label risk (a "Reference Number" read as the bill number).
 - **Boxes** now come from PageText plus the Locator over paperless's archive PDF (§3a, evidence in ADR 0007). Scored strictly (a box is right only if it covers the whole value; on raster pages against hand-checked reference boxes), total / date / bill number / GSTIN: on 14 text PDFs the text layer boxes 14 / 14 / 13 / 13 of 14 / 14 / 14 / 13, and PP-OCRv6 small run on the same pages matches it; on 24 photos and scans, small plus the `medium` second pass boxes 22 / 16 / 15 / 13 of 24 / 21 / 16 / 13, with no wrong box (21 Nov 2026). The earlier figure of 34 / 28 / 28 / 26 on 38 bills counted boxes found, not boxes right. Photos and handwriting are sometimes not located; the review UI then shows "not located" with no box.
-- **Review.** What the Claimant sees and does with these boxes and values is in `docs/research/notes/Bill review UX/design.md` §7 (variant R, approved 21 Nov 2026) and ADRs 0008 and 0009; not restated here.
+- **Review.** What the Claimant sees and does with these boxes and values is in `docs/research/notes/Bill review UX/design.md` §7 (variant R, approved 21 Nov 2026) and ADRs 0008 and 0009; not restated here. The differing-values stop, the no-default total and the "Reading arrives while open" line are behaviour decided 21–22 Nov 2026 in `docs/research/notes/Claude Code checks UX/decisions.md`; visuals pending.
 - **Rendering is now:** text PDF = text layer + 100 dpi image; other PDFs and photos = images as above. The contract (`RawExtraction`, contract 2) is frozen (task 1.6, ADR 0007).
 
 ### 3a. Reading pipeline: PageText, Locator, validators (ADR 0007)
@@ -164,11 +164,17 @@ Three parts sit between a stored document and a highlighted, validated proposal.
 
 Capability `document-intake`.
 
-- **Interface**: `handleDocument(paperlessId) → Logged{events} | Skipped{reason} | Parked{reason}` (pull: runs the configured providers); `pending(actor) → [{documentRef, checksum, mime, have: [extractor]}]` and `propose(actor, documentRef | upload, rawExtraction, extractor) → Recorded{agreement, reviewUrl} | Rejected{not_found | locked | validation | contract_mismatch}` (push: the Claimant's Claude Code). All safe to call any number of times for the same document. `Skipped`: documents Dues uploaded itself (Claim forms) and documents already linked. `Parked`: the paperless owner is not a Claimant; surfaced to an admin, never dropped.
+- **Interface**: `handleDocument(paperlessId) → Logged{events} | Skipped{reason} | Parked{reason}` (pull: runs the configured providers); `pending(actor) → [{documentRef, checksum, mime, have: [extractor]}]` (the Actor's unconfirmed Bills only) and `propose(actor, documentRef, rawExtraction, extractor) → Recorded{agreement, reviewUrl} | Rejected{not_found | locked | validation | contract_mismatch}` (push: the Claimant's Claude Code). All safe to call any number of times for the same document. `Skipped`: documents Dues uploaded itself (Claim forms) and documents already linked. `Parked`: the paperless owner is not a Claimant; surfaced to an admin, never dropped.
 - **Hides**: fetching the document, owner → Claimant resolution, provider order and privacy filtering, Readings and their fold (§3), matching `instrument` to the Claimant's Payment method hints, building the `LogDocument` command, the "couldn't read" path (Expense still logged with a blank amount), write-back to paperless.
 - **Deliberately not here**: the match decision. Intake reports a fact (`LogDocument{documentRef, extraction}`); Books decides under its lock what the fact means (D5).
 - **Dependencies**: Paperless, Extractor, PageText, Locator, Claimants, Books.
-- **Driving Adapters**: the paperless webhook (pull) and the Dues MCP server (push, OAuth through Zitadel, scope `extraction`, tools `documents_to_read`, `read_document`, `submit_extraction`, `upload_url`), shipped to Claimants as a Claude Code plugin (MCP config + one skill: "file my pending bills").
+- **Driving Adapters**: the paperless webhook (pull) and the Dues MCP server (push; the only door for a Claude Code, read only: it lists unconfirmed Bills, fetches pages and adds a Reading, and cannot confirm a Bill or touch a Claim; OAuth through Zitadel, scope `extraction`, tools `documents_to_read`, `read_document`, `submit_extraction`), shipped to Claimants as a Claude Code plugin (remote MCP server + one skill: "read my bills"). There is no token API and no maintainer-only variant.
+  - **Client registration**: a pre-registered static client ID, or a Client ID Metadata Document, so Zitadel's dynamic client registration stays closed.
+  - **Consent**: Dues shows its own page (Allow / Don't allow) around the sign-in redirect, because Zitadel has no per-application consent screen.
+  - **One connection per Claimant**: Disconnect in Settings records a cut-off time per Claimant; the MCP server refuses any token issued before it (`claude mcp remove` on a computer does not revoke). Readings already made stay. The audit log holds each run; the Claimant gets no run log.
+  - **No run state**: Dues keeps no in-progress or failure state; the last read (date, count) comes from the Readings. A Reading arriving for an open Bill never changes it under the hand.
+  - **Connect line**: Settings shows one line of the shape `claude plugin install <plugin> --marketplace <repo> -y && claude "read my bills"`.
+  - **Open (MCP spike)**: does the browser open by itself on the first tool call? If not, the skill prints one sign-in link. Does a pre-registered client or a Client ID Metadata Document work against Zitadel?
 - **Tested through its Interface**: fake Paperless + canned Extractor + real Books; assert on Books state and on the annotations the fake received. Repeat-delivery and out-of-order tests (invoice first, confirmation first, both at once).
 
 ### 6. Claim package
@@ -193,7 +199,7 @@ The rendering half of capability `claims`.
 
 Capability `identity-access`.
 
-- **Interface**: `authenticate(request) → Actor | unauthenticated | forbidden`, where `Actor = {claimantId, roles, via: session | token | intake}`; OIDC `signIn` / `callback` / `signOut`; `profile(actor)`, `updateProfile`, Payment methods (add, rename, archive, hints), time zone; personal access tokens (`issueToken`, `revokeToken`; stored hashed); `claimantForPaperlessUser(username) → claimantId?`.
+- **Interface**: `authenticate(request) → Actor | unauthenticated | forbidden`, where `Actor = {claimantId, roles, via: session | mcp | intake}`; OIDC `signIn` / `callback` / `signOut`; `profile(actor)`, `updateProfile`, Payment methods (add, rename, archive, hints), time zone; the MCP connection (`connection(actor)`, `disconnect` records a cut-off time; MCP tokens issued before it are refused); `claimantForPaperlessUser(username) → claimantId?`.
   - **Invariants**: no `claimant` role → `forbidden`, no partial access; keyed on Zitadel `sub`, never email; an Actor is the only way to reach Books.
 - **Hides**: the Zitadel roles-claim shape, discovery, PKCE, the session table, token hashing, first-sign-in profile creation.
 - **Seam**: none. The claim → roles mapping is a pure function tested with token fixtures recorded in the Phase 0 spike; tests of other Modules construct an Actor directly.
@@ -221,14 +227,14 @@ Not a deep Module: a short list of idempotent handlers, each `(event, deps) → 
 ### 11. Driving Adapters
 
 - **Web UI**: renders queries, issues commands. No money rule, transition check or scope check lives here.
-- **Assistant API** (capability `assistant-api`): token-authenticated HTTP over Books and Paperless. Endpoints map one-to-one to commands and queries: list Expenses for de-duplication, create Back-fill drafts, post Amazon order candidates, upload an invoice for a known Expense, mark a Claim reimbursed, read the sync manifest. Its Interface is the HTTP contract; it adds only transport, validation and the idempotency header (D4). Deletion test: delete it and nothing else changes; it is an Adapter, not a Module.
+- **Dues MCP server** (capability `document-intake`, §5): the only door for a Claimant's Claude Code, read only. It maps to Intake's `pending`, a page fetch and `propose`; it adds only transport, validation and the Disconnect cut-off check. Deletion test: delete it and nothing else changes; it is an Adapter, not a Module. Withdrawn from this change: the token-based Assistant API and the maintainer helpers (Back-fill drafts, Amazon picks, invoice upload by ID, marking a Reimbursement, folder sync); they return later as their own decision.
 - **paperless webhook**: checks the shared secret, enqueues `intake(documentId)`, answers `202`. Trusts nothing in the body except the ID.
-- **Uploads** through the app (web upload, assistant invoice upload) are validated (type, size) and passed straight to `Paperless.upload`; the app keeps no file.
+- **Uploads** through the app (web upload) are validated (type, size) and passed straight to `Paperless.upload`; the app keeps no file.
 - **Downloads** are proxied by the app after `Books.ownsDocument(actor, id)`; Claimants are never handed an unscoped paperless link.
 
 ### Outside the app
 
-- **Maintainer folder sync** (ADR 0002): a client of the Assistant API (`syncManifest`: the maintainer's Bills and Claims with checksums and target folder) and of paperless. Additive, keyed by SHA-256. No server-side Module.
+- **Maintainer folder sync** (ADR 0002): not part of this change; it returns later as its own decision.
 - **Jobs**: the queue library is used directly (pg-boss or the chosen stack's equivalent). No wrapper beyond the `enqueue(tx, job)` function Books accepts.
 
 ## Decisions
@@ -248,10 +254,10 @@ Stored: facts (amounts, dates, fulfilled-on, document link, Claim membership, Cl
 ### D4. Idempotency: natural keys first, idempotency keys second
 
 - **Webhook**: the handler only enqueues `intake(documentId)` with the document ID as the job's singleton key. `LogDocument` is idempotent on the paperless document ID (unique link); a repeat returns the original result. Removing the `inbox` tag is Intake's last step, so a periodic sweep of `Paperless.listInbox(olderThan)` re-enqueues anything a lost webhook or crashed job left behind. Documents Dues uploaded itself are skipped, and Dues removes the `inbox` tag paperless auto-applies to them (Claim forms, invoices uploaded for a known Expense), or Inbox never empties.
-- **Assistant API**: every write requires an `Idempotency-Key`. Books stores `(actor, key) → command hash, result` in the command's transaction; same key and same command returns the stored result; same key and a different command is `idempotency_conflict`. Natural keys still apply underneath (UPI reference, order number + shipment, file checksum), so a retry without the key becomes a duplicate hit, not a twin.
+- **MCP Reading submission**: a Reading is unique on (document, extractor name, model, version), so a repeated or resumed run is the same Reading and nothing doubles. No other write exists on the MCP server.
 - **Reactions and paperless writes**: set semantics, safe to repeat.
 
-**Rationale**: paperless will redeliver or miss; assistants retry. **Alternatives**: trusting webhook delivery (rejected); dedupe only in the queue (rejected: UI and API writes bypass it).
+**Rationale**: paperless will redeliver or miss; Claude Code runs resume. **Alternatives**: trusting webhook delivery (rejected); dedupe only in the queue (rejected: UI and API writes bypass it).
 
 ### D5. Concurrency: serialise writes per Claimant; decide matches under the lock
 
@@ -259,7 +265,7 @@ Stored: facts (amounts, dates, fulfilled-on, document link, Claim membership, Cl
 
 ### D6. Authorization at one Seam: the Actor parameter of Books
 
-Every Books command and query requires an Actor, produced only by `Claimants.authenticate` (session or token) or by Intake (`via: intake`, the document owner's Claimant). No Books operation accepts a Claimant ID from request input. Scoping is applied in the one place Books loads rows; foreign entities are `not_found`. The only cross-Claimant reads are internal to the duplicate guard and Payback linking, and their results are redacted to "already claimed, by whom". Assistant tokens carry the issuing Claimant's scope and nothing more. `admin` grants `ImportLedgerLines` and the parked-documents view, not other Claimants' Expenses. **Rationale**: the app is the only gate, so the scope must be impossible to forget. **Alternatives**: checks in route handlers (rejected: one missed handler leaks); Postgres row-level security (deferred: the duplicate guard legitimately reads across Claimants, and a second enforcement point is only worth it if a second writer to the database appears).
+Every Books command and query requires an Actor, produced only by `Claimants.authenticate` (session, or the MCP connection's token) or by Intake (`via: intake`, the document owner's Claimant). No Books operation accepts a Claimant ID from request input. Scoping is applied in the one place Books loads rows; foreign entities are `not_found`. The only cross-Claimant reads are internal to the duplicate guard and Payback linking, and their results are redacted to "already claimed, by whom". MCP tokens carry the issuing Claimant's scope and nothing more, and are refused if issued before that Claimant's Disconnect cut-off. `admin` grants `ImportLedgerLines` and the parked-documents view, not other Claimants' Expenses. **Rationale**: the app is the only gate, so the scope must be impossible to forget. **Alternatives**: checks in route handlers (rejected: one missed handler leaks); Postgres row-level security (deferred: the duplicate guard legitimately reads across Claimants, and a second enforcement point is only worth it if a second writer to the database appears).
 
 ### D7. Extractors return printed values; Dues owns conversion and confidence (revised by ADR 0006)
 
@@ -298,7 +304,7 @@ Web process and worker process from the same image; Postgres holds data and queu
 **Import of existing claim history into the Ledger**
 
 1. A script outside the app (maintainer's machine) reads the existing history file and produces rows: date, bill number, description, amount in paise, Claim name. It also uploads the historic filed documents to paperless under the maintainer's user, tagged with their Claim and with `inbox` removed (ADR 0002 checksum rule makes re-runs additive).
-2. `ImportLedgerLines{claimant, rows, dryRun}` (admin Actor, via the Assistant API). Each row gets a deterministic key (hash of its normalised content plus its position in its Claim); re-running imports nothing twice.
+2. `ImportLedgerLines{claimant, rows, dryRun}` (admin Actor; how the one-off script reaches it is decided when the maintainer helpers return). Each row gets a deterministic key (hash of its normalised content plus its position in its Claim); re-running imports nothing twice.
 3. Dry run first: reports row count, total per Claim, rows that already collide with each other on bill number + amount (history is recorded as it happened, collisions are flagged, not rejected), and unparseable rows. The maintainer compares counts and totals with the source before the real run.
 4. Real run appends Ledger lines with `source = import`, one audit event per batch. No Expenses, Bills or Claims are created.
 5. Imported documents trigger the webhook; Intake skips documents carrying a historic Claim tag.
@@ -330,6 +336,7 @@ Web process and worker process from the same image; Postgres holds data and queu
 9. ~~Admin scope~~ **Resolved (maintainer, 2026-11-20):** `admin` may see and do everything across all Claimants. The Actor carries the role; the single authorization Seam lets an admin Actor pass the ownership filter, and every admin change on another Claimant's data is audited with the admin as actor.
 10. ~~Stored status~~ **Resolved:** no spec scenario requires a stored status column; derive-on-read stands. Was: is derive-on-read acceptable for the specs' wording of "status", or do any scenarios require a stored status?
 11. ~~Ledger table~~ **Resolved:** `duplicate-guard` spec now imports history as Ledger lines (D9). Was: Ledger as its own table (D9) vs the functional spec's "Bills without an Expense": confirm with the `duplicate-guard` spec.
+12. MCP spike (task 6.0, before the MCP server is built): does the browser open by itself on the first tool call from Claude Code, or must the skill print one sign-in link? Does a pre-registered client ID, or a Client ID Metadata Document, work against Zitadel with dynamic registration closed?
 
 ## Verification
 
@@ -340,7 +347,7 @@ What will be verified, whatever the stack:
 - **Books, pure core**: property tests for the Open amount invariant and for replay (events folded through `apply` equal stored state); table tests per state machine.
 - **Books, Interface**: one scenario test per spec scenario through `execute` against real Postgres; rejection reasons asserted; audit rows asserted for every accepted command; append-only enforced (an `UPDATE` on the audit table fails).
 - **Authorization**: for every query and command, a second Claimant's Actor gets `not_found`; a test enumerates the Interface so a new operation cannot skip it.
-- **Idempotency**: same webhook twice → one Expense; same Assistant API call twice → same result; same key with a different body → `idempotency_conflict`.
+- **Idempotency**: same webhook twice → one Expense; same Reading submitted twice → one Reading.
 - **Concurrency**: two `LogDocument` commands in parallel for one Expense (two invoices; invoice + payment confirmation with no Expense yet) → one Expense, correct Open amount; two Claimants adding the same Bill to Claims in parallel → exactly one succeeds.
 - **Matching**: fixture table → Proposal, including several candidates and one Payment for several invoices.
 - **Extractor**: the corpus contract suite against every Adapter; accuracy per field reported, with the threshold agreed after the experiment.
@@ -357,7 +364,7 @@ What will be verified, whatever the stack:
 - **Phase 2: document intake and matching.** Paperless Adapter, webhook, Intake, Extractor Adapter(s), Matching, Check matches, write-back Reactions, inbox sweep.
 - **Phase 3: Claims, form and PDF.** Claim commands, naming, rounding, Claim package, Gotenberg, submission, recall, Reimbursement → Ledger.
 - **Phase 4: duplicates hardening, Paybacks, Reminders and Web Push.** Warn rules and remembered pairs, Payback link and undo, unlinked shared Bills, Owed to university, attention rules, Notifier.
-- **Phase 5: assistant API.** Tokens, idempotent endpoints, Back-fill drafts, Amazon picks, invoice upload, sync manifest; the maintainer's folder sync client outside the app.
+- **Phase 5: Claude Code over MCP.** The read-only MCP server, the consent page, Disconnect with its cut-off, the plugin and its one-line install. Maintainer helpers (Back-fill, Amazon picks, folder sync) are out of this change.
 - **UI design** runs in parallel once Phase 1 has fixed the Books Interface; the UI is a driving Adapter and can change without touching a rule.
 
 

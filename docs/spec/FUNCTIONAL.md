@@ -9,8 +9,8 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 2. **One invariant drives everything:** `Open amount = Payment − Σ Bills − Σ Refunds`. Every reminder is some form of "this Expense still has an Open amount, and here is why".
 3. **Bills are claimed, not Expenses.** A Bill goes on a Claim when it is Fulfilled and has its document. One Expense can feed several Claims (Amazon splits invoices per delivery).
 4. **The tracker owns status; paperless owns documents** (ADR 0001). Files are mirrored between paperless and the Mac folder additively (ADR 0002).
-5. **The app builds Claims; Claude is optional** (ADR 0003). Form, PDF and submission package are app features for every Claimant. Claude only helps with browser jobs (Amazon orders, invoice downloads) and the maintainer's own convenience. Nothing is sent or submitted without the Claimant.
-7. **Statements never enter the app.** Day to day, Refunds and Reimbursements are marked received by hand. Back-fill is done by Claude outside the app: Claude reads the statement and creates draft Expenses through the app's API, which the Claimant then confirms in the app.
+5. **The app builds Claims; Claude is optional** (ADR 0003). Form, PDF and submission package are app features for every Claimant. A Claimant's own Claude Code may read their unconfirmed Bills over MCP (read only, §9); nothing depends on it. Nothing is sent or submitted without the Claimant.
+7. **Statements never enter the app.** Day to day, Refunds and Reimbursements are marked received by hand. Back-fill by Claude outside the app (W6) is not part of the current change; it returns later as its own decision.
 6. **Suggest, then confirm.** Matching (document ↔ Expense, Amazon order ↔ Expense) is proposed automatically and confirmed with one action. Never silent.
 
 ## 2. Entities
@@ -117,7 +117,7 @@ draft ──app builds form + package, Claimant sends──▶ submitted ──m
 
 ## 4. Workflows
 
-Each step marks who acts: **K** (the Claimant), **T** (tracker app), **P** (paperless), **C** (Claude, optional, maintainer only).
+Each step marks who acts: **K** (the Claimant), **T** (tracker app), **P** (paperless), **C** (Claude, optional; only the Claimant's own Claude Code reading over MCP, §9; the other C steps are withdrawn for now).
 
 ### W1. Log a payment right after paying (phone) — the zero-friction path
 
@@ -125,14 +125,14 @@ Each step marks who acts: **K** (the Claimant), **T** (tracker app), **P** (pape
 
 1. **K (the only required step):** share the payment confirmation to the paperless uploader, pinned as a Direct Share target so it is one tap: the payment app's success screen (its share button if it gives an image, otherwise screenshot → share), a card/bank receipt, or an order confirmation for card checkouts.
 2. **P:** stores it under K's paperless user (owner = Claimant), type `Payment proof`, tag `inbox`; webhook to T.
-3. **T: extracts** the fields by sending the page images to the configured vision-language extractors (ADR 0006): providers pulled by Dues (internal GPU first; external ones only with the Claimant's opt-in) and, when the Claimant files with Claude Code, their own Claude Code. Values come back as printed; Dues converts and checks them.
+3. **T: extracts** the fields by sending the page images to the configured vision-language extractors (ADR 0006): providers pulled by Dues (internal GPU first; external ones only with the Claimant's opt-in) and, when the Claimant says "read my bills" in Claude Code, their own Claude Code (unconfirmed Bills only). Values come back as printed; Dues converts and checks them.
 4. **T: logs the Expense immediately** — not a draft. Kind guessed from the payee (known vendor history; Amazon/Robu/Blinkit → `online`, else `shop`), Payment method matched via the Claimant's method hints (bank name, card last 4, UPI handle), "what for" left empty. Dedupe: a second screenshot with the same UPI ref attaches to the existing Expense instead of creating one. When neither can be read (no ref), two confirmations from the same Claimant within 10 minutes get "Same payment as E-x?" (one tap merges; never automatic).
 5. **T: optional nudge** — a Web Push notification to K's phone: "₹2,500 to Robu.in logged. What was it for?" with actions *Add details* (opens a one-field form: what for; kind and order ref one tap away) and *Later*. Ignoring it is fine.
 6. **Later, in batch:** Expenses missing "what for" collect under one attention item ("3 payments need a description"); the daily nudge links there. They can be described in one pass, and "what for" is needed only before a Bill goes on a Claim.
 
 **When extraction fails:** the Expense is still created with the screenshot attached and amount blank, flagged "Couldn't read this payment" — never dropped. K fills the amount once.
 
-**No confirmation to share** (cash, or an app that shows nothing useful): quick-add form in T — amount + what for, two fields. Claude Back-fill (W6) remains the maintainer's catch-all for anything forgotten.
+**No confirmation to share** (cash, or an app that shows nothing useful): quick-add form in T — amount + what for, two fields. Back-fill (W6) is withdrawn for now.
 
 **Checks before build:** which paperless uploader app supports Android Direct Share (and iOS share sheet, for iPhone Claimants) and logs in as the Claimant's own paperless user; extraction accuracy on a sample of real confirmations from several apps (CRED, GPay, PhonePe, Paytm, a bank app; ~10 each).
 
@@ -165,14 +165,16 @@ Any document is logged with zero further steps; matching prevents the same purch
 - **State moves** are "add one `reimb:*`, remove the other two" in a single API call (`bulk_edit` `modify_tags`, or a PATCH with the full tag set).
 - Earlier "draft from document" behaviour is replaced by this; `draft` remains only for Amazon picks and Back-fill.
 
-### W5. Pick my orders from the shared Amazon account (laptop)
+### W5. Pick my orders from the shared Amazon account (laptop; withdrawn from the current change with the token API, returns later as its own decision)
 1. K presses "Read Amazon" in T → hand-off to C.
 2. C (Claude in Chrome, logged-in session, read-only) reads orders since the last run: date, order no., items + images, total, ship-to, payment method, placed-by, delivery status per shipment, invoice availability. Posts them to T as candidates.
 3. K ticks the orders he paid for (or paid back the orderer for). Each tick → Expense (`online`, orderer from Amazon "placed by") with one expected Bill per shipment; already-delivered shipments are marked fulfilled.
 4. For fulfilled shipments, C downloads the invoice PDF and uploads it to P with the Expense ID → W4 auto-attaches (exact Expense ID, no suggestion needed).
 5. Candidates matching a Ledger line or an existing Expense (order no.) are shown as already tracked.
 
-### W6. Back-fill (Claude only, outside the app)
+### W6. Back-fill (withdrawn from the current change; returns later as its own decision)
+
+(Kept below as the record of the earlier design.)
 1. The maintainer asks Claude to back-fill a period. Claude gets the statement (downloads it from the bank's site in Chrome after the maintainer logs in, or reads a file the maintainer provides), parses it, and drops lines already tracked (same amount ±3 days, or UPI ref).
 2. Claude asks the maintainer which remaining lines are lab Expenses, then creates them through the app API as `draft` Expenses (source `back-fill`, amount, date, payee, Payment method, UPI ref), attaching any matching documents.
 3. The maintainer confirms the drafts in the app like any other draft (W1 step 4).
@@ -183,11 +185,9 @@ Any document is logged with zero further steps; matching prevents the same purch
 2. T fills the Contingency Reimbursement Form from the Claimant profile and Claim lines (grouped by `purpose`, total rounded **up**, amount in words), renders the PDF, and assembles the submission package: form PDF + Bill files + email subject/body with the purpose breakdown, addressed to the Claimant's Approvers.
 3. T stores the form PDF as a `Claim form` document (a draft writes nothing else to paperless).
 4. Claimant sends the email themselves (download package / open mail client), then marks the Claim `submitted`. Only now T sets tag `reimb:claimed` and the Claim field on the Bills' documents and on the Claim form document, so Claims shows the whole package.
-- Maintainer only: Claude can additionally create the Gmail draft and copy files to the maintainer's local folder workflow.
 
 ### W8. Reimbursement arrives
 1. Claimant marks the Claim reimbursed when the money arrives (one credit per Claim, paid in full) → §3.3 completion: Bills `reimbursed`, Claim lines appended to the Ledger, documents re-tagged.
-2. During a Back-fill, Claude can mark it via the API when it finds the credit.
 
 ### W9. Payback to a colleague
 1. Colleague paid the vendor; Claimant pays the colleague back (W1).
@@ -247,7 +247,7 @@ Rule: a dashboard list is one that should be empty, and filters read link fields
 
 ### 6.1 The maintainer's Mac folder (ADR 0002, maintainer only)
 
-The maintainer keeps a local `Reimbursement` folder in sync with their data in the app. Claude runs the sync on demand ("sync") and before building a Claim.
+(Withdrawn from the current change with the token API; returns later as its own decision.) The maintainer keeps a local `Reimbursement` folder in sync with their data in the app. Claude runs the sync on demand ("sync") and before building a Claim.
 - **Mapping:** root = their Bills not yet in any Claim; `Working`, `Working2`, `Working3` = their `draft`/`submitted` Claims (one each); `Filed/<year>/<Claim>` = their `reimbursed` Claims. Each folder also holds that Claim's form docx/PDF.
 - **Folder → app:** a new file in the root (SHA-256 not yet in paperless) is uploaded to paperless with the maintainer as owner and tag `inbox` → W4.
 - **App → folder:** a Bill document missing locally is downloaded into the folder its Bill/Claim maps to; when a Claim changes state, Claude moves its folder accordingly (WorkingN → `Filed/<year>/<Claim>`).
@@ -278,17 +278,18 @@ Runs on: confirming an Expense, attaching a Bill, Amazon pick, adding a Bill to 
 | Claim unpaid | Claim `submitted` > 45 days |
 | Possible duplicate | §7 warn |
 
-## 9. Claude helpers (maintainer only; the app works without them)
+## 9. Claude Code reading (every Claimant; the app works without it)
 
-Claude talks to the app through its API with a personal access token scoped to the maintainer's own data.
+A Claimant's own Claude Code can read their unconfirmed Bills and propose values. MCP is the only door, and it only reads: no token API, for the maintainer either. Behaviour is decided in `docs/research/notes/Claude Code checks UX/decisions.md`; capability spec `document-intake`.
 
-| Job | Output |
+| Job | How |
 |---|---|
-| Back-fill (W6) | Draft Expenses created via API |
-| Read Amazon orders (shared lab account, Chrome) | Draft Expenses / expected Bills via API |
-| Fetch Amazon invoices for fulfilled Bills | Uploaded to paperless with Expense/Bill ID |
-| Mac folder sync (§6.1) | The maintainer's Reimbursement folder mirrors their Bills and Claims |
-| Gmail draft for a Claim | Draft in the maintainer's Gmail |
+| Connect | Settings shows one line; pasting it installs the Dues plugin (remote MCP server and a skill) and starts the first run; Dues' own consent page asks Allow / Don't allow |
+| Read my bills | The Claimant says "read my bills"; Claude Code reads each unconfirmed Bill and adds a Reading; the Claimant confirms in Dues |
+| Result | One line and one link in the terminal; Dues shows no "in progress" or failure state |
+| Disconnect | One per Claimant in Settings, on every computer at once: tokens issued before the cut-off time are refused; Readings already made stay |
+
+It cannot confirm a Bill, build or send a Claim, or change anything but add a Reading. Withdrawn for now, to return as their own decision: Back-fill (W6), Amazon picks (W5), the maintainer's folder sync (§6.1), marking a Reimbursement or drafting the mail by Claude.
 
 ## 10. Platform and security
 

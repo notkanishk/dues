@@ -9,7 +9,7 @@ Test-first vertical slices: each `test:` task is written red, then its paired ta
 | Claim package `build` with fake PdfConverter; one golden test with real Gotenberg | form rows, totals, words, email, naming | Word-level visual fidelity beyond the golden file |
 | Claimants `authenticate` on recorded tokens | role gate, admin, Actor shape | Zitadel availability |
 | Reminders `items(actor, now)` | every attention rule and its ageing | delivery |
-| Assistant API over HTTP | token scope, idempotent endpoints, contract | UI |
+| Dues MCP server (read only) | Claimant scope, Disconnect cut-off, Reading idempotency, no write tool | Claude Code itself, the consent page's look |
 | PageText `read` (fictional PDFs, canned fake) | boxes in page points, source routing, cache key | OCR accuracy on real bills |
 | Locator `locate` (pure, fictional pages) | look-alikes, fuzzy ids, `pick`, never a box without a match | how Intake uses the boxes |
 | Validators (pure, one table each) | each Signal | combination into confidence |
@@ -119,15 +119,16 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 5.9 test: Notifier with a recording fake — nudge after a logged payment, daily nudge, no subscription
 - [ ] 5.10 Web Push Notifier and the daily job
 
-## 6. Phase 5: assistant API and Claude Code plugin
+## 6. Phase 5: Claude Code over MCP (read only)
 
-- [ ] 6.0a test: MCP tools (`documents_to_read`, `read_document`, `submit_extraction`, `upload_url`) scoped to the Claimant; another Claimant's document not found; resubmission idempotent
-- [ ] 6.0b Dues MCP server (OAuth via Zitadel, scope `extraction`) and the Claude Code plugin (MCP config + "file my pending bills" skill); spike first: Zitadel as MCP authorisation server, image size limits in MCP results
-
-- [ ] 6.1 test: personal access tokens scoped to the maintainer; another Claimant's data refused; idempotency keys
-- [ ] 6.2 Tokens and API shell
-- [ ] 6.3 test: Back-fill drafts, Amazon picks, invoice upload with a Reference, mark reimbursed, sync manifest
-- [ ] 6.4 Assistant endpoints
+- [ ] 6.0 spike: does the browser open by itself on the first tool call from Claude Code (if not, the skill prints one sign-in link); does a pre-registered client ID, or a Client ID Metadata Document, work against Zitadel with dynamic registration closed; image size limits in MCP results. Record the answers in design Open Question 12
+- [ ] 6.1 test: MCP tools (`documents_to_read`, `read_document`, `submit_extraction`) scoped to the Claimant, the maintainer included; another Claimant's document not found; only unconfirmed Bills offered, a confirmed one never, an undone confirmation again; resubmission idempotent; no tool confirms a Bill or touches a Claim
+- [ ] 6.2 Dues MCP server (OAuth via Zitadel, scope `extraction`, static or Metadata Document client)
+- [ ] 6.3 test: Disconnect records a cut-off time per Claimant; a token issued before it is refused on every computer, one issued after is accepted; Readings already made stay
+- [ ] 6.4 Connection, Disconnect and the consent page (Allow / Don't allow, the words in `docs/research/notes/Claude Code checks UX/decisions.md`); Settings shows connected since and last read (date, count); phone shows "Connect from your computer."
+- [ ] 6.5 test: differing Readings stop only total, date, bill number and GSTIN after conversion; no-default total ("Choose 1 or 2"); "Two readings agree" only on a printed bill's stopping total from different model families; a Reading arriving for an open Bill changes nothing under the hand
+- [ ] 6.6 Differing-Readings rules in Intake's fold
+- [ ] 6.7 Claude Code plugin (remote MCP server + one skill, "read my bills"), the one-line install in Settings (`claude plugin install <plugin> --marketplace <repo> -y && claude "read my bills"`), and the run's terminal lines (results and failures; nothing in Dues)
 
 ## 7. Release
 

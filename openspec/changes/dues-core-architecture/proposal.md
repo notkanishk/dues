@@ -10,7 +10,7 @@ Makerspace members pay for lab supplies out of pocket and claim the money back f
 - Documents are matched to Expenses automatically (suggest, then confirm).
 - **Claims** are built in the app: the university form is filled, rendered to PDF and packaged with the Bills for the Claimant to send.
 - A cross-Claimant **Ledger** blocks duplicate claims; reminders surface everything that needs attention.
-- An API lets the maintainer's assistant create Back-fill drafts, Amazon picks and keep a local folder in sync.
+- A Claimant's own Claude Code can read their unconfirmed Bills over MCP (read only) and propose Readings; the Claimant confirms in Dues. MCP is the only door; there is no token API. Maintainer helpers (Back-fill, folder sync, Amazon picks) are not part of this change and return later as their own decision.
 
 ## Capabilities
 
@@ -18,13 +18,12 @@ Makerspace members pay for lab supplies out of pocket and claim the money back f
 - `platform-foundations`: money as integer paise, time rules, append-only audit log, upload validation, backups, deployment shape.
 - `identity-access`: Zitadel sign-in, role gate, Claimant profile, user-defined Payment methods, time zone.
 - `expense-tracking`: Expense and Bill lifecycles, Orders (partial delivery, cancellation, return), Refunds, Open amount, corrections, closing, Owed to university.
-- `document-intake`: paperless webhook, classification, field extraction from payment confirmations and Bills, zero-friction logging, unreadable documents, write-back to paperless.
+- `document-intake`: paperless webhook, classification, field extraction from payment confirmations and Bills, Readings (provider and the Claimant's own Claude Code over read-only MCP, consent, Disconnect), zero-friction logging, unreadable documents, write-back to paperless.
 - `bill-matching`: matching documents to Expenses (one, several, none), Check matches, one Payment for several invoices.
 - `paybacks`: Payback Expenses, linking a colleague's Expense, undo, unlinked shared Bills.
 - `claims`: building a Claim, form and PDF generation, submission package, naming, rounding, recall, Reimbursement.
 - `duplicate-guard`: Ledger, block and warn rules across Claimants, remembered "different" pairs.
 - `reminders`: attention rules and Web Push nudges.
-- `assistant-api`: token-scoped API for Back-fill drafts, Amazon order picks, invoice upload and the maintainer's folder sync.
 
 ### Modified Capabilities
 - None (first change).
