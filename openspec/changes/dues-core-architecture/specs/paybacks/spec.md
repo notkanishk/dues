@@ -11,6 +11,20 @@ The system SHALL record a Payment to a colleague who already paid the vendor as 
 - **WHEN** a Payback Expense is viewed
 - **THEN** payee and vendor are shown as separate fields
 
+### Requirement: Payback is the Claimant's answer
+The system SHALL treat a payment as a Payback only when the Claimant answered "Paying someone back" for that payee (see document-intake), and SHALL expect a Bill of that amount from any vendor, with the vendor filled in from the Bill when it arrives. See bill-matching.
+
+#### Scenario: Vendor from the Bill
+- **WHEN** a Bill from Sample Tools is attached to a Payback Expense
+- **THEN** the Expense's vendor is Sample Tools
+
+### Requirement: A Bill in a colleague's name
+The system SHALL file a Bill in a colleague's name as it is, with no note needed.
+
+#### Scenario: Colleague's name on the Bill
+- **WHEN** a Bill on a Payback Expense is in Priya's name
+- **THEN** it is claimed as it is with no note
+
 ### Requirement: Offer to link the colleague's Expense
 The system SHALL, when the colleague is a Claimant who logged that vendor payment as their own Expense, offer to link it, and on confirmation SHALL close the colleague's Expense as "paid back by" the paying Claimant and move its Bills to the Payback Expense.
 

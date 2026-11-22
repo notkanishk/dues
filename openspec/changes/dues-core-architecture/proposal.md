@@ -8,7 +8,7 @@ Makerspace members pay for lab supplies out of pocket and claim the money back f
 - Every **Expense** is logged the moment money leaves a Claimant's account, by sharing a payment confirmation (or a Bill) to paperless-ngx from the phone; nothing else is required.
 - Each Expense carries an **Open amount** (`Payment − Σ Bills − Σ Refunds`) and the reason it is still open; Orders split into one Bill per invoice, with cancellations, returns and Refunds.
 - Documents are matched to Expenses automatically (suggest, then confirm).
-- **Claims** are built in the app: the university form is filled, rendered to PDF and packaged with the Bills for the Claimant to send.
+- **Claims** are built in the app: each Fund's form template is filled, rendered to PDF and packaged with the Bills and a mail built from the Fund's template, for the Claimant to send. Funds are where the money comes from; Purposes group Expenses inside a Fund; an Advance is a personal amount on a Fund.
 - A cross-Claimant **Ledger** blocks duplicate claims; reminders surface everything that needs attention.
 - A Claimant's own Claude Code can read their unconfirmed Bills over MCP (read only) and propose Readings; the Claimant confirms in Dues. MCP is the only door; there is no token API. Maintainer helpers (Back-fill, folder sync, Amazon picks) are not part of this change and return later as their own decision.
 

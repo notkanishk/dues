@@ -35,7 +35,7 @@ The system SHALL extract from a payment confirmation, independent of the payment
 
 
 ### Requirement: Zero-friction logging of a Payment
-The system SHALL log an Expense immediately, open and not draft, for each payment confirmation with kind guessed from the payee (known vendor history, or online for marketplace vendors, otherwise shop), Payment method matched through the Claimant's hints, and "what for" left empty, so that sharing the confirmation is the only required action.
+The system SHALL log an Expense immediately, open and not draft, for each payment confirmation, with whatever can be read, with kind guessed from the payee (remembered payee type, known vendor history, or online for marketplace vendors, otherwise shop), Payment method matched through the Claimant's hints, and "what for" left empty, so that sharing the confirmation is the only required action.
 
 #### Scenario: Immediate Expense
 - **WHEN** a payment confirmation of ₹2,500.00 to a known online vendor arrives
@@ -45,6 +45,10 @@ The system SHALL log an Expense immediately, open and not draft, for each paymen
 #### Scenario: Method matched
 - **WHEN** the confirmation shows a card ending 1234 that matches a Payment method hint
 - **THEN** that Payment method is recorded on the Expense
+
+#### Scenario: Order confirmation shared
+- **WHEN** an order-confirmation screenshot is shared for an Expense
+- **THEN** the Expense's order reference is filled from it and it is not treated as a Bill
 
 #### Scenario: Method unmatched
 - **WHEN** no Payment method hint matches
@@ -102,6 +106,11 @@ The system SHALL extract from a bill the vendor, Bill number, Bill date and tota
 - **WHEN** no Expense matches the bill
 - **THEN** an open Expense is created with amount equal to the bill total, vendor from the bill, paid-on date equal to the Bill date and Payment method "not recorded"
 
+#### Scenario: Vendor unreadable
+- **WHEN** no Expense matches and the vendor cannot be read
+- **THEN** the Expense's vendor shows "Unknown"
+- **AND** review asks for the vendor once
+
 ### Requirement: Duplicate files and bills at intake
 The system SHALL consult duplicate-guard before attaching a Bill, and a file already linked to another Bill MUST NOT be attached again.
 
@@ -142,7 +151,7 @@ The system SHALL treat documents from the phone uploader share menu, web upload,
 - **THEN** it follows the same intake steps as a phone share
 
 ### Requirement: Needs-description nudge
-The system SHALL send a Web Push notification to the Claimant after a Payment is logged, reading for example "₹2,500 to Sample Electronics logged. What was it for?", with actions Add details (a one-field form) and Later, and ignoring it MUST NOT affect anything. See reminders for push delivery rules.
+The system SHALL send a Web Push notification to the Claimant after a Payment is logged, reading for example "₹2,500 to Sample Electronics logged. What was it for?", with actions Add details (the "What for?" step) and Later, and ignoring it MUST NOT affect anything. See reminders for push delivery rules.
 
 #### Scenario: Nudge after logging
 - **WHEN** a Payment is logged and push is on
@@ -156,6 +165,31 @@ The system SHALL send a Web Push notification to the Claimant after a Payment is
 - **WHEN** the Claimant taps Add details and enters "Robotics club"
 - **THEN** the Expense's "what for" is "Robotics club"
 
+### Requirement: "What for?" step
+The system SHALL ask only "What for?" after a Payment is logged, and on the same step SHALL offer "Ordered by" (Me by default, or a recent Person, stored as the Orderer) and the Fund and Purpose choices (see expense-tracking).
+
+#### Scenario: Default Orderer
+- **WHEN** the Claimant answers "What for?" and leaves "Ordered by" alone
+- **THEN** the Orderer is the Claimant
+
+#### Scenario: Ordered by a colleague
+- **WHEN** the Claimant picks Priya under "Ordered by"
+- **THEN** the Orderer is Priya
+
+### Requirement: Payee type asked once
+The system SHALL, the first time a payee that is a person (not a shop) appears, ask one question, "Shop", "Online order" or "Paying someone back", SHALL remember the answer for that payee, and MUST NOT ask again for that payee. "Paying someone back" makes the Expense a Payback (see paybacks).
+
+#### Scenario: First time
+- **WHEN** a payment to a person payee Priya appears for the first time
+- **THEN** the Claimant is asked Shop, Online order or Paying someone back
+
+#### Scenario: Remembered
+- **WHEN** the Claimant answered Paying someone back and pays Priya again
+- **THEN** the Expense is a Payback and no question is asked
+
+#### Scenario: Shop payee
+- **WHEN** the payee is a shop
+- **THEN** no question is asked
 ### Requirement: Providers configured, ordered and privacy-marked
 The system SHALL read documents through an ordered list of configured providers, each marked `internal` or `external`, SHALL send a Claimant's document to an `external` provider only if that Claimant has opted in, and SHALL skip a provider that answers `refused` until it is reconfigured, falling through to the next one.
 

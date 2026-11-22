@@ -54,12 +54,20 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 2.11 Derivation of status, Open amount and reason (no stored status)
 - [ ] 2.12 test: Order flow — split expected Bill per invoice; cancel part → expected Refund; cancel rest; return before claim → Bill cancelled permanently
 - [ ] 2.13 Order commands
+- [ ] 2.13a test: Order page — Payment first, then each Bill with Move to another payment, Detach (own invoice-only Expense) and Edit (opens review); "Still expected ₹x" with Item cancelled (expected Refund, Refund received) and No more invoices; a small leftover gets "₹1 left. Close the order?" and is never closed silently
+- [ ] 2.13b Order page queries and commands (`DetachBill`, Item cancelled, close order). Open: leftover threshold, effect of "No more invoices" (design Open Question 15)
 - [ ] 2.14 test: Refund expected → received; Expense settles only when Open amount is zero, every Refund arrived, every Bill reimbursed or cancelled
 - [ ] 2.15 Refund commands and settling
 - [ ] 2.16 test: corrections allowed until a Bill is on a submitted Claim; "differs from the document" flag; closing (personal / duplicate / written off) rules
 - [ ] 2.17 Correction and closing commands
 - [ ] 2.18 test: authorization — another Claimant's Expense is `not_found`; admin sees it and is audited as actor
 - [ ] 2.19 Authorization at the Actor Seam
+- [ ] 2.19a test: Fund — fields (name, mail, notes, form template, file-name pattern, claim-name pattern, hint, archive); notes never in mail or form; Makerspace first by default; private to its creator, Share with team makes it a team Fund, team version edited only by an admin and the creator (admin edit audited); "my version" overrides mail, form, file-name pattern and hint for one Claimant only, Reset to team version, "Team version updated. Compare"; each Claimant orders and hides Funds for themselves only
+- [ ] 2.19b Fund entity, sharing, personal versions, per-Claimant order and hiding, Archive
+- [ ] 2.20 test: Purpose — an optional group inside a Fund (name and Fund); zero or more active at once; an active Purpose preselects its Fund; End trip stops catching payments but keeps its Expenses; one active → default, two or more → choices plus None; owner only; the prompt lists Funds in the Claimant's order, Makerspace first and preselected
+- [ ] 2.21 Purpose entity inside a Fund, link from Expense (`fund`, `purpose`, free-text `what_for`), active Purposes. Open: which Fund a new Purpose starts on (design Open Question 16)
+- [ ] 2.22 test: Advance balance per Fund — total minus Payments plus Refunds received plus Reimbursements received over that Fund's Expenses; other Funds untouched; below zero allowed; moving an Expense between Funds changes both; off by default; personal, never shared; no top-up records; Funds and Purposes behave the same with the Advance on or off
+- [ ] 2.23 Advance on a Fund (per Claimant) and Advance left derived on read; chip "Makerspace" / "Makerspace · Advance"; Home block per Fund (red below zero, amber at 15% or less, green above, hidden when off)
 
 ## 3. Phase 2: document intake and matching
 
@@ -81,10 +89,14 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 3.2m PP-OCR worker: one page per worker, tier config (tiny | small | medium, default small; medium reruns only raster fields left not located, as a background job), subtract the page pad from word boxes, start a word box one character width left of its first CTC position, copy the line transform before freeing it; check the ONNX files' licence before shipping
 - [ ] 3.3 test: Paperless Adapter against a recorded-response fake (get, download, annotate, upload, findByChecksum)
 - [ ] 3.4 Paperless HTTP Adapter (service-account token)
-- [ ] 3.5 test: Matching `propose` — one clear match, several candidates (Check), none; ±₹1 / ±10 days; one Payment for 2–3 invoices from one vendor; four invoices get no suggestion
+- [ ] 3.5 test: Matching `propose` — amount leads, vendor soft: an exact amount auto-attaches only when date within ±10 days and (vendor or order number matches, or exactly one candidate); a smaller invoice auto-attaches and splits the Order's expected Bill only when date within the window and the order number or the shop (platform and learned aliases) matches, else best candidate with a Check; marketplace: the platform is the shop, the seller never breaks a match, the first invoice's order number is saved and later invoices match on it exactly; none → invoice-only Expense, "Unknown" vendor when unreadable; Payback matches on amount and date with no vendor check; confirmed or moved matches teach payee aliases that later matches use; ±₹1 / ±10 days for a late payment confirmation (invoice before payment); one Payment for 2–3 invoices from one vendor, suggested and never automatic; four invoices get no suggestion
 - [ ] 3.6 Matching
+- [ ] 3.6a test: after an auto-attach Dues says once "₹2,100 invoice added to <shop> · <what for>. ₹2,770 still expected." with Undo and Move; Undo restores the expected Bill
+- [ ] 3.6b Auto-attach message, Undo and Move
 - [ ] 3.7 test: Intake — payment confirmation logs an Expense at once; same UPI reference attaches instead; unreadable → "Couldn't read" Expense; two unreadables within 10 minutes → "Same payment as E-x?"; invoice-first logs an Expense with Payment method "not recorded"; late confirmation fills it; repeat webhook is a no-op
 - [ ] 3.8 Intake and the webhook endpoint (secret check, idempotent)
+- [ ] 3.8a test: payee type asked once for a person payee (Shop / Online order / Paying someone back) and remembered; "Paying someone back" makes a Payback; shops never asked; "What for?" step carries Ordered by (Me default, or a Person → `orderer`), the Fund choice (Claimant's order, Makerspace first and preselected, the Fund's grey hint) and the Purpose choice; an order-confirmation screenshot fills `order_ref`
+- [ ] 3.8b Payee memory (type and aliases), the "What for?" step, order-confirmation handling
 - [ ] 3.9 test: a Bill with an open Check cannot go on a Claim until confirmed or moved
 - [ ] 3.10 Check confirm / move commands
 - [ ] 3.11 test: write-back job — tags, document type, correspondent, custom fields (References) set after Books commits; retried when paperless is down
@@ -97,10 +109,22 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 4.2 Claim draft commands
 - [ ] 4.3 test: total rounded up to whole rupees, lines keep paise; amount in words
 - [ ] 4.4 Claim totals
-- [ ] 4.5 test: naming — fixed at package build, renamed if rebuilt in a later month before submission, frozen at submission and after recall
+- [ ] 4.5 test: naming — made from the Fund's claim-name pattern, fixed at package build, renamed if rebuilt in a later month before submission, frozen at submission and after recall
 - [ ] 4.6 Claim naming
-- [ ] 4.7 test: Claim package `build` with fake PdfConverter — rows grouped by purpose, form shows invoice data only, email subject and breakdown; one golden test through real Gotenberg, with a field-by-field text check of the PDF
+- [ ] 4.7 test: Claim package `build` with fake PdfConverter — rows grouped by Purpose inside the Fund's Claim, form shows invoice data only, mail To, CC, subject and body from the Fund's template with its variables and nothing the template does not put there (the Purpose name is not added to the subject), the Claimant can edit the draft; one golden test through real Gotenberg, with a field-by-field text check of the PDF
 - [ ] 4.8 Claim package (template fill + Gotenberg Adapter)
+- [ ] 4.8a test: filing — each Fund files as its own Claim with its own total and its own "File", Purposes are breakdown groups inside it; every Fund's total rounds up to the rupee; review at filing time (Bills, then form and breakdown); a Claim records the amount actually received on reimbursement
+- [ ] 4.8b Filing by Fund, reimbursed amount
+- [ ] 4.8c test: no-send rule — the mail Module has no send call; building, drafting or downloading a Claim sends nothing, on every path (Gmail draft, zip, `.eml`); "Sent it?" yes marks the Claim submitted, anything else leaves it a draft
+- [ ] 4.8d Mail paths: Gmail draft Adapter (compose scope, drafts only) with a recording fake, zip + copy-body fallback, `.eml` fallback; "Sent it?" step. Open: Gmail scope on the university Workspace and the 25 MB test draft (design Open Questions 13, 14); registering Dues with Google is parked (Open Question 17)
+- [ ] 4.8e test: Fund templates — variables filled ({claimant}, {claim_name}, {total}, {total_in_words}, {bill_count}, {date_range}, {purpose}, {breakdown}); preview of form and mail side by side from a sample claim, "Use my last claim"; a filed Claim keeps a snapshot of the template version it used and a later edit changes no past Claim; a personal version is used only for its Claimant
+- [ ] 4.8f Fund templates, preview and snapshot
+- [ ] 4.8g test: attachment sizing — original files untouched in the mail; about 18 MB raw target; over it, the largest images shrink first, then scanned PDFs, text PDFs never; every shrunk file listed ("3 photos made smaller to fit 25 MB"); originals in paperless unchanged; still too big → offer to split into two mails (fictional files)
+- [ ] 4.8h Attachment sizing and the split offer. Open: confirm the limit with one real ~22 MB test draft (design Open Question 14)
+- [ ] 4.8i test: file naming — pattern variables {purpose}, {what} (description, defaulting to "what for"), {vendor}, {person}, {n}, {kind} (Invoice, Bill, Payment); empty parts dropped with their separator; {n} only on a clash, one numbering style; Makerspace default gives "Solder Invoice" and "Club - Acrylic Beads Invoice"; an edited name at filing review is kept
+- [ ] 4.8j File naming
+- [ ] 4.8k test: moving an Expense to another Purpose or Fund while its Bill is on a draft Claim takes the Bill off that draft and onto the draft Claim of its new Fund; a move inside one Fund keeps the Bill on its Claim
+- [ ] 4.8l Move-while-drafted command
 - [ ] 4.9 test: submit, recall, mark reimbursed → Bills reimbursed, Claim lines appended to the Ledger, documents re-tagged
 - [ ] 4.10 Submission and Reimbursement commands
 - [ ] 4.11 test: Owed to university created when a claimed Bill is returned; `open` → `repaid`
@@ -116,6 +140,8 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 5.6 Payback commands
 - [ ] 5.7 test: Reminders `items(actor, now)` for every rule in the reminders spec, ageing in the Claimant's zone
 - [ ] 5.8 Reminders
+- [ ] 5.8a test: Invoice waiting — the only invoice reminder: one item after 14 days from paid-on; "Ask <name> for the <vendor> invoice" when the Orderer is someone else; never twice; no 3-day Bill missing item; Home lists (Waiting for invoice with "Invoice with <name>", Ready to file, Filed awaiting money)
+- [ ] 5.8b Invoice waiting rule and Home lists
 - [ ] 5.9 test: Notifier with a recording fake — nudge after a logged payment, daily nudge, no subscription
 - [ ] 5.10 Web Push Notifier and the daily job
 

@@ -46,6 +46,18 @@ _Avoid_: Reversal, cashback
 The part of an Expense's Payment not yet covered by a Bill or a Refund: goods still coming, a refund still owed, or a bill not yet in hand. An Expense is settled when its Open amount is zero, every Refund has arrived and every Bill is reimbursed or cancelled.
 _Avoid_: Balance, pending, outstanding
 
+**Fund**:
+Where an Expense's money comes from and how it is claimed: a name, a mail and form template, and optionally the Claimant's own Advance. Each Fund files as its own Claim.
+_Avoid_: Budget, account, pot
+
+**Purpose**:
+An optional group inside a Fund that a Claimant puts Expenses into, such as a trip or an event. Its Expenses form one breakdown group in that Fund's Claim.
+_Avoid_: Category, project, tag
+
+**Advance**:
+A personal amount on a Fund, off by default and never shared: money Finance credited to the Claimant's own bank account for that Fund's purchases, kept as one total the Claimant enters. What is left of it is the total minus the Claimant's money still out on that Fund's Expenses; below zero means the Claimant's own money is in.
+_Avoid_: Float, wallet, imprest
+
 ## Proof
 
 **Reference**:
@@ -79,7 +91,7 @@ _Avoid_: UPI receipt, screenshot
 ## Getting paid back
 
 **Claim**:
-One submitted Contingency Reimbursement Form and the Bills sent with it, filed by one Claimant and named by the month it is sent and its sequence among that Claimant's Claims that month, e.g. 2026/September1; once submitted the name never changes, even after a recall.
+One submitted form of one Fund and the Bills sent with it, filed by one Claimant and named by the Fund's claim-name pattern, e.g. 2026/September1; once submitted the name never changes, even after a recall.
 _Avoid_: Batch, report, reimbursement
 
 **Claim line**:

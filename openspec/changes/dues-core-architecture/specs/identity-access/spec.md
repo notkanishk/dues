@@ -23,7 +23,7 @@ The system SHALL grant access only when the `roles` claim contains `claimant`, a
 - **THEN** the next request from that Claimant is refused
 
 ### Requirement: Claimant profile
-The system SHALL keep for each Claimant the full name, employee code and designation the university form needs, entered once by the Claimant because Zitadel supplies only name and email, plus a list of Approvers (name and email) used to address the submission email.
+The system SHALL keep for each Claimant the full name, employee code and designation the university form needs, entered once by the Claimant because Zitadel supplies only name and email, plus a list of Approvers (name and email). A Fund's mail builder holds its own To and CC (see claims).
 
 #### Scenario: Profile gaps filled once
 - **WHEN** a Claimant first signs in
@@ -34,9 +34,9 @@ The system SHALL keep for each Claimant the full name, employee code and designa
 - **WHEN** a Claimant without an employee code builds a Claim form
 - **THEN** the system asks for the missing field before producing the form
 
-#### Scenario: Approvers addressed
+#### Scenario: Approvers kept
 - **WHEN** a Claimant has two Approvers saved
-- **THEN** both are offered as recipients of the submission email
+- **THEN** both are kept in their profile
 
 ### Requirement: Claimant-defined Payment methods
 The system SHALL let each Claimant define, rename and archive their own Payment methods (for example a savings account, a credit card, a UPI app), MUST NOT hard-code any Payment method, and SHALL let each carry optional match hints (bank name, card last four digits, UPI handle) used to recognise it on a payment confirmation.
@@ -112,3 +112,45 @@ The system SHALL keep, per Claimant, a setting that allows their documents to be
 #### Scenario: Opt in
 - **WHEN** a Claimant turns external reading on
 - **THEN** their next uploads may be read by external providers and the audit log records the change
+
+### Requirement: Advance is a personal amount on a Fund
+The system SHALL keep per Claimant and Fund whether the Advance is on and, when on, one total amount in paise, off by default, and MUST NOT share it with any other Claimant, even on a team Fund. The system MUST NOT keep top-up or return records: the Claimant edits the total. See expense-tracking for the balance.
+
+#### Scenario: Default off
+- **WHEN** a new Claimant signs in for the first time
+- **THEN** their Advance is off on every Fund
+
+#### Scenario: Turn on
+- **WHEN** a Claimant turns the Advance on for Makerspace and enters ₹10,000.00
+- **THEN** their Makerspace Advance total is ₹10,000.00
+
+#### Scenario: Edit the total
+- **WHEN** the Claimant changes the total to ₹15,000.00
+- **THEN** the total is ₹15,000.00 and no top-up record is made
+
+#### Scenario: Never shared
+- **WHEN** a Fund is shared with the team and one Claimant has an Advance on it
+- **THEN** other Claimants see no Advance on that Fund and their own is unaffected
+
+### Requirement: Fund sharing and edit rights
+The system SHALL keep a new Fund private to its creator, SHALL make it a team Fund when the creator chooses "Share with team", and SHALL let only an admin and the Fund's creator edit the team version. Any Claimant MAY make a personal version of a team Fund's mail, form, file-name pattern or "What for?" hint that affects only them (see claims). Every admin edit of a team Fund MUST be written to the audit log with the admin as actor.
+
+#### Scenario: Private by default
+- **WHEN** a Claimant creates a Fund
+- **THEN** only they can see and use it
+
+#### Scenario: Share with team
+- **WHEN** the creator chooses "Share with team"
+- **THEN** every Claimant can use the Fund
+
+#### Scenario: Who edits the team version
+- **WHEN** a Claimant who is neither an admin nor the creator tries to edit the team version
+- **THEN** the system refuses, and offers "my version" instead
+
+#### Scenario: Admin edit
+- **WHEN** an admin edits a team Fund's mail
+- **THEN** it takes effect for every Claimant without a personal version and the audit log records the admin as actor
+
+#### Scenario: Creator edit
+- **WHEN** the creator edits the team version
+- **THEN** it takes effect for every Claimant without a personal version

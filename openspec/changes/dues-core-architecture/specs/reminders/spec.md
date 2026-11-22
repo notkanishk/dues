@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Needs-attention rules
-The system SHALL raise an attention item for each of these conditions: Draft waiting (an Expense draft for more than 1 day); Goods late (a Bill expected more than 7 days after the paid-on date); Bill missing (a Bill Fulfilled with no document for more than 3 days); Refund owed (a Refund expected for more than 10 days); Mismatch (nothing expected but Bills plus Refunds differ from the Payment, raised at once); Needs description (an Expense without "what for"); Couldn't read (a Payment proof whose amount could not be extracted); Owed to university (a record with status open); Check match (a Bill attached with another candidate Expense, not confirmed); Link as payback? (the same Bill held by two Claimants with no link); Claim unpaid (a Claim submitted more than 45 days); Possible duplicate (a duplicate-guard warning).
+The system SHALL raise an attention item for each of these conditions: Draft waiting (an Expense draft for more than 1 day); Goods late (a Bill expected more than 7 days after the paid-on date); Refund owed (a Refund expected for more than 10 days); Mismatch (nothing expected but Bills plus Refunds differ from the Payment, raised at once); Invoice waiting (an Expense in Waiting for invoice for more than 14 days after the paid-on date, raised once; the only invoice reminder); Needs description (an Expense without "what for"); Couldn't read (a Payment proof whose amount could not be extracted); Owed to university (a record with status open); Check match (a Bill attached with another candidate Expense, not confirmed); Link as payback? (the same Bill held by two Claimants with no link); Claim unpaid (a Claim submitted more than 45 days); Possible duplicate (a duplicate-guard warning).
 
 #### Scenario: Draft waiting
 - **WHEN** a draft Expense is 25 hours old
@@ -19,9 +19,9 @@ The system SHALL raise an attention item for each of these conditions: Draft wai
 - **WHEN** the Bill has been expected for 7 days
 - **THEN** no item is raised
 
-#### Scenario: Bill missing
-- **WHEN** a Fulfilled Bill has had no document for 4 days
-- **THEN** "Bill missing" is raised
+#### Scenario: No 3-day Bill missing item
+- **WHEN** a Fulfilled Bill has had no document for 4 days and the Expense was paid 4 days ago
+- **THEN** no item is raised
 
 #### Scenario: Refund owed
 - **WHEN** a Refund has been expected for 11 days
@@ -98,3 +98,26 @@ The system SHALL deliver the nudge of document-intake and a daily nudge at the C
 #### Scenario: Push off
 - **WHEN** the Claimant has push off
 - **THEN** no push is sent and items still appear in the app
+
+### Requirement: Invoice waiting reminder
+The system SHALL raise one invoice reminder, and only one, when an Expense has waited for its Bill for more than 14 days after the paid-on date, reading "Ask <name> for the <vendor> invoice" when the Orderer is someone else.
+
+#### Scenario: Own order
+- **WHEN** an Expense with the Claimant as Orderer has waited 15 days for its Bill
+- **THEN** one "Invoice waiting" item is raised
+
+#### Scenario: Colleague ordered
+- **WHEN** an Expense ordered by Priya from Sample Tools has waited 15 days
+- **THEN** the item reads "Ask Priya for the Sample Tools invoice"
+
+#### Scenario: Only once
+- **WHEN** the reminder has been raised and the Expense still waits
+- **THEN** no second reminder is raised
+
+#### Scenario: Not yet due
+- **WHEN** an Expense has waited 14 days
+- **THEN** no item is raised
+
+#### Scenario: Shop Expense with no document
+- **WHEN** a shop Expense whose Bill is Fulfilled has no document 15 days after paid-on
+- **THEN** the same "Invoice waiting" item is raised and no other invoice reminder exists
