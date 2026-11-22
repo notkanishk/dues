@@ -47,15 +47,19 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 2.4 test: Keys and References — UUIDv7 keys; `E-`/`B-`/`R-`/`O-` References global, unpadded, immutable (ADR 0005)
 - [ ] 2.5 Schema for Expense, Bill, Refund, Owed to university, audit log; sequences for References
 - [ ] 2.6 test: `authenticate` on recorded tokens — no `claimant` role refused; `admin` passes ownership; role removed refused
-- [ ] 2.7 Claimants: OIDC code + PKCE login, Actor, profile (name, employee code, designation, Approvers, time zone, Payment methods with match hints)
+- [ ] 2.7 Claimants: OIDC code + PKCE login, Actor, profile (name, employee code, designation, time zone, Payment methods with match hints)
 - [ ] 2.8 test: Books `LogExpense` → `open` Expense with one expected Bill (online) or fulfilled Bill (shop/service); audit entry written in the same transaction
+- [ ] 2.8a test: entry without a bill — one sheet with What for, Amount, Date (default today, any past date), Fund (Makerspace first), Purpose, Vendor/payee, Kind, Ordered by, Payment method (default Cash), Payback and Remarks (starts "No bill (cash)"); none of bill number, GSTIN, order reference, UPI reference, documents, matching or review; saves an open Expense with one `no_bill` Bill, Fulfilled and `ready`, in Ready to file; never in Waiting for invoice, no "bill missing", no Invoice waiting; editable until on a submitted Claim; counts against the Fund's Advance; several entries for one day allowed, no recents; "Add a bill" attaches a document, turns it into a normal Bill and puts it in review
+- [ ] 2.8b Books `LogNoBillEntry`, `AddBillToEntry`; the `no_bill` Bill kind (no `paperless_id`, remarks required, no review); Home "+ Add without a bill"
 - [ ] 2.9 Books shell: `execute(actor, command)` with per-Claimant lock, events, audit log
 - [ ] 2.10 test: Open amount and "why it's open" derived on read for awaiting goods, refund owed, bill missing, mismatch, in claim
 - [ ] 2.11 Derivation of status, Open amount and reason (no stored status)
 - [ ] 2.12 test: Order flow — split expected Bill per invoice; cancel part → expected Refund; cancel rest; return before claim → Bill cancelled permanently
 - [ ] 2.13 Order commands
 - [ ] 2.13a test: Order page — Payment first, then each Bill with Move to another payment, Detach (own invoice-only Expense) and Edit (opens review); "Still expected ₹x" with Item cancelled (expected Refund, Refund received) and No more invoices; a small leftover gets "₹1 left. Close the order?" and is never closed silently
-- [ ] 2.13b Order page queries and commands (`DetachBill`, Item cancelled, close order). Open: leftover threshold, effect of "No more invoices" (design Open Question 15)
+- [ ] 2.13b Order page queries and commands (`DetachBill`, Item cancelled)
+- [ ] 2.13c test: closing what is left of an Order — "No more invoices" asks "₹270 of this order has no invoice. What happened?" with Refund coming (expected Refund, "Refund received" later), Claim without a bill (a `no_bill` Bill of ₹270 with the Order's What for and remark "No invoice from seller", `ready`) and Not claiming (remainder written off, counted in the Open amount, the Order can settle, Advance left unchanged); each undone from the Order page; a leftover under ₹10 skips the question and offers "₹1 left. Close the order?" (yes = Not claiming), ₹10 or more asks the question; never closed silently
+- [ ] 2.13d Three-way close commands, written-off remainder in the Open amount, undo
 - [ ] 2.14 test: Refund expected → received; Expense settles only when Open amount is zero, every Refund arrived, every Bill reimbursed or cancelled
 - [ ] 2.15 Refund commands and settling
 - [ ] 2.16 test: corrections allowed until a Bill is on a submitted Claim; "differs from the document" flag; closing (personal / duplicate / written off) rules
@@ -113,6 +117,8 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 4.6 Claim naming
 - [ ] 4.7 test: Claim package `build` with fake PdfConverter — rows grouped by Purpose inside the Fund's Claim, form shows invoice data only, mail To, CC, subject and body from the Fund's template with its variables and nothing the template does not put there (the Purpose name is not added to the subject), the Claimant can edit the draft; one golden test through real Gotenberg, with a field-by-field text check of the PDF
 - [ ] 4.8 Claim package (template fill + Gotenberg Adapter)
+- [ ] 4.7a test: `no_bill` line on a Claim — one form line with text, amount and remark in the remarks column; the mail breakdown marks it "no bill"; no attachment and no file name; a Claim of only `no_bill` lines builds; a Bill turned normal by "Add a bill" attaches and is named like any Bill
+- [ ] 4.7b `no_bill` lines in form, breakdown and package
 - [ ] 4.8a test: filing — each Fund files as its own Claim with its own total and its own "File", Purposes are breakdown groups inside it; every Fund's total rounds up to the rupee; review at filing time (Bills, then form and breakdown); a Claim records the amount actually received on reimbursement
 - [ ] 4.8b Filing by Fund, reimbursed amount
 - [ ] 4.8c test: no-send rule — the mail Module has no send call; building, drafting or downloading a Claim sends nothing, on every path (Gmail draft, zip, `.eml`); "Sent it?" yes marks the Claim submitted, anything else leaves it a draft
@@ -121,7 +127,7 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 4.8f Fund templates, preview and snapshot
 - [ ] 4.8g test: attachment sizing — original files untouched in the mail; about 18 MB raw target; over it, the largest images shrink first, then scanned PDFs, text PDFs never; every shrunk file listed ("3 photos made smaller to fit 25 MB"); originals in paperless unchanged; still too big → offer to split into two mails (fictional files)
 - [ ] 4.8h Attachment sizing and the split offer. Open: confirm the limit with one real ~22 MB test draft (design Open Question 14)
-- [ ] 4.8i test: file naming — pattern variables {purpose}, {what} (description, defaulting to "what for"), {vendor}, {person}, {n}, {kind} (Invoice, Bill, Payment); empty parts dropped with their separator; {n} only on a clash, one numbering style; Makerspace default gives "Solder Invoice" and "Club - Acrylic Beads Invoice"; an edited name at filing review is kept
+- [ ] 4.8i test: file naming (a `no_bill` line has no file and no name) — pattern variables {purpose}, {what} (description, defaulting to "what for"), {vendor}, {person}, {n}, {kind} (Invoice, Bill, Payment); empty parts dropped with their separator; {n} only on a clash, one numbering style; Makerspace default gives "Solder Invoice" and "Club - Acrylic Beads Invoice"; an edited name at filing review is kept
 - [ ] 4.8j File naming
 - [ ] 4.8k test: moving an Expense to another Purpose or Fund while its Bill is on a draft Claim takes the Bill off that draft and onto the draft Claim of its new Fund; a move inside one Fund keeps the Bill on its Claim
 - [ ] 4.8l Move-while-drafted command

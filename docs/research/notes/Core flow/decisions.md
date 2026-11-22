@@ -27,7 +27,7 @@ Capture, matching, Purposes, the Advance, home and filing. Visuals are not decid
 15. Each Other-fund Purpose files as its own Claim, with its own total and its own "File" in Ready to file. Example: a trip claimed from a separate fund. *(Superseded by 42: each Fund files as its own Claim, not each "Other fund" Purpose.)*
 16. A Purpose can be active (for example during a trip). Zero or more can be active at once. With exactly one active, new payments go into it by default with one tap to put one elsewhere; with two or more active, the "What for?" step offers the active Purposes as choices plus None. Ending a Purpose ("End trip") stops it catching payments.
 17. Moving an Expense into or out of a Purpose updates the Advance balance. *(Changed by 45: moving an Expense changes the Advance left of the Funds it leaves and enters, where those have an Advance on.)*
-18. Other-fund Claims use the same form and the same Approvers for now. Per-Purpose approvers may come later (a future possibility, not a requirement). *(Superseded by 39 and 46: each Fund has its own form template and mail, including To and CC.)*
+18. Other-fund Claims use the same form and the same Approvers for now. Per-Purpose approvers may come later (a future possibility, not a requirement). *(Superseded by 39 and 46: each Fund has its own form template and mail, including To and CC. Superseded again by 54: the Approvers field is removed from the profile.)*
 
 ## Advance
 
@@ -51,7 +51,7 @@ Capture, matching, Purposes, the Advance, home and filing. Visuals are not decid
 28. An invoice smaller than the open amount still auto-attaches and splits the Order's expected Bill when the date is within the window AND the order number or the shop matches (the shop includes the platform and learned aliases). Otherwise it attaches to the best candidate with "Check". An exact amount follows decision 6 as written.
 29. Marketplace invoices (for example Amazon): the platform is the shop for matching; the "Sold by" seller is detail, so a different seller name never breaks a match. The order number read from the first invoice is saved on the Expense, and later invoices match on it exactly.
 30. After an auto-attach Dues says once: "₹2,100 invoice added to <shop> · <what for>. ₹2,770 still expected." with Undo and Move.
-31. The Order page: the Payment at the top (amount, date, method, proof, order number), then each Bill (amount, seller, status) with Move to another payment / Detach (becomes its own invoice-only Expense) / Edit (opens review R), then "Still expected ₹x" with "Item cancelled" (expects a Refund of that amount; "Refund received" when it lands) and "No more invoices". A small leftover (for example ₹1 from rounding or a coupon) gets "₹1 left. Close the order?", never closed silently. The leftover threshold is an open question.
+31. The Order page: the Payment at the top (amount, date, method, proof, order number), then each Bill (amount, seller, status) with Move to another payment / Detach (becomes its own invoice-only Expense) / Edit (opens review R), then "Still expected ₹x" with "Item cancelled" (expects a Refund of that amount; "Refund received" when it lands) and "No more invoices". A small leftover (for example ₹1 from rounding or a coupon) gets "₹1 left. Close the order?", never closed silently. The leftover threshold is an open question. *(Changed by 55 and 56: "No more invoices" asks one three-way question, and the threshold is ₹10.)*
 32. Invoice before payment still works as W4 step 4 (merge suggestion, one tap, never automatic).
 
 ### Reminders, Funds off Advance, moves
@@ -81,13 +81,40 @@ Capture, matching, Purposes, the Advance, home and filing. Visuals are not decid
 
 47. File-name pattern variables: {purpose}, {what}, {vendor}, {person}, {n}, {kind}. {what} is the Bill's description, which defaults to the Expense's "what for". {kind} is "Invoice", "Bill", or "Payment" for a payment proof used as the Bill. An empty part is dropped with its separator. {n} is added only when two names in one Claim would clash, in one numbering style. Makerspace default: `{purpose} - {what} {kind}` (gives "Solder Invoice", "Club - Acrylic Beads Invoice"). Every file name is shown at filing review and can be edited for that one file; an edited name is kept.
 
+## Round 3 (owner, 22 Nov 2026)
+
+### Entries without a bill (cash: autos, rickshaws, small transport)
+
+48. (amended) Home has "+ Add without a bill". One sheet. A no-bill entry carries every field a normal Expense with a Bill has, except those that cannot exist without a document.
+    - Fields it has: What for (becomes the claim form line), Amount, Date of the transaction (default today, any past date allowed), Fund (chips, Makerspace first and preselected), Purpose (optional), Vendor/payee (free text, optional, for example "Auto"), Kind (shop / service / online; transport is service), Ordered by, Payment method (default Cash; UPI or card allowed when there is no screenshot), Payback (paying a colleague back), Remarks (goes in the form's remarks column; starts as "No bill (cash)", editable).
+    - Fields it does not have: bill number, GSTIN, order reference, UPI reference, documents, matching and review.
+    - No document is expected. If a bill or screenshot turns up later, "Add a bill" on the entry attaches it and turns it into a normal Bill, which then goes through review like any other.
+49. Saving puts it straight into Ready to file. Nothing to match or review, since the Claimant typed every value. Editable from Ready to file until it is filed.
+50. The claim form gets one line with the text, amount and remark. The mail breakdown marks the line "no bill"; there is no attachment and no file name for it.
+51. It counts against the Advance like any other spending on that Fund.
+52. (amended) Any number of no-bill entries can be made for the same day or trip. There is no recents or quick re-add shortcut.
+53. No self-declaration for now; the remarks column is enough. A Fund may carry a declaration template later (future possibility only).
+
+These replace the earlier W1 "quick-add form (amount + what for)" text. A Bill with no document can now be claimed: it is a Bill of kind `no_bill`, with no paperless document and remarks required.
+
+### Mail recipients
+
+54. Each Fund keeps its own To and CC; a Claimant's personal version of a Fund can change them. The Approvers field on the Claimant profile is removed (resolves design open question 18).
+
+### Closing what's left of an Order
+
+55. "No more invoices" on an Order's "Still expected ₹x" means "stop waiting". It asks one question with three options, each with a one-line consequence shown under it:
+    - Title: "₹270 of this order has no invoice. What happened?"
+    - **Refund coming**: "The money is coming back to you. Dues waits for it; nothing is claimed." Becomes an expected Refund; "Refund received" when it lands.
+    - **Claim without a bill**: "You still paid it. ₹270 goes on your next claim as a line with no bill." Becomes a `no_bill` Bill (48) with the Order's What for and the remark "No invoice from seller" (editable), into Ready to file.
+    - **Not claiming**: "You'll cover it yourself. Nothing is filed." Closes the remainder as written off. With the Advance on, the amount stays spent.
+    Each choice can be undone from the Order page.
+56. A leftover under ₹10 skips the question and offers "₹1 left. Close the order?"; yes is the same as Not claiming. This sets the leftover threshold at ₹10.
+
 ## Still open
 
 - Gmail compose scope: whether the university Workspace allows it (being checked).
 - Registering Dues with Google for Gmail drafts: parked, later (36).
 - Attachment limit: confirm with one real ~22 MB test draft (38).
-- Leftover threshold for "₹1 left. Close the order?" (31), and what "No more invoices" and "Close the order?" do to the remaining amount.
 - Which Fund a new Purpose starts on (43).
-- Whether the Claimant's Approvers list stays in the profile beside each Fund's To and CC (39).
 - The designer shapes the home screen and the filing flow.
-- Per-Purpose approvers, later.

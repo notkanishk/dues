@@ -12,7 +12,7 @@ The system SHALL record each Claim with an id, owning Claimant, the one Fund it 
 - **THEN** only their own Claims are returned
 
 ### Requirement: Claim eligibility of Bills
-The system SHALL allow only ready Bills on a Claim and MUST block a Bill that matches a Ledger line, that has an open Check, that is held by two Claimants with no Payback link, or whose Expense has no "what for" until it is filled in. A Claim line is always exactly one Fulfilled Bill at its exact amount.
+The system SHALL allow only ready Bills on a Claim and MUST block a Bill that matches a Ledger line, that has an open Check, that is held by two Claimants with no Payback link, or whose Expense has no "what for" until it is filled in. A Claim line is always exactly one Fulfilled Bill at its exact amount. A no-bill Bill is ready without a document and can be claimed.
 
 #### Scenario: Not ready
 - **WHEN** a Claimant adds an expected Bill to a Claim
@@ -33,6 +33,10 @@ The system SHALL allow only ready Bills on a Claim and MUST block a Bill that ma
 #### Scenario: Missing what for
 - **WHEN** a Bill's Expense has no "what for"
 - **THEN** the system shows an inline field and the Bill can be added once it is filled
+
+#### Scenario: No-bill Bill is claimable
+- **WHEN** a ready no-bill Bill of ₹60.00 is added to a Claim
+- **THEN** it is accepted although it has no document
 
 #### Scenario: Exact line amount
 - **WHEN** a Bill of ₹1,180.25 is added
@@ -105,7 +109,11 @@ The system SHALL compute a Claim's total as the sum of its Claim lines rounded u
 - **THEN** its total is ₹411.00
 
 ### Requirement: Funds define how a Claim is made
-The system SHALL give each Fund a name; a mail builder (To, CC, subject, body) with the variables {claimant}, {claim_name}, {total}, {total_in_words}, {bill_count}, {date_range}, {purpose} and {breakdown}; notes shown only to Dues users and MUST NOT be put in the mail or the form; a form template (a Word file with placeholders, from which the PDF is made); a file-name pattern; a claim-name pattern such as {Month}{n}; a "What for?" hint shown as grey example text on the upload prompt; and an Archive that hides the Fund from the prompt while its history is kept. Makerspace SHALL be a Fund like any other, first by default, with its template starting as today's Contingency Reimbursement Form. No budget or cap exists for a Fund for now.
+The system SHALL give each Fund a name; a mail builder (To, CC, subject, body), where each Fund keeps its own To and CC and a Claimant's personal version of the Fund can change them, with the variables {claimant}, {claim_name}, {total}, {total_in_words}, {bill_count}, {date_range}, {purpose} and {breakdown}; notes shown only to Dues users and MUST NOT be put in the mail or the form; a form template (a Word file with placeholders, from which the PDF is made); a file-name pattern; a claim-name pattern such as {Month}{n}; a "What for?" hint shown as grey example text on the upload prompt; and an Archive that hides the Fund from the prompt while its history is kept. Makerspace SHALL be a Fund like any other, first by default, with its template starting as today's Contingency Reimbursement Form. No budget or cap exists for a Fund for now.
+
+#### Scenario: Own recipients
+- **WHEN** two Funds have different To and CC
+- **THEN** a Claim of each uses its own Fund's To and CC, and a Claimant's personal version of a Fund can change them for that Claimant only
 
 #### Scenario: Fund fields
 - **WHEN** a Claimant opens a Fund in Settings → Funds
@@ -142,6 +150,10 @@ The system SHALL fill the mail's To, CC, subject and body from the Fund's mail b
 - **WHEN** the body contains {breakdown}
 - **THEN** it lists the Claim's lines grouped by Purpose
 
+#### Scenario: No-bill line in the breakdown
+- **WHEN** the body contains {breakdown} and a line comes from a no-bill Bill
+- **THEN** that line is marked "no bill"
+
 #### Scenario: Edit before it is made
 - **WHEN** the Claimant changes a word in the draft body
 - **THEN** the draft that is made carries the change and the Fund's template is unchanged
@@ -177,7 +189,7 @@ The system SHALL let any Claimant make "my version" of a Fund's mail, form, file
 - **THEN** the filed Claim still shows the version it used
 
 ### Requirement: Form and PDF generation
-The system SHALL fill the Fund's form template from the Claimant profile and the Claim lines, grouped by Purpose with lines of no Purpose together, with the rounded total and the amount in words, SHALL render it to PDF with Gotenberg from that template, and for Makerspace the output MUST match the university's current form.
+The system SHALL fill the Fund's form template from the Claimant profile and the Claim lines (a no-bill line is one line with its text, amount and remark in the remarks column), and any approver names the form prints are part of the template text, not profile data, grouped by Purpose with lines of no Purpose together, with the rounded total and the amount in words, SHALL render it to PDF with Gotenberg from that template, and for Makerspace the output MUST match the university's current form.
 
 #### Scenario: Form content
 - **WHEN** a draft Claim has lines under Purposes "Robotics club" and "O-week"
@@ -188,6 +200,10 @@ The system SHALL fill the Fund's form template from the Claimant profile and the
 - **WHEN** the form is produced
 - **THEN** it carries the Claimant's full name, employee code and designation
 
+#### Scenario: No-bill line on the form
+- **WHEN** a Claim holds a no-bill Bill "Auto to hardware market" of ₹60.00 with remark "No bill (cash)"
+- **THEN** the form has one line with that text, amount and remark
+
 #### Scenario: Invoice data only
 - **WHEN** a line comes from a Payback Expense
 - **THEN** no Payback information appears (see paybacks)
@@ -197,7 +213,7 @@ The system SHALL assemble a package of the form PDF, the Bill files and a mail b
 
 #### Scenario: Package contents
 - **WHEN** the package is built
-- **THEN** it contains the form PDF, every Bill file, and a mail whose To, CC, subject and body come from the Fund's mail template
+- **THEN** it contains the form PDF, every Bill file (a no-bill line has none), and a mail whose To, CC, subject and body come from the Fund's mail template
 
 #### Scenario: Form stored
 - **WHEN** the form PDF is produced
@@ -235,7 +251,7 @@ The system SHALL target about 18 MB of raw files per mail, because base64 adds a
 - **THEN** Dues offers to split the Claim into two mails
 
 ### Requirement: File names from the Fund's pattern
-The system SHALL name each Bill's file in the package from the Fund's file-name pattern with the variables {purpose}, {what}, {vendor}, {person}, {n} and {kind}, where {what} is the Bill's description (which defaults to the Expense's "what for") and {kind} is "Invoice", "Bill", or "Payment" for a payment proof used as the Bill; SHALL drop an empty part with its separator; SHALL add {n} only when two names in one Claim would clash, in one numbering style; SHALL show every file name at the filing review and let the Claimant edit it for that one file; and MUST keep an edited name. The Makerspace default is "{purpose} - {what} {kind}".
+The system SHALL name each Bill's file that has one in the package from the Fund's file-name pattern with the variables {purpose}, {what}, {vendor}, {person}, {n} and {kind}, where {what} is the Bill's description (which defaults to the Expense's "what for") and {kind} is "Invoice", "Bill", or "Payment" for a payment proof used as the Bill; SHALL drop an empty part with its separator; SHALL add {n} only when two names in one Claim would clash, in one numbering style; SHALL show every file name at the filing review and let the Claimant edit it for that one file; and MUST keep an edited name. The Makerspace default is "{purpose} - {what} {kind}".
 
 #### Scenario: Makerspace default with no Purpose
 - **WHEN** an Invoice for the Expense "Solder" has no Purpose
@@ -252,6 +268,10 @@ The system SHALL name each Bill's file in the package from the Fund's file-name 
 #### Scenario: Clash
 - **WHEN** two Bills in one Claim would both be named "Solder Invoice"
 - **THEN** a number is added to each, in one numbering style
+
+#### Scenario: No-bill line has no name
+- **WHEN** a Claim holds a no-bill Bill
+- **THEN** no attachment and no file name exist for it
 
 #### Scenario: Edited name kept
 - **WHEN** the Claimant edits one file's name at the filing review

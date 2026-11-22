@@ -23,7 +23,7 @@ The system SHALL grant access only when the `roles` claim contains `claimant`, a
 - **THEN** the next request from that Claimant is refused
 
 ### Requirement: Claimant profile
-The system SHALL keep for each Claimant the full name, employee code and designation the university form needs, entered once by the Claimant because Zitadel supplies only name and email, plus a list of Approvers (name and email). A Fund's mail builder holds its own To and CC (see claims).
+The system SHALL keep for each Claimant the full name, employee code and designation the university form needs, entered once by the Claimant because Zitadel supplies only name and email. The profile holds no Approvers field: each Fund's mail builder holds its own To and CC, which a Claimant's personal version of the Fund can change (see claims).
 
 #### Scenario: Profile gaps filled once
 - **WHEN** a Claimant first signs in
@@ -34,9 +34,9 @@ The system SHALL keep for each Claimant the full name, employee code and designa
 - **WHEN** a Claimant without an employee code builds a Claim form
 - **THEN** the system asks for the missing field before producing the form
 
-#### Scenario: Approvers kept
-- **WHEN** a Claimant has two Approvers saved
-- **THEN** both are kept in their profile
+#### Scenario: No Approvers field
+- **WHEN** a Claimant opens their profile
+- **THEN** it has no Approvers field, and recipients come from the Fund's To and CC
 
 ### Requirement: Claimant-defined Payment methods
 The system SHALL let each Claimant define, rename and archive their own Payment methods (for example a savings account, a credit card, a UPI app), MUST NOT hard-code any Payment method, and SHALL let each carry optional match hints (bank name, card last four digits, UPI handle) used to recognise it on a payment confirmation.

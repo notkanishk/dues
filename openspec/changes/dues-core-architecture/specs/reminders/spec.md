@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Needs-attention rules
-The system SHALL raise an attention item for each of these conditions: Draft waiting (an Expense draft for more than 1 day); Goods late (a Bill expected more than 7 days after the paid-on date); Refund owed (a Refund expected for more than 10 days); Mismatch (nothing expected but Bills plus Refunds differ from the Payment, raised at once); Invoice waiting (an Expense in Waiting for invoice for more than 14 days after the paid-on date, raised once; the only invoice reminder); Needs description (an Expense without "what for"); Couldn't read (a Payment proof whose amount could not be extracted); Owed to university (a record with status open); Check match (a Bill attached with another candidate Expense, not confirmed); Link as payback? (the same Bill held by two Claimants with no link); Claim unpaid (a Claim submitted more than 45 days); Possible duplicate (a duplicate-guard warning).
+The system SHALL raise an attention item for each of these conditions: Draft waiting (an Expense draft for more than 1 day); Goods late (a Bill expected more than 7 days after the paid-on date); Refund owed (a Refund expected for more than 10 days); Mismatch (nothing expected but Bills plus Refunds plus the amount written off differ from the Payment, raised at once); Invoice waiting (an Expense in Waiting for invoice for more than 14 days after the paid-on date, raised once; the only invoice reminder); Needs description (an Expense without "what for"); Couldn't read (a Payment proof whose amount could not be extracted); Owed to university (a record with status open); Check match (a Bill attached with another candidate Expense, not confirmed); Link as payback? (the same Bill held by two Claimants with no link); Claim unpaid (a Claim submitted more than 45 days); Possible duplicate (a duplicate-guard warning).
 
 #### Scenario: Draft waiting
 - **WHEN** a draft Expense is 25 hours old
@@ -117,6 +117,10 @@ The system SHALL raise one invoice reminder, and only one, when an Expense has w
 #### Scenario: Not yet due
 - **WHEN** an Expense has waited 14 days
 - **THEN** no item is raised
+
+#### Scenario: Entry without a bill
+- **WHEN** an entry without a bill is 15 days old
+- **THEN** no "Invoice waiting" item is raised
 
 #### Scenario: Shop Expense with no document
 - **WHEN** a shop Expense whose Bill is Fulfilled has no document 15 days after paid-on

@@ -6,8 +6,8 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 
 0. **Multi-Claimant.** Anyone at the makerspace can sign in (Zitadel, OIDC) and track and file their own Claims. Every Expense, Bill and Claim belongs to one Claimant; the Ledger and duplicate check span all Claimants.
 1. **Money first.** An Expense exists the moment money leaves the Claimant's account, before any order number or document exists.
-2. **One invariant drives everything:** `Open amount = Payment − Σ Bills − Σ Refunds`. Every reminder is some form of "this Expense still has an Open amount, and here is why".
-3. **Bills are claimed, not Expenses.** A Bill goes on a Claim when it is Fulfilled and has its document. One Expense can feed several Claims (Amazon splits invoices per delivery).
+2. **One invariant drives everything:** `Open amount = Payment − Σ Bills − Σ Refunds − Σ written off`. Every reminder is some form of "this Expense still has an Open amount, and here is why".
+3. **Bills are claimed, not Expenses.** A Bill goes on a Claim when it is Fulfilled and has its document (a Bill of kind `no_bill` has none until "Add a bill", §2 Bill). One Expense can feed several Claims (Amazon splits invoices per delivery).
 4. **The tracker owns status; paperless owns documents** (ADR 0001). Files are mirrored between paperless and the Mac folder additively (ADR 0002).
 5. **The app builds Claims; Claude is optional** (ADR 0003). Form, PDF and submission package are app features for every Claimant. A Claimant's own Claude Code may read their unconfirmed Bills over MCP (read only, §9); nothing depends on it. Nothing is sent or submitted without the Claimant.
 7. **Statements never enter the app.** Day to day, Refunds and Reimbursements are marked received by hand. Back-fill by Claude outside the app (W6) is not part of the current change; it returns later as its own decision.
@@ -44,18 +44,18 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 |---|---|
 | id | `B-431` |
 | expense_id | Parent Expense |
-| kind | `invoice` · `informal` · `payment_proof` |
-| bill_no | As printed; empty for informal/payment proof |
+| kind | `invoice` · `informal` · `payment_proof` · `no_bill` (no document: the Claimant typed every value; cash entries and an Order's leftover with no invoice, W1, W2) |
+| bill_no | As printed; empty for informal, payment proof and no bill |
 | bill_date | Date on the bill |
 | amount | ₹ 2dp |
 | description | Becomes the Claim line description; defaults to the Expense's "what for" |
 | fulfilled | bool + `fulfilled_on` |
-| paperless_id | Document ID; required before the Bill can be claimed |
+| paperless_id | Document ID; required before the Bill can be claimed, except for kind `no_bill`, which has none until "Add a bill" attaches one and changes its kind (W1) |
 | status | `expected` · `ready` · `claimed` · `reimbursed` · `cancelled` (§3.2) |
 | review | `in review` (not every field confirmed) · `confirmed`; alongside `status`, not part of it (§3.2) |
 | claim_id | Set when added to a Claim |
-| remarks | e.g. "Informal/raw bill attached" (auto for `informal`) |
-| file_name | Name of the Bill's file in the claim mail and package, made from the Fund's file-name pattern (§2 Fund); shown at filing review and editable for that one file; an edited name is kept |
+| remarks | e.g. "Informal/raw bill attached" (auto for `informal`). Required for `no_bill`: "No bill (cash)" for an entry (W1), "No invoice from seller" for an Order's leftover (W2.9); editable. Printed in the form's remarks column |
+| file_name | Name of the Bill's file in the claim mail and package (none for `no_bill`, which has no file), made from the Fund's file-name pattern (§2 Fund); shown at filing review and editable for that one file; an edited name is kept |
 
 ### Refund
 `id, expense_id, amount, refunded_on, reason (cancelled | returned | partial)`. Status `expected` → `received`.
@@ -72,7 +72,7 @@ Function only; UI is designed separately. Terms are defined in [GLOSSARY.md](GLO
 The existing `ledger.csv` rows (199 at import). Read-only history: date, bill_no, description, amount, claim. Imported as Ledger lines with no Expense or Bill behind them (design D9), so the duplicate check sees them.
 
 ### Claimant (profile)
-Identity from Zitadel (subject, name, email). Profile fields the form needs: full name, employee code, designation. Approvers (names + emails). Payment methods (list of labels, e.g. "Savings account", "Credit card", "Cash"; editable, can be archived, never hard-coded), each with optional match hints (bank name, card last 4, UPI handle) used to recognise it on a payment screenshot. Notification preference (Web Push on/off, daily nudge time). Funds: their own order and which they hide (never shared). Claim naming sequence.
+Identity from Zitadel (subject, name, email). Profile fields the form needs: full name, employee code, designation. Payment methods (list of labels, e.g. "Savings account", "Credit card", "Cash"; editable, can be archived, never hard-coded), each with optional match hints (bank name, card last 4, UPI handle) used to recognise it on a payment screenshot. Notification preference (Web Push on/off, daily nudge time). Funds: their own order and which they hide (never shared). Claim naming sequence.
 
 ### Fund
 | Field | Notes |
@@ -80,9 +80,9 @@ Identity from Zitadel (subject, name, email). Profile fields the form needs: ful
 | id | Key |
 | creator | The Claimant who made it. A new Fund is private to its creator; "Share with team" makes it a team Fund |
 | name | e.g. "Makerspace", "Travel grant" |
-| mail | A mail builder: To, CC, subject, body. Variables Dues fills: `{claimant}`, `{claim_name}`, `{total}`, `{total_in_words}`, `{bill_count}`, `{date_range}`, `{purpose}`, `{breakdown}`. Nothing goes into the subject or body unless this template puts it there |
+| mail | A mail builder: To, CC, subject, body. Each Fund keeps its own To and CC; a Claimant's personal version of the Fund can change them. Variables Dues fills: `{claimant}`, `{claim_name}`, `{total}`, `{total_in_words}`, `{bill_count}`, `{date_range}`, `{purpose}`, `{breakdown}`. Nothing goes into the subject or body unless this template puts it there |
 | notes | Shown only to Dues users, never in the mail or the form |
-| form template | A Word file with placeholders; the PDF is made from it (§4 W7) |
+| form template | A Word file with placeholders; the PDF is made from it (§4 W7). Any approver names the form prints are part of the template text, not profile data |
 | file_name_pattern | Variables `{purpose}`, `{what}`, `{vendor}`, `{person}`, `{n}`, `{kind}` (§4 W7 File names). Makerspace default `{purpose} - {what} {kind}` |
 | claim_name_pattern | e.g. `{Month}{n}` ("September1") |
 | what_for_hint | Grey example text on the upload prompt's "What for?" |
@@ -129,19 +129,21 @@ draft ──confirm──▶ open ──Open amount = 0 and all Bills reimbursed
 - `draft`: created from an Amazon pick or a Back-fill and not yet confirmed by the Claimant. Shared payment confirmations (W1) and bills (W4) skip `draft` and open the Expense directly.
 - `open`: confirmed, Open amount ≠ 0 or some Bill not yet reimbursed.
 - **Corrections:** amount, payee, date and Payment method stay editable until one of the Expense's Bills is on a submitted Claim; every edit goes to the audit log.
+- **Written-off remainder.** On an Order that stays open, the expected Bill's remainder can be closed as written off (W2.9, "Not claiming"): the Bill is cancelled, no Refund is expected, and the amount is the written off term of the Open amount, so the Order can settle. It is not an Expense closing and is not blocked by Bills on submitted Claims.
 - **Closing** (personal / duplicate / written off) asks what happens to each expected Refund (still expected, or written off) and cancels unclaimed Bills; blocked if any Bill is on a submitted Claim. In paperless the documents lose their `reimb:*` tag; closing as personal also adds `personal` (written only by Dues, only here), duplicate and written off add no tag.
-- **Why it's open** (shown everywhere, drives reminders): `awaiting goods` (Bills expected, not fulfilled) · `refund owed` (Refund expected) · `bill missing` (fulfilled, no document) · `mismatch ₹X` (nothing expected any more, but Bills + Refunds ≠ Payment) · `in claim` (all covered, waiting for Reimbursement).
+- **Why it's open** (shown everywhere, drives reminders): `awaiting goods` (Bills expected, not fulfilled) · `refund owed` (Refund expected) · `bill missing` (fulfilled, no document; never for a `no_bill` Bill) · `mismatch ₹X` (nothing expected any more, but Bills + Refunds ≠ Payment) · `in claim` (all covered, waiting for Reimbursement).
 
 ### 3.2 Bill
 ```
 expected ──goods arrive / service done──▶ fulfilled? ──document attached──▶ ready ──added to Claim──▶ claimed ──Reimbursement──▶ reimbursed
-   │                                          (ready requires both fulfilled AND paperless_id)
+   │                                          (ready requires both fulfilled AND paperless_id; a `no_bill` Bill is created fulfilled and `ready`, with no document)
    └──cancelled before fulfilment──▶ cancelled  (creates an expected Refund of the same amount)
 
 review, alongside status:  in review ──Claimant confirms every field──▶ confirmed
                            in review ◀──any value changes, or Undo confirm──┘
 ```
-- `shop` and `service` Expenses create their Bill already fulfilled.
+- `shop` and `service` Expenses create their Bill already fulfilled. An entry without a bill (W1) creates a `no_bill` Bill, fulfilled and `ready` at once.
+- **`no_bill` Bills have no review.** The Claimant typed every value, so there is nothing to read or confirm: the Bill is `confirmed` from the start and an edit never reopens review. It stays editable until it is on a submitted Claim. "Add a bill" (W1) turns it into a normal Bill, which is `in review` like any other.
 - A bill arriving first creates its Expense and a fulfilled, `ready` Bill (you can only scan what you have); no payment record is needed to claim it.
 - Only `ready` Bills can be added to a Claim. Also blocked: a Bill in review (not every field confirmed); a Bill matching a Ledger line (§7); a Bill with an open "Check" match (W4.3, one tap to confirm or move); a Bill held by two Claimants with no Payback link (W9.5); a Bill whose Expense has no "what for" (it can be typed inline while building the Claim, W7).
 - **Field confirmation.** The fields read from a Bill's document (bill no, bill date, amount, and the like) are each confirmed by the Claimant; the reader only proposes. A Bill is **confirmed** when every one of its fields is; until then it is **in review**. How a Claimant reviews a Bill is designed in [`docs/research/notes/Bill review UX/design.md`](../research/notes/Bill%20review%20UX/design.md) §7 (variant R, approved 21 Nov 2026); see ADRs [0008](../adr/0008-region-marking-has-no-keyboard-only-path.md) and [0009](../adr/0009-bill-confirm-reopen-undo-model.md).
@@ -182,7 +184,16 @@ Each step marks who acts: **K** (the Claimant), **T** (tracker app), **P** (pape
 
 **When extraction fails:** the Expense is still created with the screenshot attached and amount blank, flagged "Couldn't read this payment" — never dropped. K fills the amount once.
 
-**No confirmation to share** (cash, or an app that shows nothing useful): quick-add form in T — amount + what for, two fields. Back-fill (W6) is withdrawn for now.
+**No bill to attach** (cash: autos, rickshaws, small transport): Home has **+ Add without a bill**. One sheet. A no-bill entry carries every field a normal Expense with a Bill has, except those that cannot exist without a document.
+- **Fields it has:** *What for* (becomes the claim form line), *Amount*, *Date* of the transaction (default today, any past date allowed), *Fund* (chips, Makerspace first and preselected), *Purpose* (optional), *Vendor/payee* (free text, optional, for example "Auto"), *Kind* (shop, service or online; transport is service), *Ordered by*, *Payment method* (default Cash; UPI or card allowed when there is no screenshot), *Payback* (paying a colleague back) and *Remarks* (goes in the form's remarks column; starts as "No bill (cash)", editable).
+- **Fields it does not have:** bill number, GSTIN, order reference, UPI reference, documents, matching and review. No document is expected.
+- Saving creates an open Expense with those values and one `no_bill` Bill of the same amount (an entry never has an expected Bill), Fulfilled and `ready`: it goes straight into Ready to file. There is nothing to match or review, since the Claimant typed every value. It stays editable from Ready to file until it is on a submitted Claim.
+- **Add a bill.** If a bill or screenshot turns up later, "Add a bill" on the entry attaches the document and turns the Bill into a normal Bill of kind `invoice`, `informal` or `payment_proof`, which then goes through review like any other (§3.2).
+- It counts against the Advance like any other spending on that Fund.
+- Any number of no-bill entries can be made for the same day or trip. There is no recents or quick re-add shortcut.
+- No self-declaration for now; the remarks column is enough. A Fund may carry a declaration template later (a future possibility, not a requirement).
+
+Back-fill (W6) is withdrawn for now.
 
 **Checks before build:** which paperless uploader app supports Android Direct Share (and iOS share sheet, for iPhone Claimants) and logs in as the Claimant's own paperless user; extraction accuracy on a sample of real confirmations from several apps (CRED, GPay, PhonePe, Paytm, a bank app; ~10 each).
 
@@ -195,10 +206,16 @@ Each step marks who acts: **K** (the Claimant), **T** (tracker app), **P** (pape
 6. Returned after the Bill was on a submitted Claim: T creates an **Owed to university** record (§2) and an attention item; K marks it repaid. Has never happened.
 7. Replacement with no money change: nothing changes except the Bill stays expected longer.
 8. The Order completes (Expense `settled`) when its Bills + Refunds add up to the Payment and every Bill is reimbursed or cancelled.
-9. **The Order page.** At the top, the Payment: amount, date, method, proof, order number. Then each Bill (amount, seller, status) with **Move to another payment**, **Detach** (becomes its own invoice-only Expense) and **Edit** (opens review R). Then **Still expected ₹x** with **Item cancelled** (expects a Refund of that amount; **Refund received** when it lands) and **No more invoices**. A small leftover (for example ₹1 from rounding or a coupon) gets "₹1 left. Close the order?" and is never closed silently. The leftover threshold, and what "No more invoices" and "Close the order?" do to the remaining amount, are open (§11).
+9. **The Order page.** At the top, the Payment: amount, date, method, proof, order number. Then each Bill (amount, seller, status) with **Move to another payment**, **Detach** (becomes its own invoice-only Expense) and **Edit** (opens review R). Then **Still expected ₹x** with **Item cancelled** (expects a Refund of that amount; **Refund received** when it lands) and **No more invoices**.
+   - **No more invoices** means "stop waiting". It asks one question, "₹270 of this order has no invoice. What happened?", with three options, each with a one-line consequence shown under it:
+     - **Refund coming**: "The money is coming back to you. Dues waits for it; nothing is claimed." The remainder becomes an expected Refund; **Refund received** when it lands.
+     - **Claim without a bill**: "You still paid it. ₹270 goes on your next claim as a line with no bill." The remainder becomes a `no_bill` Bill with the Order's What for and the remark "No invoice from seller" (editable), `ready` in Ready to file.
+     - **Not claiming**: "You'll cover it yourself. Nothing is filed." The remainder is closed as written off (§3.1). With the Advance on, the amount stays spent.
+   - Each choice can be undone from the Order page: the remainder is expected again. A Refund already received, or a Bill on a submitted Claim, is locked (§3.2).
+   - A leftover under ₹10 (for example ₹1 from rounding or a coupon) skips the question and offers "₹1 left. Close the order?"; yes is the same as Not claiming. It is never closed silently.
 
 ### W3. Shop or service payment
-1. W1, with kind `shop` or `service` → one Bill created already fulfilled, reason `bill missing`.
+1. W1, with kind `shop` or `service` → one Bill created already fulfilled, reason `bill missing` (not for an entry without a bill, whose `no_bill` Bill is `ready` at once).
 2. K scans the paper bill (W4) or, if none exists, marks the payment confirmation as the Bill (`payment_proof`). Bill → `ready`.
 3. In paperless a Payment proof loses `inbox` and gets its Expense ID but no `reimb:*` tag, unless it was marked as the Bill.
 
@@ -242,7 +259,8 @@ Any document is logged with zero further steps; matching prevents the same purch
 3. T fills the Fund's form template from the Claimant profile and Claim lines (grouped by Purpose; lines with no Purpose together; total rounded **up**; amount in words), renders the PDF, and assembles the submission package: form PDF + Bill files + the mail built from the Fund's mail template (To, CC, subject, body with its variables). **Nothing goes into the subject or body unless the Fund's template puts it there.** The Claimant sees the mail draft and can edit it before it is made. T keeps a snapshot of the template version used on the Claim (§2 Fund).
    - **Original files.** The mail and the package carry the original files, untouched: the PDF or image as shared, never a copy with reading boxes.
    - **Attachment size.** Mail attachments are base64-encoded, which adds about a third, and Gmail's 25 MB limit applies to the encoded mail, so the target is about 18 MB of raw files. If over, T shrinks the largest images first, then scanned PDFs, until it fits; text PDFs are left alone. The filing review lists every file shrunk ("3 photos made smaller to fit 25 MB"). The originals in paperless never change. If it is still too big, T offers to split the Claim into two mails. Open: confirm the limit with one real ~22 MB test draft (§11).
-   - **File names.** Each Bill's file is named from the Fund's pattern. Variables: `{purpose}`, `{what}` (the Bill's description, which defaults to the Expense's "what for"), `{vendor}`, `{person}`, `{n}`, `{kind}` ("Invoice", "Bill", or "Payment" for a payment proof used as the Bill). An empty part is dropped with its separator. `{n}` is added only when two names in one Claim would clash, in one numbering style. Makerspace default `{purpose} - {what} {kind}`, e.g. "Solder Invoice", "Club - Acrylic Beads Invoice". Every file name is shown at filing review and can be edited for that one file; an edited name is kept.
+   - **Lines with no bill.** A `no_bill` line is one form line with its text, amount and remark (in the remarks column). The mail breakdown marks it "no bill". It has no attachment and no file name.
+   - **File names.** Each Bill that has a file is named from the Fund's pattern. Variables: `{purpose}`, `{what}` (the Bill's description, which defaults to the Expense's "what for"), `{vendor}`, `{person}`, `{n}`, `{kind}` ("Invoice", "Bill", or "Payment" for a payment proof used as the Bill). An empty part is dropped with its separator. `{n}` is added only when two names in one Claim would clash, in one numbering style. Makerspace default `{purpose} - {what} {kind}`, e.g. "Solder Invoice", "Club - Acrylic Beads Invoice". Every file name is shown at filing review and can be edited for that one file; an edited name is kept.
 4. T stores the form PDF as a `Claim form` document (a draft writes nothing else to paperless).
 5. **Mail, never sent by Dues (principle 8).** Primary path: a Gmail draft (Gmail compose scope) with the form PDF and Bill files attached and the body from the Fund's template. Fallback: download a zip of all files plus a "copy body" button. If Gmail is blocked: an `.eml` file. A later path: the Claimant's own Claude Code (MCP) using its Gmail connector to prepare the draft; this needs its own decision (§9). Registering Dues with Google for Gmail drafts is parked (§11).
 6. After the draft or download, T asks "Sent it?". Yes marks the Claim `submitted`. Only now T sets tag `reimb:claimed` and the Claim field on the Bills' documents and on the Claim form document, so Claims shows the whole package.
@@ -259,7 +277,7 @@ Any document is logged with zero further steps; matching prevents the same purch
 6. **Never linked:** if both Claimants hold the same Bill (§7 match) and no link exists, **both** are blocked from claiming it and both get "Link as payback?"; never first-claimer-wins.
 
 ### W10. Home
-Home is three lists: **Waiting for invoice** (Expenses with no Bill document yet; "Invoice with <name>" when the Orderer is someone else), **Ready to file** (Bills ready for a Claim; one "File" per Claim that would be built, W7), and **Filed awaiting money** (submitted Claims not yet reimbursed). For each Fund with an Advance on, Home also shows that Fund's Advance left as a primary block (hidden when off): red below zero, amber at 15% or less of the total, green above that. Below zero it carries "₹x of your own money in". Placement and visuals are the designer's, not the spec's.
+Home has **+ Add without a bill** (W1) and three lists: **Waiting for invoice** (Expenses with no Bill document yet, except those whose Bill is `no_bill`; "Invoice with <name>" when the Orderer is someone else), **Ready to file** (Bills ready for a Claim; one "File" per Claim that would be built, W7), and **Filed awaiting money** (submitted Claims not yet reimbursed). For each Fund with an Advance on, Home also shows that Fund's Advance left as a primary block (hidden when off): red below zero, amber at 15% or less of the total, green above that. Below zero it carries "₹x of your own money in". Placement and visuals are the designer's, not the spec's.
 
 ## 5. paperless-ngx setup (to be created by Claude; currently fresh install)
 
@@ -377,7 +395,7 @@ It cannot confirm a Bill, build or send a Claim, or change anything but add a Re
 
 ## 11. Open questions
 
-Remaining items are facts to check, not decisions (items 7 to 11 are open design and future decisions):
+Remaining items are facts to check, not decisions (items 7 and 8 are open design decisions):
 1. NAS readiness (snapshots, off-site backup, healthy disks): separate infrastructure task; launch does not wait for it.
 2. ~~paperless OIDC~~ **Checked 2026-11-20** (installed source on the paperless host + [fact checks](../research/notes/Tracker%20fact%20checks/fact_checks.md)): allauth 65.16.1 `openid_connect` is installed; config via `PAPERLESS_APPS` + `PAPERLESS_SOCIALACCOUNT_PROVIDERS`, callback `https://<host>/accounts/oidc/<provider_id>/login/callback/`; `PAPERLESS_SOCIAL_AUTO_SIGNUP=true` and `PAPERLESS_SOCIAL_ACCOUNT_DEFAULT_GROUPS` = a group with *Add document* (else uploads get 403); OIDC-only users can generate a profile API token; uploads are owned by the token's user (`owner_id=request.user.id`, client can't override). Uploaders: Android = gmag11 "Paperless NGX Uploader" (share target, pasted API token, no OIDC); iOS = Swift Paperless (share extension, OIDC via a **public PKCE** client, likely a second Zitadel app). Still to test live: Zitadel roles claim (JSON object) → paperless group sync.
 3. Server-side form rendering must match the current docx exactly — test LibreOffice conversion against a Word-exported PDF.
@@ -385,13 +403,10 @@ Remaining items are facts to check, not decisions (items 7 to 11 are open design
 5. Gmail compose scope: whether the university Workspace allows it (being checked). Without it, W7 falls back to the zip or `.eml`. Registering Dues with Google for Gmail drafts is parked (owner: later).
 6. Attachment size: shrinking and splitting are decided (W7); the limit is to be confirmed with one real ~22 MB test draft.
 7. Home screen and the filing flow (W7, W10) are for the designer to shape.
-8. Per-Purpose Approvers may come later.
-9. Leftover threshold for "₹1 left. Close the order?" (W2.9), and what "No more invoices" and "Close the order?" do to the remaining amount.
-10. Which Fund a new Purpose starts on.
-11. Whether the Claimant's Approvers list stays in the profile beside each Fund's To and CC.
+8. Which Fund a new Purpose starts on.
 3a. Form PDF (item 3) will be tested with Gotenberg on the tracker's own LXC once it exists.
 
-Decided 22 Nov 2026 (owner): payment first, matching by amount, Purposes and the Advance, home lists, mail by draft only. Round 2, same day: partial invoices and the Order page, one invoice reminder, Funds (mail and form templates, sharing, personal Advance), original attachments with sizing, file naming. See [`docs/research/notes/Core flow/decisions.md`](../research/notes/Core%20flow/decisions.md).
+Decided 22 Nov 2026 (owner): payment first, matching by amount, Purposes and the Advance, home lists, mail by draft only. Round 2, same day: partial invoices and the Order page, one invoice reminder, Funds (mail and form templates, sharing, personal Advance), original attachments with sizing, file naming. Round 3, same day: entries without a bill, mail recipients per Fund (no Approvers field), closing what is left of an Order. See [`docs/research/notes/Core flow/decisions.md`](../research/notes/Core%20flow/decisions.md).
 
 Resolved 2026-11-20, round 2: access by `claimant` role via Syndra only · form carries invoice data only (no payback/payee info) · Owed to university: repaid only, never on a form · launch on local disk until TrueNAS is connected.
 

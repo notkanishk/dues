@@ -88,13 +88,6 @@ The system SHALL, when no amount can be extracted from a payment confirmation, s
 - **WHEN** the Claimant enters the amount
 - **THEN** the flag is cleared
 
-### Requirement: Quick-add without a confirmation
-The system SHALL offer a quick-add form with two fields, amount and what for, for a payment with no confirmation to share.
-
-#### Scenario: Cash payment
-- **WHEN** a Claimant adds ₹180.00 with "Zip ties"
-- **THEN** an open Expense of ₹180.00 with that purpose exists and no document is attached
-
 ### Requirement: Bill intake
 The system SHALL extract from a bill the vendor, Bill number, Bill date and total, and SHALL pass them to bill-matching; a bill with no matching Expense MUST create an Expense immediately, as described in expense-tracking.
 

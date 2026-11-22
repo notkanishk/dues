@@ -65,7 +65,7 @@ The short label Dues gives each Expense, Bill, Refund and Owed to university rec
 _Avoid_: ID, tracker ID, invoice number
 
 **Bill**:
-A document that proves part or all of an Expense to the university, and the unit that is claimed. Comes in three kinds: Invoice, Informal bill, Payment proof.
+The unit that is claimed: usually a document that proves part or all of an Expense to the university. Comes in four kinds: Invoice, Informal bill, Payment proof, No bill.
 _Avoid_: Receipt, voucher
 
 **Fulfilled**:
@@ -87,6 +87,10 @@ _Avoid_: Raw bill, kacha bill
 **Payment proof**:
 A screenshot of the Payment itself, used as the Bill when the vendor gives nothing else.
 _Avoid_: UPI receipt, screenshot
+
+**No bill**:
+A Bill with no document, typed by the Claimant and claimed with a remark: a cash payment, or the part of an Order the seller never invoiced. A document added later turns it into a normal Bill.
+_Avoid_: Cash memo, self-bill
 
 ## Getting paid back
 

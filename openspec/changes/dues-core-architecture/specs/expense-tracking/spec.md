@@ -39,7 +39,7 @@ The system SHALL give each Expense one status of draft, open, settled or closed,
 - **THEN** the system refuses
 
 ### Requirement: Open amount invariant
-The system SHALL compute every Expense's Open amount as the Payment minus the sum of its Bills minus the sum of its Refunds, in integer paise, and SHALL treat an Expense as settled in amount only when the Open amount is zero.
+The system SHALL compute every Expense's Open amount as the Payment minus the sum of its Bills minus the sum of its Refunds minus the amount written off, in integer paise, and SHALL treat an Expense as settled in amount only when the Open amount is zero.
 
 #### Scenario: Partly covered
 - **WHEN** an Expense has a Payment of ₹1,000.00, one Bill of ₹400.00 and no Refunds
@@ -49,12 +49,16 @@ The system SHALL compute every Expense's Open amount as the Payment minus the su
 - **WHEN** an Expense has a Payment of ₹1,000.00, Bills of ₹700.00 and a Refund of ₹300.00
 - **THEN** the Open amount is ₹0.00
 
+#### Scenario: Written off
+- **WHEN** an Expense has a Payment of ₹1,000.00, a Bill of ₹730.00 and ₹270.00 written off
+- **THEN** the Open amount is ₹0.00
+
 #### Scenario: Exact in paise
 - **WHEN** a Payment of ₹100.05 has a Bill of ₹100.04
 - **THEN** the Open amount is exactly 1 paise
 
 ### Requirement: Why an Expense is open
-The system SHALL show, wherever an open Expense appears, exactly one reason it is open, chosen in this order: awaiting goods (a Bill is expected and not Fulfilled), refund owed (a Refund is expected), bill missing (a Bill is Fulfilled but has no document), mismatch (nothing is expected but Bills plus Refunds differ from the Payment, with the amount), in claim (everything is covered and the Expense waits for Reimbursement).
+The system SHALL show, wherever an open Expense appears, exactly one reason it is open, chosen in this order: awaiting goods (a Bill is expected and not Fulfilled), refund owed (a Refund is expected), bill missing (a Bill is Fulfilled but has no document, except a no-bill Bill), mismatch (nothing is expected but Bills plus Refunds plus the amount written off differ from the Payment, with the amount), in claim (everything is covered and the Expense waits for Reimbursement).
 
 #### Scenario: Awaiting goods
 - **WHEN** an online Expense has an expected Bill
@@ -67,6 +71,10 @@ The system SHALL show, wherever an open Expense appears, exactly one reason it i
 #### Scenario: Bill missing
 - **WHEN** a Bill is Fulfilled and has no document
 - **THEN** its reason is bill missing
+
+#### Scenario: No bill is never bill missing
+- **WHEN** a no-bill Bill is Fulfilled and has no document
+- **THEN** its reason is not bill missing
 
 #### Scenario: Mismatch
 - **WHEN** no Bill or Refund is expected and Bills plus Refunds are ₹50.00 less than the Payment
@@ -114,7 +122,7 @@ The system SHALL let a Claimant close an Expense as personal, duplicate or writt
 - **THEN** its status becomes closed
 
 ### Requirement: Bill lifecycle
-The system SHALL give each Bill one status of expected, ready, claimed, reimbursed or cancelled, and SHALL make a Bill ready only when it is Fulfilled and has a paperless-ngx document.
+The system SHALL give each Bill one status of expected, ready, claimed, reimbursed or cancelled, and SHALL make a Bill ready only when it is Fulfilled and has a paperless-ngx document, except a Bill of kind no bill, which has none and is ready when created.
 
 #### Scenario: Ready needs both
 - **WHEN** a Bill is Fulfilled and then a document is attached
@@ -142,7 +150,7 @@ The system SHALL give each Bill one status of expected, ready, claimed, reimburs
 - **AND** an expected Refund of ₹800.00 is created
 
 ### Requirement: Bill kinds and remarks
-The system SHALL classify every Bill as an Invoice, an Informal bill or a Payment proof, SHALL leave the Bill number empty for the latter two, and SHALL add the remark "Informal/raw bill attached" automatically to an Informal bill.
+The system SHALL classify every Bill as an Invoice, an Informal bill, a Payment proof or a No bill (no document), SHALL leave the Bill number empty for all but an Invoice, SHALL add the remark "Informal/raw bill attached" automatically to an Informal bill, and MUST require remarks on a No bill.
 
 #### Scenario: Informal bill remark
 - **WHEN** a Bill of kind Informal bill is created
@@ -152,8 +160,12 @@ The system SHALL classify every Bill as an Invoice, an Informal bill or a Paymen
 - **WHEN** a Payment proof is marked as the Bill
 - **THEN** its Bill number is empty
 
+#### Scenario: No bill needs remarks
+- **WHEN** a No bill is saved with empty remarks
+- **THEN** the system refuses
+
 ### Requirement: Shop and service Bills start Fulfilled
-The system SHALL create the Bill of a shop or service Expense already Fulfilled with the reason bill missing until its document is attached, and SHALL let the Claimant mark the payment confirmation itself as the Bill (Payment proof) when no other document exists.
+The system SHALL create the Bill of a shop or service Expense (other than an entry without a bill) already Fulfilled with the reason bill missing until its document is attached, and SHALL let the Claimant mark the payment confirmation itself as the Bill (Payment proof) when no other document exists.
 
 #### Scenario: Shop Expense
 - **WHEN** a shop Expense of ₹250.00 is logged
@@ -162,6 +174,43 @@ The system SHALL create the Bill of a shop or service Expense already Fulfilled 
 #### Scenario: Payment proof as Bill
 - **WHEN** the Claimant marks the payment confirmation as the Bill
 - **THEN** a Payment proof Bill of ₹250.00 is ready
+
+### Requirement: Entry without a bill
+The system SHALL offer "+ Add without a bill" on Home, one sheet that creates an open Expense and one Bill of kind no bill of the same amount, Fulfilled and ready, so it goes straight into Ready to file. The entry SHALL carry What for, Amount, Date of the transaction (default today, any past date allowed), Fund (Makerspace first and preselected), an optional Purpose, an optional free-text Vendor/payee, Kind (shop, service or online), Ordered by, Payment method (default Cash; UPI or card allowed when there is no screenshot), Payback, and Remarks (the form's remarks column, starting as "No bill (cash)", editable). It MUST NOT have a bill number, GSTIN, order reference, UPI reference, document, matching or review. It SHALL be editable from Ready to file until it is on a submitted Claim, SHALL count against the Advance like any other spending on its Fund, MUST NOT appear in Waiting for invoice or raise an invoice reminder, and MUST NOT offer a recents list or quick re-add; any number of entries can be made for the same day or trip. "Add a bill" on the entry SHALL attach a document and turn it into a normal Bill, which goes through review like any other.
+
+#### Scenario: Cash ride
+- **WHEN** a Claimant adds ₹60.00 "Auto to hardware market" in Makerspace with the default Payment method
+- **THEN** an open Expense of ₹60.00 with Payment method Cash exists, kind service
+- **AND** one no-bill Bill of ₹60.00 with remarks "No bill (cash)" is ready in Ready to file
+
+#### Scenario: Past date
+- **WHEN** the Claimant sets the Date to a day last week
+- **THEN** the entry takes that date
+
+#### Scenario: Nothing to match or review
+- **WHEN** an entry is saved
+- **THEN** no document, matching or review exists for it and it has no bill number, GSTIN, order reference or UPI reference
+
+#### Scenario: Editable until submitted
+- **WHEN** the Claimant changes the amount while the Bill is ready or on a draft Claim
+- **THEN** the amount changes
+- **AND** when the Bill is on a submitted Claim the system refuses
+
+#### Scenario: Counts against the Advance
+- **WHEN** a ₹60.00 entry is saved in a Fund whose Advance is on
+- **THEN** that Fund's Advance left falls by ₹60.00
+
+#### Scenario: Not waiting for an invoice
+- **WHEN** an entry is saved
+- **THEN** it is not in Waiting for invoice and no Invoice waiting item is raised for it
+
+#### Scenario: Several entries, no shortcut
+- **WHEN** a Claimant adds three entries for one day
+- **THEN** three Expenses exist and no recents list or quick re-add is offered
+
+#### Scenario: Add a bill later
+- **WHEN** the Claimant uses "Add a bill" on an entry and attaches an invoice
+- **THEN** the Bill becomes a normal Bill and is in review until confirmed
 
 ### Requirement: A Bill arriving first
 The system SHALL create, for a Bill that arrives with no matching Expense, an Expense and a Fulfilled ready Bill, and MUST NOT require a payment record before the Bill can be claimed. See document-intake for how the Expense is logged.
@@ -192,7 +241,7 @@ The system SHALL start an online Expense with one expected Bill for the full Pay
 - **THEN** it splits the expected Bill the same way
 
 ### Requirement: The Order page
-The system SHALL show an online Expense as an Order page: at the top the Payment (amount, date, method, proof, order number); then each Bill (amount, seller, status) with Move to another payment, Detach (the Bill becomes its own invoice-only Expense) and Edit (opens review); then "Still expected ₹x" with "Item cancelled" (expects a Refund of that amount, and "Refund received" when it lands) and "No more invoices". A small leftover (for example ₹1 from rounding or a coupon) SHALL prompt "₹1 left. Close the order?" and MUST NOT be closed silently. The leftover threshold is an open question.
+The system SHALL show an online Expense as an Order page: at the top the Payment (amount, date, method, proof, order number); then each Bill (amount, seller, status) with Move to another payment, Detach (the Bill becomes its own invoice-only Expense) and Edit (opens review); then "Still expected ₹x" with "Item cancelled" (expects a Refund of that amount, and "Refund received" when it lands) and "No more invoices", which SHALL ask "₹270 of this order has no invoice. What happened?" (see "Closing what is left of an Order"). A leftover under ₹10 (for example ₹1 from rounding or a coupon) SHALL skip that question and prompt "₹1 left. Close the order?", and MUST NOT be closed silently.
 
 #### Scenario: Page contents
 - **WHEN** a Claimant opens an Order with a Payment of ₹4,870.00 and one Bill of ₹2,100.00
@@ -218,6 +267,43 @@ The system SHALL show an online Expense as an Order page: at the top the Payment
 #### Scenario: Small leftover
 - **WHEN** ₹1 is left after the Bills and Refunds
 - **THEN** the page asks "₹1 left. Close the order?" and the Order stays open until the Claimant says yes
+
+#### Scenario: Leftover of ₹10 or more
+- **WHEN** ₹10.00 is left and the Claimant taps "No more invoices"
+- **THEN** the three-way question is asked, not "Close the order?"
+
+### Requirement: Closing what is left of an Order
+The system SHALL treat "No more invoices" as "stop waiting" and ask one question with three options, each with a one-line consequence under it. **Refund coming** ("The money is coming back to you. Dues waits for it; nothing is claimed.") SHALL turn the remainder into an expected Refund. **Claim without a bill** ("You still paid it. ₹270 goes on your next claim as a line with no bill.") SHALL turn the remainder into a no-bill Bill with the Order's What for and the editable remark "No invoice from seller", ready in Ready to file. **Not claiming** ("You'll cover it yourself. Nothing is filed.") SHALL close the remainder as written off, which counts in the Open amount so the Order can settle, and MUST leave the amount spent against an Advance. Each choice SHALL be undoable from the Order page, with the remainder expected again; a Refund already received or a Bill on a submitted Claim is locked. A leftover under ₹10 SHALL skip the question and offer "₹1 left. Close the order?", where yes is the same as Not claiming.
+
+#### Scenario: The question
+- **WHEN** ₹270.00 of an Order is still expected and the Claimant taps "No more invoices"
+- **THEN** the page asks "₹270 of this order has no invoice. What happened?" with Refund coming, Claim without a bill and Not claiming, each with its consequence line
+
+#### Scenario: Refund coming
+- **WHEN** the Claimant chooses Refund coming
+- **THEN** an expected Refund of ₹270.00 exists, nothing is claimed, and "Refund received" is offered when it lands
+
+#### Scenario: Claim without a bill
+- **WHEN** the Claimant chooses Claim without a bill
+- **THEN** a no-bill Bill of ₹270.00 with the Order's What for and remark "No invoice from seller" is ready in Ready to file
+- **AND** the remark can be edited
+
+#### Scenario: Not claiming
+- **WHEN** the Claimant chooses Not claiming
+- **THEN** ₹270.00 is written off, nothing is filed, and the Order can settle once its Bills are reimbursed
+- **AND** with the Advance on, Advance left does not rise
+
+#### Scenario: Undo
+- **WHEN** the Claimant undoes a choice from the Order page while it is not locked
+- **THEN** ₹270.00 is expected again
+
+#### Scenario: Leftover under ₹10
+- **WHEN** ₹1.00 is left
+- **THEN** no question is asked, the page offers "₹1 left. Close the order?", and yes writes the ₹1.00 off like Not claiming
+
+#### Scenario: Never silent
+- **WHEN** a leftover under ₹10 exists and the Claimant does not answer
+- **THEN** the Order stays open
 
 ### Requirement: Order cancellation and Refunds
 The system SHALL reduce the expected remainder by a cancelled amount and create an expected Refund of the same amount, SHALL turn the whole remainder into a Refund when everything left is cancelled, SHALL support several Refunds per Expense with reason cancelled, returned or partial, and SHALL let the Claimant mark a Refund received.
@@ -398,11 +484,15 @@ The system SHALL, when a Claimant's Advance on a Fund is on, compute that Fund's
 - **THEN** the Makerspace Advance left falls by its Payment, and it rises again if the Expense moves back
 
 ### Requirement: Home lists and the Advance block
-The system SHALL present Home as three lists, Waiting for invoice (open Expenses with no Bill document yet), Ready to file (ready Bills, with one "File" for each Claim that would be built) and Filed awaiting money (submitted Claims not yet reimbursed); an Expense whose Orderer is someone else MUST read "Invoice with <name>" in Waiting for invoice; and for each Fund whose Advance is on, Home SHALL show that Fund's Advance left as a primary block, red below zero, amber when 15% or less of the total is left and green above that, carrying "₹x of your own money in" below zero, and MUST hide the block when that Fund's Advance is off. Placement and visuals are not specified.
+The system SHALL present Home as three lists, Waiting for invoice (open Expenses with no Bill document yet, except those whose Bill is a no-bill Bill), Ready to file (ready Bills, with one "File" for each Claim that would be built) and Filed awaiting money (submitted Claims not yet reimbursed); an Expense whose Orderer is someone else MUST read "Invoice with <name>" in Waiting for invoice; and for each Fund whose Advance is on, Home SHALL show that Fund's Advance left as a primary block, red below zero, amber when 15% or less of the total is left and green above that, carrying "₹x of your own money in" below zero, and MUST hide the block when that Fund's Advance is off. Placement and visuals are not specified.
 
 #### Scenario: Three lists
 - **WHEN** a Claimant opens Home
 - **THEN** they see Waiting for invoice, Ready to file and Filed awaiting money
+
+#### Scenario: Add without a bill
+- **WHEN** a Claimant opens Home
+- **THEN** "+ Add without a bill" is offered
 
 #### Scenario: Invoice with a colleague
 - **WHEN** a Payment's Orderer is Priya and no Bill has arrived
