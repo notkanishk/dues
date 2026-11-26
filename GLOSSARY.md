@@ -43,18 +43,38 @@ Money a vendor returns for an Expense after a cancellation or return. An Expense
 _Avoid_: Reversal, cashback
 
 **Open amount**:
-The part of an Expense's Payment not yet covered by a Bill or a Refund: goods still coming, a refund still owed, or a bill not yet in hand. An Expense is settled when its Open amount is zero.
+The part of an Expense's Payment not yet covered by a Bill or a Refund: goods still coming, a refund still owed, or a bill not yet in hand. An Expense is settled when its Open amount is zero, every Refund has arrived and every Bill is reimbursed or cancelled.
 _Avoid_: Balance, pending, outstanding
+
+**Fund**:
+Where an Expense's money comes from and how it is claimed: a name, a mail and form template, and optionally the Claimant's own Advance. Each Fund files as its own Claim.
+_Avoid_: Budget, account, pot
+
+**Purpose**:
+An optional group inside a Fund that a Claimant puts Expenses into, such as a trip or an event. Its Expenses form one breakdown group in that Fund's Claim.
+_Avoid_: Category, project, tag
+
+**Advance**:
+A personal amount on a Fund, off by default and never shared: money Finance credited to the Claimant's own bank account for that Fund's purchases, kept as one total the Claimant enters. What is left of it is the total minus the Claimant's money still out on that Fund's Expenses; below zero means the Claimant's own money is in.
+_Avoid_: Float, wallet, imprest
 
 ## Proof
 
+**Reference**:
+The short label Dues gives each Expense, Bill, Refund and Owed to university record, such as E-213 or B-431, unique across all Claimants and never changed. Distinct from the Bill number the vendor prints.
+_Avoid_: ID, tracker ID, invoice number
+
 **Bill**:
-A document that proves part or all of an Expense to the university, and the unit that is claimed. Comes in three kinds: Invoice, Informal bill, Payment proof.
+The unit that is claimed: usually a document that proves part or all of an Expense to the university. Comes in four kinds: Invoice, Informal bill, Payment proof, No bill.
 _Avoid_: Receipt, voucher
 
 **Fulfilled**:
 A Bill whose goods have all arrived (or whose service is done). Only Fulfilled Bills can go on a Claim.
 _Avoid_: Delivered, complete
+
+**Reading**:
+One reader's account of what a document says, as printed: from a provider Dues calls, or from a Claimant's own Claude Code. Readings only propose; the Claimant confirms.
+_Avoid_: OCR result, parse, extraction
 
 **Invoice**:
 A Bill issued by the vendor with a bill number, typically a GST tax invoice.
@@ -68,10 +88,14 @@ _Avoid_: Raw bill, kacha bill
 A screenshot of the Payment itself, used as the Bill when the vendor gives nothing else.
 _Avoid_: UPI receipt, screenshot
 
+**No bill**:
+A Bill with no document, typed by the Claimant and claimed with a remark: a cash payment, or the part of an Order the seller never invoiced. A document added later turns it into a normal Bill.
+_Avoid_: Cash memo, self-bill
+
 ## Getting paid back
 
 **Claim**:
-One submitted Contingency Reimbursement Form and the Bills sent with it, filed by one Claimant and named by filing month and sequence, e.g. September1.
+One submitted form of one Fund and the Bills sent with it, filed by one Claimant and named by the Fund's claim-name pattern, e.g. 2026/September1; once submitted the name never changes, even after a recall.
 _Avoid_: Batch, report, reimbursement
 
 **Claim line**:

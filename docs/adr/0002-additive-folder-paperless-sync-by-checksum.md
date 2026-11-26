@@ -16,4 +16,4 @@ Bill files live both in the Mac Reimbursement folder (where Claude builds Claims
 
 - Deleting a bill must be done by hand on both sides.
 - Folder location (root, WorkingN, Filed/<year>/<Claim>) is not mirrored into paperless; claim membership is written to paperless as metadata instead.
-- paperless rejects re-uploads of an identical file, which doubles as a cheap duplicate-file guard.
+- paperless 3.x accepts re-uploads of an identical file (it only logs a warning), so the sync itself must check `checksum` before uploading; Dues' duplicate guard catches anything that slips through.
