@@ -527,8 +527,14 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       const target = slice.expenses[command.toExpenseId];
       if (!target) return reject("not_found"); // the loader scoped it: another Claimant's Expense is absent
       if (target.id === expense.id || target.draft || target.closedReason) return reject("invalid_transition");
-      const into = moveExpected(target, -bill.amount.paise);
-      if (!Array.isArray(into)) return into;
+      // A Bill equal to what the target still expects fulfils its expected Bill: cancelled, with no Refund (W4.3).
+      const waiting = target.bills.find(isExpected);
+      const into: Event[] | Rejected =
+        waiting?.amount!.paise === bill.amount.paise
+          ? [{ type: "BillCancelled", billId: waiting.id, expenseId: target.id, reason: "cancelled" }]
+          : moveExpected(target, -bill.amount.paise);
+      // ponytail: a Bill larger than the remainder is an open owner question; refused until it is decided.
+      if (!Array.isArray(into)) return rejectField("billId");
       return ok([...out, { type: "BillMoved", billId: bill.id, fromExpenseId: expense.id, toExpenseId: target.id }, ...into]);
     }
     case "MarkRefundReceived": {
