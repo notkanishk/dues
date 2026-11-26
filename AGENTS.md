@@ -35,6 +35,6 @@ Dues tracks money makerspace members spend for the lab, from payment to universi
 This repository is public. Real claims, invoices and infrastructure live in `private/` (gitignored) and never leave it.
 
 - Hosts, IPs, domains, container IDs and security posture appear only as placeholders (`<APP_HOST>`, `dues.example.org`); the real mapping is `private/DEPLOY.local.md`.
-- Example data is fictional: invented shops, bill numbers and amounts.
+- Example data is fictional: invented shops, bill numbers and amounts. People in mockups, fixtures and example addresses are Disney or Cartoon Network characters (Mickey, Dexter, Courage), never real or real-sounding names.
 - People appear by role (Claimant, Approver, the maintainer), never by name, email or employee code.
 - Before every commit, scan the staged diff for the above.
