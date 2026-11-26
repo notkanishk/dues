@@ -33,3 +33,16 @@ export function formatRupees(m: Money): string {
   const { sign, rupees, rest } = split(m.paise);
   return `${sign}₹${indian.format(rupees)}.${rest}`;
 }
+
+/** A form row's amount: "1180.25/-", no ₹ and no grouping, paise exactly as stored. */
+export function formAmount(m: Money): string {
+  const { sign, rupees, rest } = split(m.paise);
+  return `${sign}${rupees}.${rest}/-`;
+}
+
+/** A Claim's total: Σ Claim lines rounded up to whole rupees. The only rounded figure in Dues. */
+export function claimTotal(lines: readonly Money[]): Money {
+  const { paise } = sum(lines);
+  const rest = paise % 100;
+  return { paise: rest > 0 ? paise - rest + 100 : paise, currency: "INR" };
+}

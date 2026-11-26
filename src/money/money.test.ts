@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRupees, parseRupees, sum } from "./money";
+import { claimTotal, formAmount, formatRupees, parseRupees, sum } from "./money";
 
 // platform-foundations: "Money stored as integer paise". Expected values are the spec's own literals.
 describe("Money stored as integer paise", () => {
@@ -58,5 +58,32 @@ describe("display: ₹, Indian grouping, two decimals, paise as printed", () => 
     [-150, "-₹1.50"],
   ])("%i paise shows %s", (paise, shown) => {
     expect(formatRupees({ paise, currency: "INR" })).toBe(shown);
+  });
+});
+
+// platform-foundations: "Paise kept as printed; only the Claim total is rounded".
+describe("Paise kept as printed; only the Claim total is rounded", () => {
+  it("keeps an Invoice for ₹1,180.25 as 118025 paise, shown 1180.25/- on its form row", () => {
+    const bill = parseRupees("₹1,180.25")!;
+    expect(bill.paise).toBe(118025);
+    expect(formAmount(bill)).toBe("1180.25/-");
+  });
+
+  it("keeps both lines' paise on the form; only the total shows ₹1,280.00", () => {
+    const lines = [parseRupees("₹1,180.25")!, parseRupees("₹99.50")!];
+    expect(lines.map(formAmount)).toEqual(["1180.25/-", "99.50/-"]);
+    expect(formatRupees(claimTotal(lines))).toBe("₹1,280.00");
+  });
+
+  it.each([
+    [[128000], 128000], // already whole rupees: unchanged
+    [[1], 100], // one paisa rounds up a whole rupee
+    [[10, 20, 30], 100],
+    [[], 0],
+  ])("Claim lines %j total %i paise", (paise, total) => {
+    expect(claimTotal(paise.map((p) => ({ paise: p, currency: "INR" as const })))).toEqual({
+      paise: total,
+      currency: "INR",
+    });
   });
 });
