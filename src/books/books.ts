@@ -8,6 +8,7 @@ import {
   type Actor,
   apply,
   type BillKind,
+  type BillState,
   type BillStatus,
   type Command,
   decide,
@@ -55,20 +56,24 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   const billRows = await q.select().from(bills).where(inArray(bills.expenseId, found)).orderBy(bills.id);
   const refundRows = await q.select().from(refunds).where(inArray(refunds.expenseId, found)).orderBy(refunds.id);
   return rows.map((row) => {
-    const ownBills = billRows.filter((b) => b.expenseId === row.id);
-    const state: ExpenseState = {
-      id: row.id,
-      draft: row.draft,
-      closedReason: row.closedReason,
-      amount: money(row.amountPaise, row.currency),
-      bills: ownBills.map((b) => ({
+    // Each Bill carries its database-issued reference with its state, so reads never pair two arrays by position.
+    const ownBills: (BillState & { reference: string })[] = billRows
+      .filter((b) => b.expenseId === row.id)
+      .map((b) => ({
         id: b.id,
+        reference: b.reference,
         kind: b.kind as BillKind | null,
         amount: money(b.amountPaise, b.currency),
         fulfilledOn: b.fulfilledOn,
         paperlessId: b.paperlessId,
         cancelled: b.cancelledAt !== null,
-      })),
+      }));
+    const state: ExpenseState = {
+      id: row.id,
+      draft: row.draft,
+      closedReason: row.closedReason,
+      amount: money(row.amountPaise, row.currency),
+      bills: ownBills,
       refunds: refundRows
         .filter((r) => r.expenseId === row.id)
         .map((r) => ({ amount: money(r.amountPaise, r.currency)!, received: r.refundedOn !== null })),
@@ -209,7 +214,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
     async expense(actor: Actor, id: string) {
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
-      const { row, bills: billRows, state } = found;
+      const { row, bills: billStates, state } = found;
       const { status, openAmount } = deriveExpense(state);
       return {
         ok: true as const,
@@ -229,9 +234,9 @@ export function createBooks({ db, now, enqueue }: Deps) {
           upiRef: row.upiRef,
           notes: row.notes,
           source: row.source,
-          bills: state.bills.map((b, i) => ({
+          bills: billStates.map((b) => ({
             id: b.id,
-            reference: billRows[i]!.reference,
+            reference: b.reference,
             kind: b.kind,
             amount: b.amount,
             fulfilledOn: b.fulfilledOn,
