@@ -439,6 +439,8 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (!found.ok) return found;
       const { expense, bill, remainder } = found;
       if (!CLOSE_CHOICES.includes(command.choice)) return rejectField("choice");
+      // A leftover under ₹10 is asked only "Close the order?", whose yes is Not claiming (decision 55).
+      if (remainder.paise < LEFTOVER_QUESTION_FROM.paise && command.choice !== "not_claiming") return rejectField("choice");
       const [newId] = slice.newIds as [string];
       const at = { billId: bill.id, expenseId: expense.id };
       const made: Event =
@@ -815,7 +817,6 @@ export function orderPage(slice: Slice, expenseId: string, actor: Actor, now: Da
   const today = now.toISOString().slice(0, 10);
   const expected = expense.bills.find(isExpected);
   const closed = expense.bills.find((b) => b.closedAs);
-  const small = !!expected && expected.amount!.paise < LEFTOVER_QUESTION_FROM.paise;
   return {
     // An Order's expected remainder is "Still expected", not a Bill; a closed-out one is shown with its choice.
     bills: expense.bills
@@ -835,8 +836,8 @@ export function orderPage(slice: Slice, expenseId: string, actor: Actor, now: Da
       ? {
           billId: expected.id,
           amount: expected.amount!,
-          ask: small ? ("close_order" as const) : ("three_way" as const),
-          choices: small ? (["not_claiming"] as CloseChoice[]) : (CLOSE_CHOICES as CloseChoice[]),
+          ask: expected.amount!.paise < LEFTOVER_QUESTION_FROM.paise ? ("close_order" as const) : ("three_way" as const),
+          choices: (CLOSE_CHOICES as CloseChoice[]).filter((choice) => accepts({ type: "CloseOrder", billId: expected.id, choice })),
           commands: offered([
             ["ExpectRefund", { type: "ExpectRefund", billId: expected.id, amount: { paise: 1, currency: "INR" } }],
             ["CloseOrder", { type: "CloseOrder", billId: expected.id, choice: "not_claiming" }],
