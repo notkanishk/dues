@@ -205,4 +205,16 @@ describe("why an Expense is open", () => {
       code: "awaiting_goods",
     });
   });
+
+  it("Refund owed: no Bill expected and a Refund expected", () => {
+    const e = facts(100000, [{ paise: 70000 }], { refunds: [{ amount: rupees(30000), received: false }] });
+    expect(reasonOf(e)).toEqual({ code: "refund_owed" });
+  });
+
+  it("awaiting goods comes before refund owed", () => {
+    const e = facts(100000, [{ paise: 70000, fulfilledOn: null, paperlessId: null }], {
+      refunds: [{ amount: rupees(30000), received: false }],
+    });
+    expect(reasonOf(e)).toEqual({ code: "awaiting_goods" });
+  });
 });

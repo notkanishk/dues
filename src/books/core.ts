@@ -203,6 +203,7 @@ function openAmount(expense: ExpenseState): Money | null {
 function whyOpen(expense: ExpenseState): OpenReason | null {
   const live = expense.bills.filter((b) => !b.cancelled);
   if (live.some((b) => !b.fulfilledOn)) return { code: "awaiting_goods" };
+  if (expense.refunds.some((r) => !r.received)) return { code: "refund_owed" };
   return null;
 }
 
