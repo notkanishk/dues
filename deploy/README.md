@@ -47,6 +47,8 @@ Deploy an older digest. Each run's full reference (`ghcr.io/<owner>/dues@sha256:
 
 Migrations only go forward. Rolling back past a migration needs a database restore, or a migration written to undo it.
 
+Every deploy first takes a database copy, once Postgres is running: `/var/backups/dues/pre-deploy-<UTC time>-<digest prefix>.dump` (root only, last 14 kept). `dues-deploy` pulls the new image before it, so a registry outage fails with nothing stopped. To restore, as root in `/opt/dues`: `docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' < <dump>`, then deploy the digest that matches it.
+
 ## Testing the compose file
 
 `bun run test:compose` builds the image and brings `compose.yaml` up the way a host does, under the project name `dues-scratch-smoke` with a throwaway `.env` and web on `127.0.0.1:53000`. It checks that every service is healthy and `/api/health` is 200, then stops Postgres and checks for 503, then removes everything. With a remote `DOCKER_HOST`, forward port 53000 first (`ssh -L 53000:127.0.0.1:53000 <host>`).
