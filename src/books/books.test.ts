@@ -742,6 +742,10 @@ describe("The Order page", () => {
     });
     expect(shown.payment.reference).toMatch(/^E-[1-9]\d*$/);
     expect(shown.bills[0]!.reference).toMatch(/^B-[1-9]\d*$/);
+    // Every id goes with its Reference (ADR 0005).
+    expect(shown.payment.id).toBe(expenseId);
+    const expectedRef = (await read(mickey, expenseId)).bills.find((b) => b.id === expectedBillId)!.reference;
+    expect(shown.stillExpected).toMatchObject({ billId: expectedBillId, reference: expectedRef });
   });
 
   it("Item cancelled: ₹500.00 of the expected ₹2,770.00 → an expected Refund of ₹500.00, ₹2,270.00 expected, Refund received offered", async () => {
@@ -843,6 +847,10 @@ describe("The Order page", () => {
     expect(await page(mickey, expenseId)).toMatchObject({ openAmount: rupees(0), refunds: [], stillExpected: null, closedOut: { choice: "not_claiming" } });
     expect((await page(mickey, expenseId)).bills.map((b) => b.status)).toEqual(["expected", "expected"]);
     expect(await writtenOff(expenseId)).toEqual([{ billId: expectedBillId, amountPaise: 27000 }]);
+    // A closed-out remainder reads as closed out, not as Item cancelled, with its Reference beside its id.
+    const closedBill = (await read(mickey, expenseId)).bills.find((b) => b.id === expectedBillId)!;
+    expect(closedBill).toMatchObject({ status: "cancelled", cancelReason: "cancelled", closedAs: "not_claiming" });
+    expect((await page(mickey, expenseId)).closedOut).toMatchObject({ billId: expectedBillId, reference: closedBill.reference });
 
     ok(await books.execute(mickey, { type: "UndoCloseOrder", billId: expectedBillId }));
     expect(await writtenOff(expenseId)).toEqual([]);
