@@ -21,6 +21,7 @@ Dues tracks money makerspace members spend for the lab, from payment to universi
 - **Money is integer paise.** Moments are UTC `timestamptz`; business dates are plain `date`; display uses the Claimant's IANA zone (FUNCTIONAL §10).
 - **Suggest, then confirm.** The app proposes matches and merges; a person confirms. Nothing about money changes silently.
 - **Prototypes live off `main`.** Throwaway code is committed to a `prototype/<topic>` branch; `main` keeps only the validated decision and a pointer to that branch.
+- **Dev before `main`.** Every branch is deployed to dev with `deploy-dev` and checked live there before it merges, because `main` deploys to prod with no approval. How: [`deploy/README.md`](deploy/README.md), "Trying a branch on dev".
 - **Subagents name their model**, by the kind of work:
   - **haiku**: finding, listing, locating, mapping, gathering facts.
   - **sonnet**: building from a precise brief, research, audits that need judgement, tests, UI wiring, fixes.
