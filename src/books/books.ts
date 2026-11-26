@@ -10,9 +10,11 @@ import {
   type BillKind,
   type BillState,
   type BillStatus,
+  type CloseChoice,
   type CloseReason,
   type Command,
   decide,
+  orderPage,
   deriveBill,
   deriveExpense,
   deriveRefund,
@@ -62,12 +64,13 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   const writeOffRows = await q.select().from(writeOffs).where(inArray(writeOffs.expenseId, found));
   return rows.map((row) => {
     // Each Bill carries its database-issued reference with its state, so reads never pair two arrays by position.
-    const ownBills: (BillState & { reference: string; cancelReason: string | null })[] = billRows
+    const ownBills: (BillState & { reference: string; cancelReason: string | null; description: string | null })[] = billRows
       .filter((b) => b.expenseId === row.id)
       .map((b) => ({
         id: b.id,
         reference: b.reference,
         cancelReason: b.cancelReason,
+        description: b.description,
         kind: b.kind as BillKind | null,
         amount: money(b.amountPaise, b.currency),
         billNo: b.billNo,
@@ -75,7 +78,10 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         fulfilledOn: b.fulfilledOn,
         paperlessId: b.paperlessId,
         differs: b.differsFromDocument,
+        remarks: b.remarks,
         cancelled: b.cancelledAt !== null,
+        closedAs: b.closedAs as CloseChoice | null, // the bills_closed_as check keeps it one of these
+        fromBillId: b.fromBillId,
         claim: null, // ponytail: no Claims table yet; filled from Claim membership when Claims land
       }));
     const ownRefunds = refundRows
@@ -95,9 +101,11 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       id: row.id,
       draft: row.draft,
       closedReason: row.closedReason as CloseReason | null, // the expenses_closed_reason check keeps it one of these
+      kind: row.kind as ExpenseState["kind"], // the expenses_kind check
       amount: money(row.amountPaise, row.currency),
       payee: row.payee,
       paidOn: row.paidOn,
+      whatFor: row.whatFor,
       bills: ownBills,
       refunds: ownRefunds,
       writtenOff: sum(ownWriteOffs), // Σ written off (FUNCTIONAL §1), every row summed
@@ -112,13 +120,19 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
     switch (command.type) {
       case "LogExpense":
         return [2, []];
+      case "MoveBill":
+        // Both Expenses load under the one Claimant lock already held (design D5): the Actor owns both or it is not_found.
+        return [0, [...(await expenseOf(tx, bills, command.billId)), command.toExpenseId]];
+      case "DetachBill":
       case "SplitExpectedBill":
+      case "CloseOrder":
       case "ExpectRefund":
       case "CancelBill":
       case "ReturnBill":
         return [1, await expenseOf(tx, bills, command.billId)];
       case "CorrectBill":
       case "ConfirmDiffers":
+      case "UndoCloseOrder":
         return [0, await expenseOf(tx, bills, command.billId)];
       case "MarkRefundReceived":
         return [0, await expenseOf(tx, refunds, command.refundId)];
@@ -147,16 +161,23 @@ function entityOf(event: Event): [Entity, string] {
     case "ExpenseClosed":
       return ["expense", event.expenseId];
     case "BillAdded":
+    case "BillMoved":
     case "ExpectedBillReduced":
     case "ExpectedBillIncreased":
     case "BillRemovedFromClaim":
     case "BillCancelled":
     case "BillCorrected":
     case "DiffersConfirmed":
+    case "ExpectedBillClosedOut":
+    case "ExpectedBillReopened":
+    case "RemainderWrittenOff":
+    case "RemainderWriteOffWithdrawn":
+    case "BillWithdrawn":
       return ["bill", event.billId];
     case "RefundExpected":
     case "RefundReceived":
     case "RefundWrittenOff":
+    case "RefundWithdrawn":
       return ["refund", event.refundId];
   }
 }
@@ -207,8 +228,14 @@ async function write(tx: Tx, event: Event, at: Date) {
         amountPaise: event.amount.paise,
         currency: event.amount.currency,
         fulfilledOn: event.fulfilledOn,
+        description: event.description,
+        remarks: event.remarks,
+        fromBillId: event.fromBillId,
         createdAt: at,
       });
+      return;
+    case "BillMoved":
+      await tx.update(bills).set({ expenseId: event.toExpenseId }).where(eq(bills.id, event.billId));
       return;
     case "ExpectedBillReduced":
     case "ExpectedBillIncreased":
@@ -234,13 +261,14 @@ async function write(tx: Tx, event: Event, at: Date) {
       await tx.update(refunds).set({ refundedOn: event.refundedOn }).where(eq(refunds.id, event.refundId));
       return;
     case "BillCorrected": {
-      const { amount, billNo, billDate } = event.changes;
+      const { amount, billNo, billDate, remarks } = event.changes;
       await tx
         .update(bills)
         .set({
           ...(amount && { amountPaise: amount.to?.paise ?? null }),
           ...(billNo && { billNo: billNo.to }),
           ...(billDate && { billDate: billDate.to }),
+          ...(remarks && { remarks: remarks.to }),
           differsFromDocument: event.differs,
         })
         .where(eq(bills.id, event.billId));
@@ -257,6 +285,31 @@ async function write(tx: Tx, event: Event, at: Date) {
         currency: event.amount.currency,
         createdAt: at,
       });
+      return;
+    case "ExpectedBillClosedOut":
+      await tx.update(bills).set({ cancelledAt: at, cancelReason: "cancelled", closedAs: event.choice }).where(eq(bills.id, event.billId));
+      return;
+    case "ExpectedBillReopened":
+      await tx.update(bills).set({ cancelledAt: null, cancelReason: null, closedAs: null }).where(eq(bills.id, event.billId));
+      return;
+    case "RemainderWrittenOff":
+      await tx.insert(writeOffs).values({
+        expenseId: event.expenseId,
+        billId: event.billId,
+        amountPaise: event.amount.paise,
+        currency: event.amount.currency,
+        createdAt: at,
+      });
+      return;
+    // Undo takes the row back; the audit log keeps that it existed (design D2).
+    case "RemainderWriteOffWithdrawn":
+      await tx.delete(writeOffs).where(eq(writeOffs.billId, event.billId));
+      return;
+    case "RefundWithdrawn":
+      await tx.delete(refunds).where(eq(refunds.id, event.refundId));
+      return;
+    case "BillWithdrawn":
+      await tx.delete(bills).where(eq(bills.id, event.billId));
       return;
     case "ExpenseClosed":
       await tx.update(expenses).set({ closedReason: event.reason }).where(eq(expenses.id, event.expenseId));
@@ -379,6 +432,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
             differs: b.differs,
             fulfilledOn: b.fulfilledOn,
             cancelReason: b.cancelReason,
+            closedAs: b.closedAs, // set on a remainder "No more invoices" closed out, so it is not read as Item cancelled
             status: deriveBill(b),
           })),
           refunds: refundStates.map((r) => ({
@@ -390,6 +444,66 @@ export function createBooks({ db, now, enqueue }: Deps) {
             refundedOn: r.refundedOn,
             status: deriveRefund(r),
           })),
+        },
+      };
+    },
+
+    /**
+     * The Order page from Books (W2.9), for an online Expense (else not_found): the Payment first, each delivered Bill and each Refund with the commands open
+     * now, "Still expected" with the leftover question, and a closed-out remainder with its Undo.
+     */
+    async order(actor: Actor, id: string) {
+      const [found] = await loadExpenses(db, actor, [id]);
+      if (!found) return notFound;
+      const { row, bills: billStates, refunds: refundStates, state } = found;
+      const page = orderPage({ newIds: [], expenses: { [state.id]: state } }, state.id, actor, now());
+      if (!page) return notFound; // only an online Expense has an Order page
+      const derived = deriveExpense(state);
+      const billOf = (billId: string) => billStates.find((b) => b.id === billId)!;
+      const refundOf = (refundId: string) => refundStates.find((r) => r.id === refundId)!;
+      return {
+        ok: true as const,
+        order: {
+          // ponytail: Payment method and proof join with those entities (tasks 2.21, Phase 2).
+          payment: {
+            id: row.id,
+            reference: row.reference,
+            amount: state.amount,
+            paidOn: row.paidOn,
+            payee: row.payee,
+            orderRef: row.orderRef,
+            upiRef: row.upiRef,
+            whatFor: row.whatFor,
+          },
+          status: derived.status,
+          openAmount: derived.openAmount,
+          reason: derived.reason,
+          bills: page.bills.map(({ id: billId, status, commands }) => {
+            const b = billOf(billId);
+            return {
+              id: b.id,
+              reference: b.reference,
+              kind: b.kind,
+              amount: b.amount,
+              // ponytail: a Bill has no seller yet; the "Sold by" a Reading gives arrives with Phase 2.
+              seller: null,
+              description: b.description,
+              remarks: b.remarks,
+              billNo: b.billNo,
+              billDate: b.billDate,
+              differs: b.differs,
+              fulfilledOn: b.fulfilledOn,
+              status,
+              commands,
+            };
+          }),
+          refunds: page.refunds.map(({ id: refundId, status, commands }) => {
+            const r = refundOf(refundId);
+            return { id: r.id, reference: r.reference, amount: r.amount, reason: r.reason, refundedOn: r.refundedOn, status, commands };
+          }),
+          // Every id goes with its Reference (ADR 0005).
+          stillExpected: page.stillExpected && { ...page.stillExpected, reference: billOf(page.stillExpected.billId).reference },
+          closedOut: page.closedOut && { ...page.closedOut, reference: billOf(page.closedOut.billId).reference },
         },
       };
     },

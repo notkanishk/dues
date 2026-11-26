@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { formatRupees } from "@/src/money/money";
-import { type Actor, apply, type BillState, type Command, decide, deriveBill, deriveExpense, deriveRefund, type ExpenseState, type Slice } from "./core";
+import {
+  type Actor,
+  apply,
+  type BillState,
+  type Command,
+  decide,
+  deriveBill,
+  deriveExpense,
+  deriveRefund,
+  type ExpenseState,
+  orderPage,
+  type Slice,
+} from "./core";
 
 // Pure core: no database. Expected values are written by hand from the spec scenarios.
 const mickey: Actor = { claimantId: "00000000-0000-7000-8000-00000000000a", roles: ["claimant"], via: "session" };
@@ -34,7 +46,7 @@ describe("decide LogExpense", () => {
           notes: null,
           source: "manual",
         },
-        { type: "BillAdded", billId: "b-1", expenseId: "e-1", kind: null, amount: rupees(129900), fulfilledOn: null },
+        { type: "BillAdded", billId: "b-1", expenseId: "e-1", kind: null, amount: rupees(129900), fulfilledOn: null, description: null, remarks: null, fromBillId: null },
       ],
     });
   });
@@ -48,6 +60,9 @@ describe("decide LogExpense", () => {
       kind: null,
       amount: rupees(25000),
       fulfilledOn: "2026-11-19",
+      description: null,
+      remarks: null,
+      fromBillId: null,
     });
   });
 
@@ -95,9 +110,11 @@ describe("apply and derivation", () => {
                 id: "e-1",
                 draft: false,
                 closedReason: null,
+                kind,
                 amount: rupees(paise),
                 payee: null,
                 paidOn,
+                whatFor: null,
                 refunds: [],
                 writtenOff: rupees(0),
                 bills: [
@@ -110,7 +127,10 @@ describe("apply and derivation", () => {
                     fulfilledOn: kind === "online" ? null : paidOn,
                     paperlessId: null,
                     differs: false,
+                    remarks: null,
                     cancelled: false,
+                    closedAs: null,
+                    fromBillId: null,
                     claim: null,
                   },
                 ],
@@ -134,9 +154,11 @@ describe("apply and derivation", () => {
     id: "e-1",
     draft: false,
     closedReason: null,
+    kind: "online",
     amount: rupees(paise),
     payee: null,
     paidOn: "2026-11-19",
+    whatFor: null,
     bills: bills.map((b, i) => ({
       id: `b-${i}`,
       kind: "invoice",
@@ -146,10 +168,13 @@ describe("apply and derivation", () => {
       billNo: null,
       billDate: null,
       differs: false,
+      remarks: null,
       cancelled: false,
+      closedAs: null,
+      fromBillId: null,
       claim: null,
     })),
-    refunds: refunds.map((r) => ({ id: "r", amount: rupees(r.paise), reason: "cancelled", received: r.received, writtenOff: false })),
+    refunds: refunds.map((r) => ({ id: "r", billId: null, amount: rupees(r.paise), reason: "cancelled", received: r.received, writtenOff: false })),
     writtenOff: rupees(0),
   });
 
@@ -197,7 +222,10 @@ describe("why an Expense is open", () => {
     billNo: null,
     billDate: null,
     differs: false,
+    remarks: null,
     cancelled: false,
+    closedAs: null,
+    fromBillId: null,
     claim: null,
     ...facts,
   });
@@ -205,9 +233,11 @@ describe("why an Expense is open", () => {
     id: "e-1",
     draft: false,
     closedReason: null,
+    kind: "online",
     amount: rupees(paise),
     payee: null,
     paidOn: "2026-11-19",
+    whatFor: null,
     bills: bills.map(bill),
     refunds: [],
     writtenOff: rupees(0),
@@ -222,13 +252,13 @@ describe("why an Expense is open", () => {
   });
 
   it("Refund owed: no Bill expected and a Refund expected", () => {
-    const e = facts(100000, [{ paise: 70000 }], { refunds: [{ id: "r", amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false }] });
+    const e = facts(100000, [{ paise: 70000 }], { refunds: [{ id: "r", billId: null, amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false }] });
     expect(reasonOf(e)).toEqual({ code: "refund_owed" });
   });
 
   it("awaiting goods comes before refund owed", () => {
     const e = facts(100000, [{ paise: 70000, fulfilledOn: null, paperlessId: null }], {
-      refunds: [{ id: "r", amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false }],
+      refunds: [{ id: "r", billId: null, amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false }],
     });
     expect(reasonOf(e)).toEqual({ code: "awaiting_goods" });
   });
@@ -238,7 +268,7 @@ describe("why an Expense is open", () => {
   });
 
   it("refund owed comes before bill missing", () => {
-    const e = facts(100000, [{ paise: 70000, paperlessId: null }], { refunds: [{ id: "r", amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false }] });
+    const e = facts(100000, [{ paise: 70000, paperlessId: null }], { refunds: [{ id: "r", billId: null, amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false }] });
     expect(reasonOf(e)).toEqual({ code: "refund_owed" });
   });
 
@@ -249,14 +279,14 @@ describe("why an Expense is open", () => {
 
   it("a cancelled Bill without a document is not bill missing", () => {
     const e = facts(100000, [{ paise: 60000, claim: "submitted" }, { paise: 40000, paperlessId: null, cancelled: true }], {
-      refunds: [{ id: "r", amount: rupees(40000), reason: "cancelled", received: true, writtenOff: false }],
+      refunds: [{ id: "r", billId: null, amount: rupees(40000), reason: "cancelled", received: true, writtenOff: false }],
     });
     expect(deriveExpense(e)).toMatchObject({ status: "open", reason: { code: "in_claim" } });
   });
 
   it("Mismatch: nothing expected and Bills plus Refunds ₹50.00 short of the Payment → \"mismatch ₹50.00\", at once", () => {
     // Derivation takes no clock, so nothing can make it wait.
-    const e = facts(100000, [{ paise: 70000 }], { refunds: [{ id: "r", amount: rupees(25000), reason: "cancelled", received: true, writtenOff: false }] });
+    const e = facts(100000, [{ paise: 70000 }], { refunds: [{ id: "r", billId: null, amount: rupees(25000), reason: "cancelled", received: true, writtenOff: false }] });
     const reason = reasonOf(e);
     expect(reason).toEqual({ code: "mismatch", amount: rupees(5000) });
     expect(reason?.code === "mismatch" && formatRupees(reason.amount)).toBe("₹50.00");
@@ -312,14 +342,14 @@ describe("why an Expense is open", () => {
 
   it("Settling: Open amount zero and every Bill reimbursed or cancelled → settled", () => {
     const e = facts(100000, [{ paise: 70000, claim: "reimbursed" }, { paise: 30000, cancelled: true }], {
-      refunds: [{ id: "r", amount: rupees(30000), reason: "cancelled", received: true, writtenOff: false }],
+      refunds: [{ id: "r", billId: null, amount: rupees(30000), reason: "cancelled", received: true, writtenOff: false }],
     });
     expect(deriveExpense(e)).toEqual({ status: "settled", openAmount: rupees(0), reason: null, bills: ["reimbursed", "cancelled"] });
   });
 
   it("Expected Refund blocks settled: stays open with reason refund owed", () => {
     const e = facts(100000, [{ paise: 70000, claim: "reimbursed" }, { paise: 30000, cancelled: true }], {
-      refunds: [{ id: "r", amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false }],
+      refunds: [{ id: "r", billId: null, amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false }],
     });
     expect(deriveExpense(e)).toMatchObject({ status: "open", reason: { code: "refund_owed" } });
   });
@@ -335,7 +365,10 @@ describe("Bill lifecycle", () => {
     billNo: null,
     billDate: null,
     differs: false,
+    remarks: null,
     cancelled: false,
+    closedAs: null,
+    fromBillId: null,
     claim: null,
     ...facts,
   });
@@ -362,7 +395,7 @@ describe("Bill lifecycle", () => {
 
 describe("Refund lifecycle", () => {
   it("expected until its money is back, then received", () => {
-    const refund = { id: "r-1", amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false } as const;
+    const refund = { id: "r-1", billId: null, amount: rupees(30000), reason: "cancelled", received: false, writtenOff: false } as const;
     expect(deriveRefund(refund)).toBe("expected");
     expect(deriveRefund({ ...refund, received: true })).toBe("received");
   });
@@ -397,11 +430,14 @@ describe("Open amount and settled invariants, for any generated slice", () => {
           billNo: null,
           billDate: null,
           differs: false,
+          remarks: null,
           cancelled: pick([false, false, true]),
+          closedAs: null,
+          fromBillId: null,
           claim: pick([null, "draft", "submitted", "reimbursed", "reimbursed"] as const),
         }),
       );
-      const refunds = many(() => ({ id: "r", amount: rupees(paise()), reason: "cancelled" as const, received: pick([true, true, false]), writtenOff: pick([false, false, false, true]) }));
+      const refunds = many(() => ({ id: "r", billId: null, amount: rupees(paise()), reason: "cancelled" as const, received: pick([true, true, false]), writtenOff: pick([false, false, false, true]) }));
       const amount = maybeBlank(paise() + 1);
       // Half the time written off takes up whatever is left, so Open amount zero is common, not a fluke.
       const live = bills.filter((b) => !b.cancelled);
@@ -412,6 +448,8 @@ describe("Open amount and settled invariants, for any generated slice", () => {
         id: "e-1",
         draft: pick([false, false, false, true]),
         closedReason: pick([null, null, null, "personal"]),
+        kind: "online",
+        whatFor: null,
         amount,
         payee: null,
         paidOn: "2026-11-19",
@@ -444,19 +482,39 @@ describe("Open amount and settled invariants, for any generated slice", () => {
   });
 
   // Every Order command moves money between the expected Bill, new Bills and Refunds and never creates or loses any;
-  // writing a Refund off moves it from Σ Refunds to Σ written off. Only three things move the Open amount: a corrected
-  // Payment (+ the change), a corrected Bill (− the change) and closing (+ each live Bill it cancels, with no Refund);
-  // while goods are expected, a corrected Payment or delivered Bill moves the expected Bill by the same change instead.
-  // So from a logged Expense (Open amount zero) the Open amount follows that running total, and still equals Payment −
-  // Σ live Bills − Σ Refunds not written off − Σ written-off amounts. A cancelled Bill stays cancelled, a received or
-  // written-off Refund stays so, a closed Expense stays closed. A Bill on a submitted Claim is refused as locked, and
-  // locks its Expense too; a second Expense in the slice, never named by a command, never changes.
-  it("hold for 2,000 random sequences of Order, correction and closing commands; refusals are typed, never thrown", () => {
-    const types = ["CancelBill", "CloseExpense", "ConfirmDiffers", "CorrectBill", "CorrectExpense", "ExpectRefund", "MarkRefundReceived", "ReturnBill", "SplitExpectedBill"];
-    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0, locked: 0, closed: 0, writtenOff: 0, movedExpected: 0 };
+  // writing a Refund off moves it from Σ Refunds to Σ written off, and closing an Order (CloseOrder) moves the remainder
+  // into a Refund, a No bill or Σ written off. What moves an Open amount: a corrected Payment (+ the change), a corrected
+  // Bill (− the change), closing an Expense (+ each live Bill it cancels, with no Refund), a Bill moved or detached
+  // (+ its amount where it left, − where it landed), and undoing a close (+ what it took back − the remainder expected
+  // again, which differ only when a No bill was corrected). While goods are expected, an Expense's expected Bill takes
+  // a correction's or a moved Bill's amount instead. So from logged Expenses (Open amount zero) each Open amount follows
+  // that running total, and still equals Payment − Σ live Bills − Σ Refunds not written off − Σ written off, where Σ
+  // written off is counted independently from the written-off Refunds and the remainders closed as Not claiming. A
+  // returned Bill stays cancelled (only undo reopens a closed-out one), a received or written-off Refund stays so, a
+  // closed Expense stays closed. A Bill on a submitted Claim is refused as locked, and locks its Expense too; the other
+  // Expense changes only when a Bill moves into it.
+  it("hold for 2,000 random sequences of Order, Bill, correction and closing commands across Expenses; refusals are typed, never thrown", () => {
+    const types = [
+      "CancelBill",
+      "CloseExpense",
+      "CloseOrder",
+      "ConfirmDiffers",
+      "CorrectBill",
+      "CorrectExpense",
+      "DetachBill",
+      "ExpectRefund",
+      "MarkRefundReceived",
+      "MoveBill",
+      "ReturnBill",
+      "SplitExpectedBill",
+      "UndoCloseOrder",
+    ];
+    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0, locked: 0, closed: 0, writtenOff: 0, movedExpected: 0, moved: 0, movedEqual: 0, undone: 0 };
     for (let n = 0; n < 2000; n++) {
-      const logged = decide(fresh, logExpense(pick(["online", "online", "shop"] as const), paise() + 1), mickey, now);
-      const other = decide({ ...fresh, newIds: ["e-2", "b-foreign"] }, logExpense("online", paise() + 1), mickey, now);
+      const first = paise() + 1;
+      const logged = decide(fresh, logExpense(pick(["online", "online", "shop"] as const), first), mickey, now);
+      // Now and then the other Order expects what the first paid, so a Bill can move in equal to its remainder (W4.3).
+      const other = decide({ ...fresh, newIds: ["e-2", "b-foreign"] }, logExpense("online", pick([paise() + 1, first])), mickey, now);
       if (!logged.ok || !other.ok) throw new Error("expected Ok");
       let slice = [...logged.events, ...other.events].reduce(apply, fresh);
       // Half the time the first Bill has its Invoice document, so it can be corrected (no command attaches one yet).
@@ -465,19 +523,19 @@ describe("Open amount and settled invariants, for any generated slice", () => {
       const claimed = next() % 3;
       for (let k = claimed; k > 0; k--) {
         const amount = rupees(paise() + 1);
-        slice = apply(slice, { type: "BillAdded", billId: `b-claimed-${k}`, expenseId: "e-1", kind: "invoice", amount, fulfilledOn: "2026-11-19" });
+        slice = apply(slice, { type: "BillAdded", billId: `b-claimed-${k}`, expenseId: "e-1", kind: "invoice", amount, fulfilledOn: "2026-11-19", description: null, remarks: null, fromBillId: null });
         const e1 = slice.expenses["e-1"]!;
         e1.amount = rupees(e1.amount!.paise + amount.paise);
         e1.bills.at(-1)!.claim = "submitted";
       }
-      const foreign = structuredClone(slice.expenses["e-2"]!);
       let fresher = 0;
-      let open = 0; // the running total, from the commands' money effects alone
+      const open: Record<string, number> = { "e-1": 0, "e-2": 0 }; // running totals, from the commands' money effects alone
       for (let step = 0; step < 12; step++) {
         const expense = slice.expenses["e-1"]!;
-        const billId = pick([...expense.bills.map((b) => b.id), "b-unknown"]);
+        const everyBill = Object.values(slice.expenses).flatMap((e) => e.bills);
+        const billId = pick([...everyBill.map((b) => b.id), "b-unknown"]);
         const refundId = pick([...expense.refunds.map((r) => r.id), "r-unknown"]);
-        const remainder = expense.bills.find((b) => b.id === billId)?.amount?.paise ?? 100;
+        const remainder = everyBill.find((b) => b.id === billId)?.amount?.paise ?? 100;
         const amount = rupees(pick([0, 1, next() % (remainder + 2), remainder - 1, remainder, remainder + 1]));
         // One answer per expected Refund, now and then one too many.
         const answers: Record<string, "expected" | "written_off"> = Object.fromEntries(
@@ -494,6 +552,10 @@ describe("Open amount and settled invariants, for any generated slice", () => {
           { type: "CorrectBill", billId, amount },
           { type: "ConfirmDiffers", billId },
           { type: "CloseExpense", expenseId: "e-1", reason: pick(["personal", "duplicate", "written_off"] as const), refunds: answers },
+          { type: "CloseOrder", billId, choice: pick(["refund_coming", "claim_without_bill", "not_claiming", "shrug"] as const) as never },
+          { type: "UndoCloseOrder", billId: pick([billId, "b-1", "b-1"]) },
+          { type: "MoveBill", billId, toExpenseId: pick([...Object.keys(slice.expenses), "e-unknown"]) },
+          { type: "DetachBill", billId },
         ] as const);
         const ids = { ...slice, newIds: [`new-${fresher++}`] };
         const decision = decide(ids, command, mickey, now);
@@ -507,50 +569,80 @@ describe("Open amount and settled invariants, for any generated slice", () => {
           continue;
         }
         seen.accepted.add(command.type);
-        const before = slice.expenses["e-1"]!;
+        const before = slice;
+        const billBefore = (id: string) => Object.values(before.expenses).flatMap((e) => e.bills).find((b) => b.id === id)!;
         for (const event of decision.events) {
-          if (event.type === "ExpenseCorrected" && event.changes.amount) open += event.changes.amount.to!.paise - event.changes.amount.from!.paise;
-          if (event.type === "BillCorrected" && event.changes.amount) open -= event.changes.amount.to!.paise - event.changes.amount.from!.paise;
-          if (event.type === "BillCancelled" && command.type === "CloseExpense") open += before.bills.find((b) => b.id === event.billId)!.amount!.paise;
-          if ((event.type === "ExpectedBillReduced" || event.type === "ExpectedBillIncreased") && command.type.startsWith("Correct"))
-            open -= event.amount.paise - before.bills.find((b) => b.id === event.billId)!.amount!.paise;
+          if (event.type === "ExpenseLogged") open[event.expenseId] = event.amount.paise; // a detached Bill's own Payment
+          if (event.type === "ExpenseCorrected" && event.changes.amount) open[event.expenseId]! += event.changes.amount.to!.paise - event.changes.amount.from!.paise;
+          if (event.type === "BillCorrected" && event.changes.amount) open[event.expenseId]! -= event.changes.amount.to!.paise - event.changes.amount.from!.paise;
+          if (event.type === "BillCancelled" && (command.type === "CloseExpense" || command.type === "MoveBill")) open[event.expenseId]! += billBefore(event.billId).amount!.paise;
+          if ((event.type === "ExpectedBillReduced" || event.type === "ExpectedBillIncreased") && /^(Correct|MoveBill|DetachBill)/.test(command.type))
+            open[event.expenseId]! -= event.amount.paise - billBefore(event.billId).amount!.paise;
+          if (event.type === "BillMoved") {
+            open[event.fromExpenseId]! += billBefore(event.billId).amount!.paise;
+            open[event.toExpenseId]! -= billBefore(event.billId).amount!.paise;
+          }
+          if (event.type === "RefundWithdrawn" || event.type === "BillWithdrawn" || event.type === "RemainderWriteOffWithdrawn") open[event.expenseId]! += event.amount.paise;
+          if (event.type === "ExpectedBillReopened") open[event.expenseId]! -= billBefore(event.billId).amount!.paise;
         }
         slice = decision.events.reduce(apply, ids);
-        const after = slice.expenses["e-1"]!;
 
-        const live = after.bills.filter((b) => !b.cancelled);
-        const owed = after.refunds.filter((r) => !r.writtenOff);
-        const writtenOff = after.refunds.filter((r) => r.writtenOff).reduce((t, r) => t + r.amount.paise, 0);
-        const formula =
-          after.amount!.paise - live.reduce((t, b) => t + b.amount!.paise, 0) - owed.reduce((t, r) => t + r.amount.paise, 0) - writtenOff;
-        const { openAmount, status } = deriveExpense(after);
+        for (const id of Object.keys(slice.expenses)) {
+          const was = before.expenses[id];
+          const after = slice.expenses[id]!;
+          const live = after.bills.filter((b) => !b.cancelled);
+          const owed = after.refunds.filter((r) => !r.writtenOff);
+          const writtenOff =
+            after.refunds.filter((r) => r.writtenOff).reduce((t, r) => t + r.amount.paise, 0) +
+            after.bills.filter((b) => b.closedAs === "not_claiming").reduce((t, b) => t + b.amount!.paise, 0);
+          const formula =
+            after.amount!.paise - live.reduce((t, b) => t + b.amount!.paise, 0) - owed.reduce((t, r) => t + r.amount.paise, 0) - writtenOff;
+          const { openAmount, status } = deriveExpense(after);
+          expect(after.writtenOff).toEqual(rupees(writtenOff));
+          expect(openAmount).toEqual(rupees(formula));
+          expect(openAmount).toEqual(rupees(open[id]!));
+          for (const b of after.bills) expect(b.amount!.paise).toBeGreaterThan(0);
+          if (status === "settled") seen.settled++;
+          if (!was) continue;
+          for (const b of was.bills) {
+            const now = after.bills.find((x) => x.id === b.id);
+            if (b.cancelled && !(command.type === "UndoCloseOrder" && b.closedAs)) expect(now?.cancelled).toBe(true);
+          }
+          for (const r of was.refunds) {
+            const now = after.refunds.find((x) => x.id === r.id);
+            if (r.received) expect(now?.received).toBe(true);
+            if (r.writtenOff) expect(now?.writtenOff).toBe(true);
+          }
+          if (was.closedReason) expect(after.closedReason).toBe(was.closedReason);
+          // An Expense no command named and no Bill moved into or out of does not change.
+          const touched = decision.events.some((e) => ("expenseId" in e && e.expenseId === id) || (e.type === "BillMoved" && (e.fromExpenseId === id || e.toExpenseId === id)));
+          if (!touched) expect(after).toEqual(was);
+        }
         // While goods are expected, correcting the Payment or a delivered Bill leaves the Open amount where it was,
         // so it never goes below zero (FUNCTIONAL §3.1: mismatch only once nothing is expected).
-        const expecting = before.bills.some((b) => !b.cancelled && !b.fulfilledOn && !b.claim);
-        const delivered = command.type === "CorrectBill" && !!before.bills.find((b) => b.id === command.billId)?.fulfilledOn;
+        const e1Before = before.expenses["e-1"]!;
+        const expecting = e1Before.bills.some((b) => !b.cancelled && !b.fulfilledOn && !b.claim);
+        const delivered = command.type === "CorrectBill" && !!e1Before.bills.find((b) => b.id === command.billId)?.fulfilledOn;
         if (expecting && (command.type === "CorrectExpense" || delivered)) {
-          expect(openAmount).toEqual(deriveExpense(before).openAmount);
-          if (deriveExpense(before).openAmount!.paise >= 0) expect(openAmount!.paise).toBeGreaterThanOrEqual(0);
+          expect(deriveExpense(slice.expenses["e-1"]!).openAmount).toEqual(deriveExpense(e1Before).openAmount);
           if (decision.events.length) seen.movedExpected++;
         }
-        expect(after.writtenOff).toEqual(rupees(writtenOff));
-        expect(openAmount).toEqual(rupees(formula));
-        expect(openAmount).toEqual(rupees(open));
-        for (const b of before.bills) if (b.cancelled) expect(after.bills.find((x) => x.id === b.id)?.cancelled).toBe(true);
-        for (const r of before.refunds) {
-          const now = after.refunds.find((x) => x.id === r.id)!;
-          if (r.received) expect(now.received).toBe(true);
-          if (r.writtenOff) expect(now.writtenOff).toBe(true);
-        }
-        if (before.closedReason) expect(after.closedReason).toBe(before.closedReason);
-        for (const b of after.bills) expect(b.amount!.paise).toBeGreaterThan(0);
-        expect(slice.expenses["e-2"]).toEqual(foreign);
-        if (status === "settled") seen.settled++;
+        // A Bill moved or detached leaves the Open amount of an Expense still expecting goods where it was: its expected
+        // Bill takes the difference, on both sides.
+        if (command.type === "MoveBill" || command.type === "DetachBill")
+          for (const [id, was] of Object.entries(before.expenses))
+            if (was.bills.some((b) => !b.cancelled && !b.fulfilledOn && !b.claim))
+              expect(deriveExpense(slice.expenses[id]!).openAmount).toEqual(deriveExpense(was).openAmount);
+        // Closing an Order never moves its Open amount: the remainder is covered three ways.
+        if (command.type === "CloseOrder") expect(deriveExpense(slice.expenses["e-1"]!).openAmount).toEqual(deriveExpense(e1Before).openAmount);
         if (command.type === "CloseExpense") seen.closed++;
-        if (decision.events.some((e) => e.type === "RefundWrittenOff")) seen.writtenOff++;
+        if (command.type === "MoveBill" || command.type === "DetachBill") seen.moved++;
+        if (command.type === "MoveBill" && decision.events.some((e) => e.type === "BillCancelled")) seen.movedEqual++;
+        if (command.type === "UndoCloseOrder") seen.undone++;
+        if (decision.events.some((e) => e.type === "RefundWrittenOff" || e.type === "RemainderWrittenOff")) seen.writtenOff++;
       }
     }
-    // Every command is accepted somewhere, refused somewhere, and some sequences settle, close and write off.
+    // Every command is accepted somewhere, refused somewhere, and some sequences settle, close, write off, move and undo.
     expect([...seen.accepted].sort()).toEqual(types);
     for (const type of types) expect([...seen.refused].some((r) => r.startsWith(`${type}:`))).toBe(true);
     expect(seen.settled).toBeGreaterThan(20);
@@ -558,6 +650,9 @@ describe("Open amount and settled invariants, for any generated slice", () => {
     expect(seen.closed).toBeGreaterThan(20);
     expect(seen.writtenOff).toBeGreaterThan(20);
     expect(seen.movedExpected).toBeGreaterThan(20);
+    expect(seen.moved).toBeGreaterThan(20);
+    expect(seen.undone).toBeGreaterThan(20);
+    expect(seen.movedEqual).toBeGreaterThan(10);
   });
 });
 
@@ -592,7 +687,7 @@ describe("Order commands", () => {
         jobs: [],
         events: [
           { type: "ExpectedBillReduced", billId: "b-1", expenseId: "e-1", amount: rupees(180000) },
-          { type: "BillAdded", billId: "b-2", expenseId: "e-1", kind: null, amount: rupees(120000), fulfilledOn: "2026-11-21" },
+          { type: "BillAdded", billId: "b-2", expenseId: "e-1", kind: null, amount: rupees(120000), fulfilledOn: "2026-11-21", description: null, remarks: null, fromBillId: null },
         ],
       });
       expect(amounts(slice)).toEqual([180000, 120000]);
@@ -654,7 +749,7 @@ describe("Order commands", () => {
         ],
       });
       expect(amounts(slice)).toEqual([130000, 120000]);
-      expect(refunds(slice)).toEqual([{ id: "r-1", amount: rupees(50000), reason: "cancelled", received: false, writtenOff: false }]);
+      expect(refunds(slice)).toEqual([{ id: "r-1", billId: "b-1", amount: rupees(50000), reason: "cancelled", received: false, writtenOff: false }]);
       expect(derived(slice)).toMatchObject({ openAmount: rupees(0), reason: { code: "awaiting_goods" } });
     });
 
@@ -754,7 +849,7 @@ describe("Order commands", () => {
     it("a delivered Invoice without its document can be returned too", () => {
       const { slice } = run(delivered(), { type: "ReturnBill", billId: "b-2" }, ["r-1"]);
       expect(derived(slice).bills).toEqual(["expected", "cancelled"]);
-      expect(refunds(slice)).toEqual([{ id: "r-1", amount: rupees(120000), reason: "returned", received: false, writtenOff: false }]);
+      expect(refunds(slice)).toEqual([{ id: "r-1", billId: "b-2", amount: rupees(120000), reason: "returned", received: false, writtenOff: false }]);
     });
 
     it("Cancelled Bill stays cancelled: a returned Bill is never ready again and takes no more commands", () => {
@@ -821,7 +916,7 @@ describe("Order commands", () => {
         jobs: [],
         events: [{ type: "RefundReceived", refundId: "r-1", expenseId: "e-1", refundedOn: "2026-11-25" }],
       });
-      expect(refunds(slice)).toEqual([{ id: "r-1", amount: rupees(80000), reason: "cancelled", received: true, writtenOff: false }]);
+      expect(refunds(slice)).toEqual([{ id: "r-1", billId: "b-1", amount: rupees(80000), reason: "cancelled", received: true, writtenOff: false }]);
     });
 
     it("Expected Refund blocks settled; received, the fully cancelled Order settles", () => {
@@ -979,6 +1074,23 @@ describe("CorrectBill and ConfirmDiffers", () => {
     expect(bill(slice)).toMatchObject({ billNo: "GPB/2611/042", billDate: "2026-11-18" });
   });
 
+  it("a remark is not a document value: editing it never marks the Bill as differing", () => {
+    const { decision, slice } = run(documented(), correct({ remarks: "Bought for the laser cutter" }));
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [{ type: "BillCorrected", billId: "b-1", expenseId: "e-1", changes: { remarks: { from: null, to: "Bought for the laser cutter" } }, differs: false }],
+    });
+    expect(bill(slice)).toMatchObject({ remarks: "Bought for the laser cutter", differs: false });
+  });
+
+  it("Claim without a bill: the No bill's remark \"No invoice from seller\" can be edited, never emptied", () => {
+    const closed = run(order(27000), { type: "CloseOrder", billId: "b-1", choice: "claim_without_bill" }, ["b-2"]).slice;
+    const edit = (remarks: string) => run(closed, { type: "CorrectBill", billId: "b-2", remarks });
+    expect(edit("No invoice from seller; refund refused").slice.expenses["e-1"]!.bills[1]!.remarks).toBe("No invoice from seller; refund refused");
+    expect(edit("  ").decision).toEqual({ ok: false, reason: "validation", field: "remarks" });
+  });
+
   it("keeping every value changes nothing and does not mark the Bill", () => {
     expect(run(documented(), correct({ amount: rupees(118000) })).decision).toEqual({ ok: true, events: [], jobs: [] });
   });
@@ -1129,5 +1241,381 @@ describe("CloseExpense", () => {
       ok: false,
       reason: "invalid_transition",
     });
+  });
+});
+
+// Closing what is left of an Order (W2.9). Figures from the spec: a ₹4,870.00 Order, Invoices of ₹2,100.00 and
+// ₹2,500.00 delivered, ₹270.00 still expected on b-1.
+describe("CloseOrder (No more invoices) and UndoCloseOrder", () => {
+  const leftover = (): Slice => {
+    const logged = decide(fresh, { ...logExpense("online", 487000), whatFor: "PLA filament and nozzles" }, mickey, now);
+    if (!logged.ok) throw new Error("expected Ok");
+    let slice = logged.events.reduce(apply, fresh);
+    slice = run(slice, { type: "SplitExpectedBill", billId: "b-1", amount: rupees(210000), fulfilledOn: "2026-11-21" }, ["b-2"]).slice;
+    return run(slice, { type: "SplitExpectedBill", billId: "b-1", amount: rupees(250000), fulfilledOn: "2026-11-23" }, ["b-3"]).slice;
+  };
+  type Choice = Extract<Command, { type: "CloseOrder" }>["choice"];
+  const close = (choice: Choice, billId = "b-1") => ({ type: "CloseOrder", billId, choice }) as const;
+  const undo = (billId = "b-1") => ({ type: "UndoCloseOrder", billId }) as const;
+  const closedOut = (choice: Choice) => ({ type: "ExpectedBillClosedOut", billId: "b-1", expenseId: "e-1", choice, amount: rupees(27000) });
+
+  it("Refund coming: the ₹270.00 remainder becomes an expected Refund; the expected Bill is closed out", () => {
+    const { decision, slice } = run(leftover(), close("refund_coming"), ["r-1"]);
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [
+        closedOut("refund_coming"),
+        { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", billId: "b-1", amount: rupees(27000), reason: "cancelled" },
+      ],
+    });
+    expect(derived(slice)).toMatchObject({ openAmount: rupees(0), reason: { code: "refund_owed" }, bills: ["cancelled", "expected", "expected"] });
+    expect(refunds(slice).map(deriveRefund)).toEqual(["expected"]);
+    expect(run(slice, { type: "MarkRefundReceived", refundId: "r-1", refundedOn: "2026-11-28" }).decision).toMatchObject({ ok: true });
+  });
+
+  it("Claim without a bill: a No bill of ₹270.00 with the Order's What for and remark \"No invoice from seller\", ready", () => {
+    const { decision, slice } = run(leftover(), close("claim_without_bill"), ["b-4"]);
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [
+        closedOut("claim_without_bill"),
+        {
+          type: "BillAdded",
+          billId: "b-4",
+          expenseId: "e-1",
+          kind: "no_bill",
+          amount: rupees(27000),
+          fulfilledOn: "2026-11-19",
+          description: "PLA filament and nozzles",
+          remarks: "No invoice from seller",
+          fromBillId: "b-1",
+        },
+      ],
+    });
+    expect(derived(slice)).toMatchObject({ openAmount: rupees(0), bills: ["cancelled", "expected", "expected", "ready"] });
+    expect(slice.expenses["e-1"]!.bills[3]).toMatchObject({ remarks: "No invoice from seller", fromBillId: "b-1" });
+  });
+
+  it("Not claiming: ₹270.00 written off, counted in the Open amount; nothing filed", () => {
+    const { decision, slice } = run(leftover(), close("not_claiming"));
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [closedOut("not_claiming"), { type: "RemainderWrittenOff", billId: "b-1", expenseId: "e-1", amount: rupees(27000) }],
+    });
+    expect(slice.expenses["e-1"]!.writtenOff).toEqual(rupees(27000));
+    // ₹4,870.00 − ₹2,100.00 − ₹2,500.00 − ₹270.00 written off.
+    expect(derived(slice)).toMatchObject({ openAmount: rupees(0), bills: ["cancelled", "expected", "expected"] });
+  });
+
+  it("Not claiming lets the Order settle once its Bills are reimbursed", () => {
+    const slice = run(leftover(), close("not_claiming")).slice;
+    for (const b of slice.expenses["e-1"]!.bills.slice(1)) b.claim = "reimbursed";
+    expect(derived(slice).status).toBe("settled");
+  });
+
+  it("Leftover under ₹10: ₹1.00 written off like Not claiming", () => {
+    const small = run(order(100), close("not_claiming")).slice;
+    expect(small.expenses["e-1"]!.writtenOff).toEqual(rupees(100));
+    expect(derived(small).openAmount).toEqual(rupees(0));
+  });
+
+  it.each([
+    ["₹9.99", 999, "refund_coming"],
+    ["₹9.99", 999, "claim_without_bill"],
+    ["₹1.00", 100, "refund_coming"],
+  ] as const)("Leftover under ₹10: %s (%i paise) takes only Not claiming; %s is refused on choice", (_, paise, choice) => {
+    const small = order(paise);
+    expect(run(small, close(choice), ["x-1"]).decision).toEqual({ ok: false, reason: "validation", field: "choice" });
+    expect(run(small, close("not_claiming")).decision).toMatchObject({ ok: true });
+  });
+
+  it("a leftover of exactly ₹10.00 takes all three choices", () => {
+    for (const choice of ["refund_coming", "claim_without_bill", "not_claiming"] as const)
+      expect(run(order(1000), close(choice), ["x-1"]).decision).toMatchObject({ ok: true });
+  });
+
+  it.each(["refund_coming", "claim_without_bill", "not_claiming"] as const)("Undo %s: ₹270.00 is expected again", (choice) => {
+    const before = leftover();
+    const closed = run(before, close(choice), [choice === "refund_coming" ? "r-1" : "b-4"]).slice;
+    const { decision, slice } = run(closed, undo());
+    expect(decision.ok && decision.events.at(-1)).toEqual({ type: "ExpectedBillReopened", billId: "b-1", expenseId: "e-1" });
+    expect(slice.expenses).toEqual(before.expenses);
+    expect(derived(slice)).toMatchObject({ openAmount: rupees(0), reason: { code: "awaiting_goods" } });
+  });
+
+  it("each undo names what it takes back", () => {
+    const events = (choice: Choice, id: string) => {
+      const { decision } = run(run(leftover(), close(choice), [id]).slice, undo());
+      return decision.ok && decision.events;
+    };
+    expect(events("refund_coming", "r-1")).toEqual([
+      { type: "RefundWithdrawn", refundId: "r-1", expenseId: "e-1", amount: rupees(27000) },
+      { type: "ExpectedBillReopened", billId: "b-1", expenseId: "e-1" },
+    ]);
+    expect(events("claim_without_bill", "b-4")).toEqual([
+      { type: "BillWithdrawn", billId: "b-4", expenseId: "e-1", amount: rupees(27000) },
+      { type: "ExpectedBillReopened", billId: "b-1", expenseId: "e-1" },
+    ]);
+    expect(events("not_claiming", "-")).toEqual([
+      { type: "RemainderWriteOffWithdrawn", billId: "b-1", expenseId: "e-1", amount: rupees(27000) },
+      { type: "ExpectedBillReopened", billId: "b-1", expenseId: "e-1" },
+    ]);
+  });
+
+  it("Refund coming after Item cancelled: undo takes back only the close's Refund, not the earlier ₹100.00", () => {
+    let slice = run(leftover(), { type: "ExpectRefund", billId: "b-1", amount: rupees(10000) }, ["r-1"]).slice;
+    slice = run(slice, close("refund_coming"), ["r-2"]).slice;
+    const { slice: undone } = run(slice, undo());
+    expect(refunds(undone).map((r) => r.id)).toEqual(["r-1"]);
+    expect(undone.expenses["e-1"]!.bills[0]!.amount).toEqual(rupees(17000));
+  });
+
+  it("a No bill on a draft Claim comes off it when undone", () => {
+    const slice = run(leftover(), close("claim_without_bill"), ["b-4"]).slice;
+    slice.expenses["e-1"]!.bills[3]!.claim = "draft";
+    const { decision } = run(slice, undo());
+    expect(decision.ok && decision.events.map((e) => e.type)).toEqual(["BillRemovedFromClaim", "BillWithdrawn", "ExpectedBillReopened"]);
+  });
+
+  it("Undo after lock is refused: a received Refund, or a No bill on a submitted Claim", () => {
+    const received = run(run(leftover(), close("refund_coming"), ["r-1"]).slice, { type: "MarkRefundReceived", refundId: "r-1", refundedOn: "2026-11-28" }).slice;
+    expect(run(received, undo()).decision).toEqual({ ok: false, reason: "locked" });
+    const filed = run(leftover(), close("claim_without_bill"), ["b-4"]).slice;
+    filed.expenses["e-1"]!.bills[3]!.claim = "submitted";
+    expect(run(filed, undo()).decision).toEqual({ ok: false, reason: "locked" });
+  });
+
+  it("refuses undoing a No bill that was returned, and anything on a closed Expense", () => {
+    const returned = run(run(leftover(), close("claim_without_bill"), ["b-4"]).slice, { type: "ReturnBill", billId: "b-4" }, ["r-1"]).slice;
+    expect(run(returned, undo()).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    const closed = run(run(leftover(), close("not_claiming")).slice, { type: "CloseExpense", expenseId: "e-1", reason: "duplicate", refunds: {} }).slice;
+    expect(run(closed, undo()).decision).toEqual({ ok: false, reason: "invalid_transition" });
+  });
+
+  it.each([
+    ["a Bill that is not expected (delivered)", close("not_claiming", "b-2"), { ok: false, reason: "invalid_transition" }],
+    ["a Bill outside the Actor's slice", close("not_claiming", "b-9"), { ok: false, reason: "not_found" }],
+    ["an unknown choice", close("shrug" as never), { ok: false, reason: "validation", field: "choice" }],
+  ])("CloseOrder refuses %s", (_, command, rejection) => {
+    expect(run(leftover(), command, ["x-1"]).decision).toEqual(rejection);
+  });
+
+  it("refuses closing twice, and undoing a Bill that was never closed out (Item cancelled for everything left)", () => {
+    const closed = run(leftover(), close("not_claiming")).slice;
+    expect(run(closed, close("not_claiming")).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(run(closed, undo()).decision).toMatchObject({ ok: true });
+    const cancelled = run(leftover(), { type: "CancelBill", billId: "b-1" }, ["r-1"]).slice;
+    expect(run(cancelled, undo()).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(run(leftover(), undo()).decision).toEqual({ ok: false, reason: "invalid_transition" });
+  });
+});
+
+// The Order page's Bill commands (W2.9): Move to another payment, Detach. A ₹4,870.00 Order (e-1) with a ₹2,100.00
+// Invoice delivered (b-2) and ₹2,770.00 still expected (b-1), beside the Claimant's other Expense e-2.
+describe("MoveBill and DetachBill", () => {
+  type Other = { kind: "online" | "shop"; paise: number };
+  const twoExpensesFrom = (first: Slice, other: Other): Slice => {
+    const logged = decide({ ...first, newIds: ["e-2", "b-9"] }, logExpense(other.kind, other.paise), mickey, now);
+    if (!logged.ok) throw new Error("expected Ok");
+    return logged.events.reduce(apply, first);
+  };
+  const twoExpenses = (other: Other = { kind: "online", paise: 300000 }): Slice =>
+    twoExpensesFrom(run(order(487000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(210000), fulfilledOn: "2026-11-21" }, ["b-2"]).slice, other);
+  const move = (billId = "b-2", toExpenseId = "e-2") => ({ type: "MoveBill", billId, toExpenseId }) as const;
+  const detach = (billId = "b-2") => ({ type: "DetachBill", billId }) as const;
+  const of = (slice: Slice, id: string) => deriveExpense(slice.expenses[id]!);
+  const billIds = (slice: Slice, id: string) => slice.expenses[id]!.bills.map((b) => `${b.id}:${b.amount?.paise}`);
+
+  it("Move: the ₹2,100.00 Bill belongs to the other Order; each Order's expected Bill takes the difference", () => {
+    const { decision, slice } = run(twoExpenses(), move());
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [
+        { type: "ExpectedBillIncreased", billId: "b-1", expenseId: "e-1", amount: rupees(487000) },
+        { type: "BillMoved", billId: "b-2", fromExpenseId: "e-1", toExpenseId: "e-2" },
+        { type: "ExpectedBillReduced", billId: "b-9", expenseId: "e-2", amount: rupees(90000) },
+      ],
+    });
+    expect(billIds(slice, "e-1")).toEqual(["b-1:487000"]);
+    expect(billIds(slice, "e-2")).toEqual(["b-9:90000", "b-2:210000"]);
+    expect(of(slice, "e-1").openAmount).toEqual(rupees(0));
+    expect(of(slice, "e-2").openAmount).toEqual(rupees(0));
+  });
+
+  it("Move to a shop payment with nothing expected: the Open amounts move by ₹2,100.00", () => {
+    const { slice } = run(twoExpenses({ kind: "shop", paise: 210000 }), move());
+    expect(of(slice, "e-1").openAmount).toEqual(rupees(0));
+    // ₹2,100.00 − its own ₹2,100.00 Bill − the moved ₹2,100.00: mismatch −₹2,100.00 until one is sorted out.
+    expect(of(slice, "e-2")).toMatchObject({ openAmount: rupees(-210000), bills: ["expected", "expected"] });
+  });
+
+  it("Move a Bill equal to what the target still expects: a ₹500.00 Order takes a ₹500.00 Bill; its expected Bill is cancelled, no Refund", () => {
+    const first = run(order(487000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(50000), fulfilledOn: "2026-11-21" }, ["b-2"]).slice;
+    const { decision, slice } = run(twoExpensesFrom(first, { kind: "online", paise: 50000 }), move());
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [
+        { type: "ExpectedBillIncreased", billId: "b-1", expenseId: "e-1", amount: rupees(487000) },
+        { type: "BillMoved", billId: "b-2", fromExpenseId: "e-1", toExpenseId: "e-2" },
+        { type: "BillCancelled", billId: "b-9", expenseId: "e-2", reason: "cancelled" },
+      ],
+    });
+    expect(slice.expenses["e-2"]!.refunds).toEqual([]);
+    expect(of(slice, "e-2")).toMatchObject({ openAmount: rupees(0), bills: ["cancelled", "expected"] });
+    expect(of(slice, "e-1").openAmount).toEqual(rupees(0));
+  });
+
+  it("Detach: the Bill becomes its own invoice-only Expense of ₹2,100.00, and the Order expects ₹4,870.00 again", () => {
+    const { decision, slice } = run(twoExpenses(), detach(), ["e-3"]);
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [
+        { type: "ExpectedBillIncreased", billId: "b-1", expenseId: "e-1", amount: rupees(487000) },
+        {
+          type: "ExpenseLogged",
+          expenseId: "e-3",
+          claimantId: mickey.claimantId,
+          kind: "online",
+          amount: rupees(210000),
+          paidOn: "2026-11-19",
+          payee: null,
+          vendor: null,
+          payback: false,
+          orderRef: null,
+          whatFor: null,
+          upiRef: null,
+          notes: null,
+          source: "manual",
+        },
+        { type: "BillMoved", billId: "b-2", fromExpenseId: "e-1", toExpenseId: "e-3" },
+      ],
+    });
+    expect(billIds(slice, "e-3")).toEqual(["b-2:210000"]);
+    expect(of(slice, "e-3")).toMatchObject({ status: "open", openAmount: rupees(0) });
+    expect(of(slice, "e-1").openAmount).toEqual(rupees(0));
+  });
+
+  it("Detach takes the Bill's own date as the new Expense's date when it has one", () => {
+    const slice = twoExpenses();
+    slice.expenses["e-1"]!.bills[1]!.billDate = "2026-11-21";
+    const { decision } = run(slice, detach(), ["e-3"]);
+    expect(decision.ok && decision.events[1]).toMatchObject({ type: "ExpenseLogged", paidOn: "2026-11-21" });
+  });
+
+  it("Detach is an Order's only: a shop Expense's Bill is not detached, but still moves to another payment (W4.3)", () => {
+    const slice = twoExpenses({ kind: "shop", paise: 210000 });
+    expect(run(slice, detach("b-9"), ["e-3"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(run(slice, move("b-9", "e-1")).decision).toMatchObject({ ok: true });
+  });
+
+  it("a locked Bill is locked: on a submitted Claim it neither moves nor detaches", () => {
+    const slice = twoExpenses();
+    slice.expenses["e-1"]!.bills[1]!.claim = "submitted";
+    expect(run(slice, move()).decision).toEqual({ ok: false, reason: "locked" });
+    expect(run(slice, detach(), ["e-3"]).decision).toEqual({ ok: false, reason: "locked" });
+  });
+
+  it.each([
+    ["a target Expense outside the Actor's slice", move("b-2", "e-9"), { ok: false, reason: "not_found" }],
+    ["a Bill outside the Actor's slice", move("b-8"), { ok: false, reason: "not_found" }],
+    ["its own Expense", move("b-2", "e-1"), { ok: false, reason: "invalid_transition" }],
+    ["the expected Bill itself", move("b-1"), { ok: false, reason: "invalid_transition" }],
+    // ponytail: open owner question (a Bill larger than the remainder); refused until it is decided.
+    ["more than the target still expects (₹2,100.00 into ₹2,000.00)", move("b-2", "e-2"), { ok: false, reason: "validation", field: "billId" }],
+  ])("MoveBill refuses %s", (_, command, rejection) => {
+    const slice = twoExpenses({ kind: "online", paise: 200000 });
+    expect(run(slice, command).decision).toEqual(rejection);
+  });
+
+  it("refuses a cancelled Bill, a closed target, and detaching the expected Bill", () => {
+    const returned = run(twoExpenses(), { type: "ReturnBill", billId: "b-2" }, ["r-1"]).slice;
+    expect(run(returned, move()).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(run(returned, detach(), ["e-3"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    const closedTarget = run(twoExpenses(), { type: "CloseExpense", expenseId: "e-2", reason: "duplicate", refunds: {} }).slice;
+    expect(run(closedTarget, move()).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(run(twoExpenses(), detach("b-1"), ["e-3"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+  });
+});
+
+// The Order page (W2.9): what it shows and which commands are open now, from the one decide.
+describe("orderPage", () => {
+  const page = (slice: Slice) => orderPage(slice, "e-1", mickey, now)!;
+  const split = (slice: Slice, paise: number, id: string) =>
+    run(slice, { type: "SplitExpectedBill", billId: "b-1", amount: rupees(paise), fulfilledOn: "2026-11-21" }, [id]).slice;
+  const all3 = ["refund_coming", "claim_without_bill", "not_claiming"];
+
+  it("Page contents: a ₹4,870.00 Order with a ₹2,100.00 Bill → the Bill with Move and Detach, then \"Still expected ₹2,770\"", () => {
+    expect(page(split(order(487000), 210000, "b-2"))).toEqual({
+      bills: [{ id: "b-2", status: "expected", commands: ["MoveBill", "DetachBill"] }],
+      refunds: [],
+      stillExpected: { billId: "b-1", amount: rupees(277000), ask: "three_way", choices: all3, commands: ["ExpectRefund", "CloseOrder"] },
+      closedOut: null,
+    });
+  });
+
+  it("Item cancelled: ₹500.00 of ₹2,770.00 → an expected Refund with Refund received, and ₹2,270.00 still expected", () => {
+    const slice = run(split(order(487000), 210000, "b-2"), { type: "ExpectRefund", billId: "b-1", amount: rupees(50000) }, ["r-1"]).slice;
+    expect(page(slice)).toMatchObject({
+      refunds: [{ id: "r-1", status: "expected", commands: ["MarkRefundReceived"] }],
+      stillExpected: { amount: rupees(227000) },
+    });
+  });
+
+  it.each([
+    ["₹1.00", 100, "close_order", ["not_claiming"]],
+    ["₹9.99", 999, "close_order", ["not_claiming"]],
+    ["₹10.00", 1000, "three_way", all3],
+    ["₹270.00", 27000, "three_way", all3],
+  ])("a leftover of %s (%i paise) asks %s", (_, paise, ask, choices) => {
+    expect(page(split(order(487000), 487000 - paise, "b-2")).stillExpected).toMatchObject({ amount: rupees(paise), ask, choices });
+  });
+
+  it("Never silent: ₹1.00 left and no answer → still asked, and the Order stays open", () => {
+    const slice = split(order(487000), 486900, "b-2");
+    expect(page(slice).stillExpected).toMatchObject({ ask: "close_order" });
+    expect(derived(slice)).toMatchObject({ status: "open", reason: { code: "awaiting_goods" } });
+  });
+
+  it("after a close: nothing still expected, the choice shown with Undo; a received Refund locks the undo", () => {
+    const left = split(order(487000), 460000, "b-2");
+    const written = run(left, { type: "CloseOrder", billId: "b-1", choice: "not_claiming" }).slice;
+    expect(page(written)).toMatchObject({ stillExpected: null, closedOut: { billId: "b-1", choice: "not_claiming", amount: rupees(27000), commands: ["UndoCloseOrder"] } });
+    const refunded = run(left, { type: "CloseOrder", billId: "b-1", choice: "refund_coming" }, ["r-1"]).slice;
+    const received = run(refunded, { type: "MarkRefundReceived", refundId: "r-1", refundedOn: "2026-11-28" }).slice;
+    expect(page(received)).toMatchObject({ refunds: [{ status: "received", commands: [] }], closedOut: { choice: "refund_coming", commands: [] } });
+  });
+
+  it("Claim without a bill: the leftover's No bill is listed as ready, with Move and Detach", () => {
+    const slice = run(split(order(487000), 460000, "b-2"), { type: "CloseOrder", billId: "b-1", choice: "claim_without_bill" }, ["b-3"]).slice;
+    expect(page(slice).bills).toEqual([
+      { id: "b-2", status: "expected", commands: ["MoveBill", "DetachBill"] },
+      { id: "b-3", status: "ready", commands: ["MoveBill", "DetachBill"] },
+    ]);
+  });
+
+  it("a locked Bill offers nothing; a returned one is listed as cancelled", () => {
+    const slice = split(split(order(487000), 210000, "b-2"), 100000, "b-3");
+    slice.expenses["e-1"]!.bills[1]!.claim = "submitted";
+    const returned = run(slice, { type: "ReturnBill", billId: "b-3" }, ["r-1"]).slice;
+    expect(page(returned).bills).toEqual([
+      { id: "b-2", status: "claimed", commands: [] },
+      { id: "b-3", status: "cancelled", commands: [] },
+    ]);
+  });
+
+  it("is null for an Expense that is not an online Order", () => {
+    const logged = decide(fresh, logExpense("shop", 25000), mickey, now);
+    if (!logged.ok) throw new Error("expected Ok");
+    expect(orderPage(logged.events.reduce(apply, fresh), "e-1", mickey, now)).toBeNull();
+  });
+
+  it("is null for an Expense outside the Actor's slice", () => {
+    expect(orderPage(order(100), "e-9", mickey, now)).toBeNull();
   });
 });

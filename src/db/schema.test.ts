@@ -186,6 +186,48 @@ describe("Write-offs", () => {
     const [written] = await db.insert(writeOffs).values({ expenseId: other.id, refundId: refund!.id, amountPaise: 50000 }).returning();
     expect(written!.refundId).toBe(refund!.id);
   });
+
+  // W2.9 "Not claiming": the remainder of an Order's expected Bill, tied to that Bill so undo finds it.
+  it("ties a written-off remainder to an expected Bill of its own Expense, once; never another Expense's Bill", async () => {
+    const own = await logExpense(mickey);
+    const other = await logExpense(mickey);
+    const [bill] = await db.insert(bills).values({ expenseId: other.id, amountPaise: 27000 }).returning();
+    await refusedWith(FOREIGN_KEY_VIOLATION, db.insert(writeOffs).values({ expenseId: own.id, billId: bill!.id, amountPaise: 27000 }));
+    const [written] = await db.insert(writeOffs).values({ expenseId: other.id, billId: bill!.id, amountPaise: 27000 }).returning();
+    expect(written!.billId).toBe(bill!.id);
+    await refusedWith("23505", db.insert(writeOffs).values({ expenseId: other.id, billId: bill!.id, amountPaise: 27000 }));
+  });
+
+  it("names exactly one of a Refund or a Bill", async () => {
+    const expense = await logExpense(mickey);
+    const [bill] = await db.insert(bills).values({ expenseId: expense.id, amountPaise: 100 }).returning();
+    const [refund] = await db.insert(refunds).values({ expenseId: expense.id, amountPaise: 100, reason: "cancelled" }).returning();
+    await refusedWith(CHECK_VIOLATION, db.insert(writeOffs).values({ expenseId: expense.id, amountPaise: 100 }));
+    await refusedWith(
+      CHECK_VIOLATION,
+      db.insert(writeOffs).values({ expenseId: expense.id, refundId: refund!.id, billId: bill!.id, amountPaise: 100 }),
+    );
+  });
+});
+
+describe("Closing what is left of an Order (W2.9)", () => {
+  it("records on the expected Bill how it was closed out, one of three choices", async () => {
+    const expense = await logExpense(mickey);
+    const [bill] = await db.insert(bills).values({ expenseId: expense.id, amountPaise: 27000, closedAs: "not_claiming" }).returning();
+    expect(bill!.closedAs).toBe("not_claiming");
+    await refusedWith(CHECK_VIOLATION, db.insert(bills).values({ expenseId: expense.id, amountPaise: 1, closedAs: "shrugged" }));
+  });
+
+  it("links a leftover's No bill to the expected Bill it came from", async () => {
+    const expense = await logExpense(mickey);
+    const [expected] = await db.insert(bills).values({ expenseId: expense.id, amountPaise: 27000 }).returning();
+    const [noBill] = await db
+      .insert(bills)
+      .values({ expenseId: expense.id, kind: "no_bill", amountPaise: 27000, remarks: "No invoice from seller", fromBillId: expected!.id })
+      .returning();
+    expect(noBill!.fromBillId).toBe(expected!.id);
+    await refusedWith("23503", db.insert(bills).values({ expenseId: expense.id, amountPaise: 1, fromBillId: randomUUID() }));
+  });
 });
 
 describe("Audit log", () => {
