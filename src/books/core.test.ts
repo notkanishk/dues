@@ -311,3 +311,48 @@ describe("Bill lifecycle", () => {
     expect(deriveBill(bill(facts))).toBe(status);
   });
 });
+
+// Property (design §1): for any slice, Open amount = Payment − Σ Bills − Σ Refunds − written off.
+describe("Open amount invariant, for any generated slice", () => {
+  // ponytail: a seeded generator instead of a property-testing dependency; same seed, same 2,000 slices.
+  let seed = 0x5eed;
+  const next = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (t ^ (t >>> 14)) >>> 0;
+  };
+  const paise = () => next() % 10_000_000; // up to ₹1,00,000.00
+  const pick = <T>(xs: readonly T[]) => xs[next() % xs.length]!;
+  const many = <T>(make: () => T) => Array.from({ length: next() % 5 }, make);
+
+  it("holds in integer paise for 2,000 slices", () => {
+    for (let n = 0; n < 2000; n++) {
+      const expense: ExpenseState = {
+        id: "e-1",
+        draft: pick([false, false, true]),
+        closedReason: pick([null, null, null, "personal"]),
+        amount: rupees(paise() + 1),
+        bills: many(() => ({
+          id: "b",
+          kind: pick(["invoice", "no_bill", null] as const),
+          amount: rupees(paise()),
+          fulfilledOn: pick(["2026-11-19", null]),
+          paperlessId: pick([7, null]),
+          cancelled: pick([false, false, true]),
+          claim: pick([null, "submitted", "reimbursed"] as const),
+        })),
+        refunds: many(() => ({ amount: rupees(paise()), received: pick([true, false]) })),
+        writtenOff: rupees(pick([0, paise()])),
+      };
+      let expected = expense.amount!.paise;
+      for (const b of expense.bills) if (!b.cancelled) expected -= b.amount!.paise;
+      for (const r of expense.refunds) expected -= r.amount.paise;
+      expected -= expense.writtenOff.paise;
+
+      const { openAmount } = deriveExpense(expense);
+      expect(openAmount).toEqual(rupees(expected));
+      expect(Number.isSafeInteger(openAmount!.paise)).toBe(true);
+    }
+  });
+});
