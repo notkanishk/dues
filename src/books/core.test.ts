@@ -445,14 +445,15 @@ describe("Open amount and settled invariants, for any generated slice", () => {
 
   // Every Order command moves money between the expected Bill, new Bills and Refunds and never creates or loses any;
   // writing a Refund off moves it from Σ Refunds to Σ written off. Only three things move the Open amount: a corrected
-  // Payment (+ the change), a corrected Bill (− the change) and closing (+ each live Bill it cancels, with no Refund).
+  // Payment (+ the change), a corrected Bill (− the change) and closing (+ each live Bill it cancels, with no Refund);
+  // while goods are expected, a corrected Payment or delivered Bill moves the expected Bill by the same change instead.
   // So from a logged Expense (Open amount zero) the Open amount follows that running total, and still equals Payment −
   // Σ live Bills − Σ Refunds not written off − Σ written-off amounts. A cancelled Bill stays cancelled, a received or
   // written-off Refund stays so, a closed Expense stays closed. A Bill on a submitted Claim is refused as locked, and
   // locks its Expense too; a second Expense in the slice, never named by a command, never changes.
   it("hold for 2,000 random sequences of Order, correction and closing commands; refusals are typed, never thrown", () => {
     const types = ["CancelBill", "CloseExpense", "ConfirmDiffers", "CorrectBill", "CorrectExpense", "ExpectRefund", "MarkRefundReceived", "ReturnBill", "SplitExpectedBill"];
-    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0, locked: 0, closed: 0, writtenOff: 0 };
+    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0, locked: 0, closed: 0, writtenOff: 0, movedExpected: 0 };
     for (let n = 0; n < 2000; n++) {
       const logged = decide(fresh, logExpense(pick(["online", "online", "shop"] as const), paise() + 1), mickey, now);
       const other = decide({ ...fresh, newIds: ["e-2", "b-foreign"] }, logExpense("online", paise() + 1), mickey, now);
@@ -511,6 +512,8 @@ describe("Open amount and settled invariants, for any generated slice", () => {
           if (event.type === "ExpenseCorrected" && event.changes.amount) open += event.changes.amount.to!.paise - event.changes.amount.from!.paise;
           if (event.type === "BillCorrected" && event.changes.amount) open -= event.changes.amount.to!.paise - event.changes.amount.from!.paise;
           if (event.type === "BillCancelled" && command.type === "CloseExpense") open += before.bills.find((b) => b.id === event.billId)!.amount!.paise;
+          if ((event.type === "ExpectedBillReduced" || event.type === "ExpectedBillIncreased") && command.type.startsWith("Correct"))
+            open -= event.amount.paise - before.bills.find((b) => b.id === event.billId)!.amount!.paise;
         }
         slice = decision.events.reduce(apply, ids);
         const after = slice.expenses["e-1"]!;
@@ -521,6 +524,15 @@ describe("Open amount and settled invariants, for any generated slice", () => {
         const formula =
           after.amount!.paise - live.reduce((t, b) => t + b.amount!.paise, 0) - owed.reduce((t, r) => t + r.amount.paise, 0) - writtenOff;
         const { openAmount, status } = deriveExpense(after);
+        // While goods are expected, correcting the Payment or a delivered Bill leaves the Open amount where it was,
+        // so it never goes below zero (FUNCTIONAL §3.1: mismatch only once nothing is expected).
+        const expecting = before.bills.some((b) => !b.cancelled && !b.fulfilledOn && !b.claim);
+        const delivered = command.type === "CorrectBill" && !!before.bills.find((b) => b.id === command.billId)?.fulfilledOn;
+        if (expecting && (command.type === "CorrectExpense" || delivered)) {
+          expect(openAmount).toEqual(deriveExpense(before).openAmount);
+          if (deriveExpense(before).openAmount!.paise >= 0) expect(openAmount!.paise).toBeGreaterThanOrEqual(0);
+          if (decision.events.length) seen.movedExpected++;
+        }
         expect(after.writtenOff).toEqual(rupees(writtenOff));
         expect(openAmount).toEqual(rupees(formula));
         expect(openAmount).toEqual(rupees(open));
@@ -545,6 +557,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
     expect(seen.locked).toBeGreaterThan(20);
     expect(seen.closed).toBeGreaterThan(20);
     expect(seen.writtenOff).toBeGreaterThan(20);
+    expect(seen.movedExpected).toBeGreaterThan(20);
   });
 });
 

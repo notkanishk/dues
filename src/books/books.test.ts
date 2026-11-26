@@ -513,6 +513,62 @@ describe("Expense corrections", () => {
     expect(await auditRowsOf(mickey)).toHaveLength(2);
     expect(await read(mickey, expenseId)).toMatchObject({ amount: rupees(100000) });
   });
+
+  // An Order expects one Bill for the full Payment (W2.1); mismatch exists only once nothing is expected (FUNCTIONAL §3.1).
+  it("Order Payment corrected: ₹1,000.00 → ₹900.00 moves the expected Bill to ₹900.00, Open amount ₹0.00 to the end", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 100000);
+
+    const corrected = ok(await books.execute(mickey, { type: "CorrectExpense", expenseId, amount: rupees(90000) }));
+    expect(corrected.events).toEqual([
+      { type: "ExpenseCorrected", expenseId, changes: { amount: { from: rupees(100000), to: rupees(90000) } } },
+      { type: "ExpectedBillReduced", billId: expectedBillId, expenseId, amount: rupees(90000) },
+    ]);
+    expect(await read(mickey, expenseId)).toMatchObject({
+      amount: rupees(90000),
+      openAmount: rupees(0),
+      reason: { code: "awaiting_goods" },
+      bills: [{ amount: rupees(90000), status: "expected" }],
+    });
+    expect((await auditRowsOf(mickey)).slice(-2).map((r) => [r.event, r.entity])).toEqual([
+      ["ExpenseCorrected", "expense"],
+      ["ExpectedBillReduced", "bill"],
+    ]);
+
+    // A ₹600.00 Invoice leaves ₹300.00 expected; cancelling it makes a ₹300.00 Refund. Nothing goes negative.
+    ok(await books.execute(mickey, { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(60000), fulfilledOn: "2026-11-21" }));
+    ok(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId }));
+    const expense = await read(mickey, expenseId);
+    expect(expense.openAmount).toEqual(rupees(0));
+    expect(expense.bills.map((b) => [b.amount?.paise, b.status])).toEqual([
+      [30000, "cancelled"],
+      [60000, "expected"],
+    ]);
+    expect(expense.refunds.map((r) => r.amount.paise)).toEqual([30000]);
+  });
+
+  it("Order Payment corrected up: ₹1,000.00 → ₹1,250.00 grows the expected Bill to ₹1,250.00", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 100000);
+    const corrected = ok(await books.execute(mickey, { type: "CorrectExpense", expenseId, amount: rupees(125000) }));
+    expect(corrected.events[1]).toEqual({ type: "ExpectedBillIncreased", billId: expectedBillId, expenseId, amount: rupees(125000) });
+    expect(await read(mickey, expenseId)).toMatchObject({ openAmount: rupees(0), bills: [{ amount: rupees(125000), status: "expected" }] });
+  });
+
+  it("refuses a Payment correction that leaves nothing expected: ₹3,000.00 with ₹1,200.00 delivered, to ₹1,200.00 or ₹1,000.00", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 300000);
+    ok(await books.execute(mickey, { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }));
+    const before = await auditRowsOf(mickey);
+    for (const paise of [120000, 100000])
+      expect(await books.execute(mickey, { type: "CorrectExpense", expenseId, amount: rupees(paise) })).toEqual({
+        ok: false,
+        reason: "validation",
+        field: "amount",
+      });
+    expect(await auditRowsOf(mickey)).toEqual(before);
+    expect(await read(mickey, expenseId)).toMatchObject({ amount: rupees(300000), bills: [{ amount: rupees(180000) }, { amount: rupees(120000) }] });
+  });
 });
 
 // Bill corrections after a document is attached (expense-tracking), through execute.
@@ -544,6 +600,29 @@ describe("Bill corrections", () => {
     expect(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(110800) })).toEqual({ ok: false, reason: "invalid_transition" });
     expect((await read(mickey, expenseId)).bills).toMatchObject([{ amount: rupees(118000), differs: false }]);
     expect(await auditRowsOf(mickey)).toHaveLength(2);
+  });
+
+  it("a delivered Bill corrected on an Order still expecting goods moves the difference to the expected Bill", async () => {
+    const mickey = claimant();
+    // ₹3,000.00 Order, ₹1,200.00 delivered with its Invoice document: ₹1,800.00 still expected.
+    const { expenseId, expectedBillId } = await order(mickey, 300000);
+    const split = ok(
+      await books.execute(mickey, { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }),
+    );
+    const billId = (split.events[1] as { billId: string }).billId;
+    await db.update(bills).set({ paperlessId: 7, kind: "invoice" }).where(eq(bills.id, billId));
+
+    const corrected = ok(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(100000) }));
+    expect(corrected.events[1]).toEqual({ type: "ExpectedBillIncreased", billId: expectedBillId, expenseId, amount: rupees(200000) });
+    expect(await read(mickey, expenseId)).toMatchObject({
+      openAmount: rupees(0),
+      bills: [{ amount: rupees(200000), status: "expected" }, { amount: rupees(100000), differs: true }],
+    });
+
+    // ₹3,000.00 would leave nothing expected: refused, nothing changes.
+    expect(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(300000) })).toEqual({ ok: false, reason: "validation", field: "amount" });
+    ok(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(150000) }));
+    expect((await read(mickey, expenseId)).bills.map((b) => b.amount?.paise)).toEqual([150000, 150000]);
   });
 });
 
