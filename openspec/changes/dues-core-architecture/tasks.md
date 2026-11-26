@@ -41,7 +41,7 @@ Commands (ADR 0007: Next.js 16 on Bun):
 
 ## 2. Phase 1: foundations, identity, Expense core
 
-- [ ] 2.1 Scaffold the repo (app, worker, Postgres 19, Gotenberg 9.9 in Docker; versions as pinned in ADR 0007 Compose); CI runs tests against a real Postgres; `<APP_HOST>` deploy notes stay in `private/`
+- [x] 2.1 Scaffold the repo (app, worker, Postgres 19, Gotenberg 9.9 in Docker; versions as pinned in ADR 0007 Compose); CI runs tests against a real Postgres; `<APP_HOST>` deploy notes stay in `private/`
 - [x] 2.2 test: money — paise in, paise out; sums exact; no float path (platform-foundations)
 - [x] 2.3 Money type and formatting (₹ Indian grouping, two decimals, paise kept as printed)
 - [x] 2.4 test: Keys and References — UUIDv7 keys; `E-`/`B-`/`R-`/`O-` References global, unpadded, immutable (ADR 0005)
