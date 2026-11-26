@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, char, check, date, integer, jsonb, pgSequence, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, char, check, date, foreignKey, index, integer, jsonb, pgSequence, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // Keys and References (ADR 0005). The key is a UUIDv7 from Postgres's own uuidv7(), so every
 // writer (app, psql, imports) gets the same time-ordered key without app code.
@@ -110,6 +110,7 @@ export const refunds = pgTable(
   (t) => [
     check("refunds_reference_format", referenceFormat("R")),
     check("refunds_reason", sql`${t.reason} in ('cancelled', 'returned', 'partial')`),
+    unique("refunds_id_expense_id_unique").on(t.id, t.expenseId), // target of write_offs' (refund_id, expense_id) key
   ],
 );
 
@@ -121,12 +122,16 @@ export const writeOffs = pgTable(
   {
     id: key(),
     expenseId: uuid("expense_id").notNull().references(() => expenses.id),
-    refundId: uuid("refund_id").unique().references(() => refunds.id), // a Refund is written off once
+    refundId: uuid("refund_id").unique(), // a Refund is written off once, and only on its own Expense (the key below)
     amountPaise: amountPaise().notNull(),
     currency: currency(),
     createdAt: createdAt(),
   },
-  (t) => [check("write_offs_amount", sql`${t.amountPaise} > 0`)],
+  (t) => [
+    check("write_offs_amount", sql`${t.amountPaise} > 0`),
+    foreignKey({ name: "write_offs_refund_expense_fk", columns: [t.refundId, t.expenseId], foreignColumns: [refunds.id, refunds.expenseId] }),
+    index("write_offs_expense_id_idx").on(t.expenseId),
+  ],
 );
 
 export const owedToUniversityReferenceSeq = pgSequence("owed_to_university_reference_seq");

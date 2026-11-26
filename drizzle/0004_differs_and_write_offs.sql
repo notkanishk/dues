@@ -11,4 +11,6 @@ CREATE TABLE "write_offs" (
 --> statement-breakpoint
 ALTER TABLE "bills" ADD COLUMN "differs_from_document" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "write_offs" ADD CONSTRAINT "write_offs_expense_id_expenses_id_fk" FOREIGN KEY ("expense_id") REFERENCES "public"."expenses"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "write_offs" ADD CONSTRAINT "write_offs_refund_id_refunds_id_fk" FOREIGN KEY ("refund_id") REFERENCES "public"."refunds"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "refunds" ADD CONSTRAINT "refunds_id_expense_id_unique" UNIQUE("id","expense_id");--> statement-breakpoint
+ALTER TABLE "write_offs" ADD CONSTRAINT "write_offs_refund_expense_fk" FOREIGN KEY ("refund_id","expense_id") REFERENCES "public"."refunds"("id","expense_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "write_offs_expense_id_idx" ON "write_offs" USING btree ("expense_id");

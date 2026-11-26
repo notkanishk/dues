@@ -1,5 +1,5 @@
 {
-  "id": "dd2667c8-0232-4e2e-8123-2f03ec7d33e5",
+  "id": "f11c1ffd-6609-4ec8-95d4-a53c6455f815",
   "prevId": "384c16d3-77bf-42c8-b980-ff12dff77fbe",
   "version": "7",
   "dialect": "postgresql",
@@ -634,6 +634,14 @@
           "columns": [
             "reference"
           ]
+        },
+        "refunds_id_expense_id_unique": {
+          "name": "refunds_id_expense_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "expense_id"
+          ]
         }
       },
       "policies": {},
@@ -693,7 +701,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "write_offs_expense_id_idx": {
+          "name": "write_offs_expense_id_idx",
+          "columns": [
+            {
+              "expression": "expense_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "write_offs_expense_id_expenses_id_fk": {
           "name": "write_offs_expense_id_expenses_id_fk",
@@ -708,15 +732,17 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "write_offs_refund_id_refunds_id_fk": {
-          "name": "write_offs_refund_id_refunds_id_fk",
+        "write_offs_refund_expense_fk": {
+          "name": "write_offs_refund_expense_fk",
           "tableFrom": "write_offs",
           "tableTo": "refunds",
           "columnsFrom": [
-            "refund_id"
+            "refund_id",
+            "expense_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "expense_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
