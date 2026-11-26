@@ -159,11 +159,10 @@ describe("apply and derivation", () => {
     expect(deriveExpense(expense(100000, [100000])).status).toBe("open");
   });
 
-  it("a cancelled Bill no longer covers the Payment (its expected Refund does)", () => {
-    const e = expense(100000, [100000]);
-    e.bills[0]!.cancelled = true;
-    expect(deriveExpense(e)).toMatchObject({ status: "open", openAmount: rupees(100000) });
-    expect(deriveBill(e.bills[0]!)).toBe("cancelled");
+  it("a cancelled Bill no longer covers the Payment (its expected Refund does): refund owed, not awaiting goods", () => {
+    const e = expense(100000, [100000], [{ paise: 100000, received: false }]);
+    e.bills[0] = { ...e.bills[0]!, cancelled: true, fulfilledOn: null, paperlessId: null };
+    expect(deriveExpense(e)).toEqual({ status: "open", openAmount: rupees(0), reason: { code: "refund_owed" }, bills: ["cancelled"] });
   });
 
   it("a ready Bill is Fulfilled and has its document", () => {
@@ -234,10 +233,10 @@ describe("why an Expense is open", () => {
   });
 
   it("a cancelled Bill without a document is not bill missing", () => {
-    const e = facts(100000, [{ paise: 100000, paperlessId: null, cancelled: true }], {
-      refunds: [{ amount: rupees(100000), received: true }],
+    const e = facts(100000, [{ paise: 60000, claim: "submitted" }, { paise: 40000, paperlessId: null, cancelled: true }], {
+      refunds: [{ amount: rupees(40000), received: true }],
     });
-    expect(deriveExpense(e)).toMatchObject({ status: "settled", reason: null });
+    expect(deriveExpense(e)).toMatchObject({ status: "open", reason: { code: "in_claim" } });
   });
 
   it("Mismatch: nothing expected and Bills plus Refunds ₹50.00 short of the Payment → \"mismatch ₹50.00\", at once", () => {
@@ -246,6 +245,10 @@ describe("why an Expense is open", () => {
     const reason = reasonOf(e);
     expect(reason).toEqual({ code: "mismatch", amount: rupees(5000) });
     expect(reason?.code === "mismatch" && formatRupees(reason.amount)).toBe("₹50.00");
+  });
+
+  it("Overpaid: Bills ₹50.00 over the Payment → mismatch keeps the signed amount, −₹50.00", () => {
+    expect(reasonOf(facts(100000, [{ paise: 105000 }]))).toEqual({ code: "mismatch", amount: rupees(-5000) });
   });
 
   it("bill missing comes before mismatch", () => {
