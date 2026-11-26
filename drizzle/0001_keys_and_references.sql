@@ -24,3 +24,11 @@ CREATE TABLE "expenses" (
 	CONSTRAINT "expenses_source" CHECK ("expenses"."source" in ('manual', 'document', 'amazon', 'back-fill')),
 	CONSTRAINT "expenses_closed_reason" CHECK ("expenses"."closed_reason" in ('personal', 'duplicate', 'written_off'))
 );
+--> statement-breakpoint
+-- Hand-written (drizzle-kit does not model triggers): a Reference never changes once issued (ADR 0005).
+CREATE FUNCTION "public"."reference_is_immutable"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	RAISE EXCEPTION 'Reference % cannot change', OLD.reference USING ERRCODE = 'check_violation';
+END $$;--> statement-breakpoint
+CREATE TRIGGER "expenses_reference_immutable" BEFORE UPDATE OF "reference" ON "expenses"
+	FOR EACH ROW WHEN (NEW.reference IS DISTINCT FROM OLD.reference) EXECUTE FUNCTION "public"."reference_is_immutable"();
