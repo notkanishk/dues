@@ -777,12 +777,11 @@ describe("Order commands", () => {
     });
 
     it.each([
-      ["receiving it twice", received(), { ok: false, reason: "invalid_transition" }],
-      ["a date that does not exist", received("r-1", "2026-11-31"), { ok: false, reason: "validation", field: "refundedOn" }],
-      ["a Refund outside the Actor's slice", received("r-9"), { ok: false, reason: "not_found" }],
-    ])("refuses %s", (name, command, rejection) => {
-      const slice = name === "receiving it twice" ? run(cancelled(), received()).slice : cancelled();
-      expect(run(slice, command).decision).toEqual(rejection);
+      ["receiving it twice", () => run(cancelled(), received()).slice, received(), { ok: false, reason: "invalid_transition" }],
+      ["a date that does not exist", cancelled, received("r-1", "2026-11-31"), { ok: false, reason: "validation", field: "refundedOn" }],
+      ["a Refund outside the Actor's slice", cancelled, received("r-9"), { ok: false, reason: "not_found" }],
+    ])("refuses %s", (_, slice, command, rejection) => {
+      expect(run(slice(), command).decision).toEqual(rejection);
     });
   });
 });

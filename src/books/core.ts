@@ -140,37 +140,33 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (!isPayment(command.amount)) return rejectField("amount");
       if (!isDate(command.paidOn)) return rejectField("paidOn");
       const [expenseId, billId] = slice.newIds as [string, string];
-      return {
-        ok: true,
-        jobs: [],
-        events: [
-          {
-            type: "ExpenseLogged",
-            expenseId,
-            claimantId: actor.claimantId, // never from input (design D6)
-            kind: command.kind,
-            amount: command.amount,
-            paidOn: command.paidOn,
-            payee: command.payee ?? null,
-            vendor: command.vendor ?? null,
-            payback: command.payback ?? false,
-            orderRef: command.orderRef ?? null,
-            whatFor: command.whatFor ?? null,
-            upiRef: command.upiRef ?? null,
-            notes: command.notes ?? null,
-            source: "manual",
-          },
-          // W2: an Order waits for its goods. W3: a shop or service Bill is Fulfilled at payment.
-          {
-            type: "BillAdded",
-            billId,
-            expenseId,
-            kind: null,
-            amount: command.amount,
-            fulfilledOn: command.kind === "online" ? null : command.paidOn,
-          },
-        ],
-      };
+      return ok([
+        {
+          type: "ExpenseLogged",
+          expenseId,
+          claimantId: actor.claimantId, // never from input (design D6)
+          kind: command.kind,
+          amount: command.amount,
+          paidOn: command.paidOn,
+          payee: command.payee ?? null,
+          vendor: command.vendor ?? null,
+          payback: command.payback ?? false,
+          orderRef: command.orderRef ?? null,
+          whatFor: command.whatFor ?? null,
+          upiRef: command.upiRef ?? null,
+          notes: command.notes ?? null,
+          source: "manual",
+        },
+        // W2: an Order waits for its goods. W3: a shop or service Bill is Fulfilled at payment.
+        {
+          type: "BillAdded",
+          billId,
+          expenseId,
+          kind: null,
+          amount: command.amount,
+          fulfilledOn: command.kind === "online" ? null : command.paidOn,
+        },
+      ]);
     }
     case "SplitExpectedBill": {
       const found = expectedBill(slice, command.billId);
