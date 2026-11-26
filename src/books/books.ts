@@ -125,8 +125,20 @@ async function expenseOf(tx: Tx, table: typeof bills | typeof refunds, id: strin
 }
 
 type Entity = "expense" | "bill" | "refund";
-const entityOf = (event: Event): [Entity, string] =>
-  event.type === "ExpenseLogged" ? ["expense", event.expenseId] : "refundId" in event ? ["refund", event.refundId] : ["bill", event.billId];
+function entityOf(event: Event): [Entity, string] {
+  switch (event.type) {
+    case "ExpenseLogged":
+      return ["expense", event.expenseId];
+    case "BillAdded":
+    case "ExpectedBillReduced":
+    case "BillRemovedFromClaim":
+    case "BillCancelled":
+      return ["bill", event.billId];
+    case "RefundExpected":
+    case "RefundReceived":
+      return ["refund", event.refundId];
+  }
+}
 
 function stateOf(slice: Slice, entity: Entity, id: string): ExpenseStatus | BillStatus | RefundStatus | null {
   if (entity === "expense") {
