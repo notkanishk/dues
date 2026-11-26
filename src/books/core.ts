@@ -390,8 +390,10 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
 const ok = (events: Event[], jobs: Job[] = []): Decision => ({ ok: true, events, jobs });
 
 /** A Bill on a submitted Claim locks it and its Expense's fields (design §1). Recalled to draft, it no longer does. */
-// ponytail: reimbursed counts as submitted; the spec names only submitted.
-const onSubmittedClaim = (expense: ExpenseState) => expense.bills.some((b) => b.claim === "submitted" || b.claim === "reimbursed");
+// ponytail: reimbursed counts as submitted; the spec names only submitted. Returning after submission (Owed to
+// university) arrives with Claims.
+const locked = (bill: BillState) => bill.claim === "submitted" || bill.claim === "reimbursed";
+const onSubmittedClaim = (expense: ExpenseState) => expense.bills.some(locked);
 
 /** { [field]: { from, to } } when the command gives a value that differs from the current one, else nothing. */
 function changed<K extends string, T>(field: K, from: T, to: T | undefined): { [P in K]?: Change<T> } {
@@ -409,8 +411,7 @@ function findBill(slice: Slice, billId: string) {
     const bill = expense.bills.find((b) => b.id === billId);
     if (!bill) continue;
     if (expense.draft || expense.closedReason) return reject("invalid_transition");
-    // ponytail: reimbursed counts as submitted; returning after submission (Owed to university) arrives with Claims.
-    if (bill.claim === "submitted" || bill.claim === "reimbursed") return reject("locked");
+    if (locked(bill)) return reject("locked");
     return { ok: true as const, expense, bill };
   }
   return reject("not_found");
