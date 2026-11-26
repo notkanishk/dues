@@ -793,3 +793,57 @@ export function deriveExpense(expense: ExpenseState): {
     open?.paise === 0 && bills.every((b) => b === "reimbursed" || b === "cancelled") && expense.refunds.every((r) => deriveRefund(r) !== "expected");
   return settled ? at("settled") : at("open", whyOpen(expense, open));
 }
+
+/**
+ * What Books shows on the Order page (W2.9) and which of its commands `decide` accepts now: the delivered Bills with
+ * Move and Detach, the Refunds with Refund received, "Still expected" with Item cancelled and No more invoices (a
+ * leftover under LEFTOVER_QUESTION_FROM is asked "Close the order?", whose yes is Not claiming), and a closed-out
+ * remainder with its Undo. Null when the Expense is not in the Actor's slice.
+ */
+export function orderPage(slice: Slice, expenseId: string, actor: Actor, now: Date) {
+  const expense = slice.expenses[expenseId];
+  if (!expense) return null;
+  // One validator: a command is offered only when decide would take it (a probe id stands in for new keys).
+  const accepts = (command: Command) => decide({ ...slice, newIds: ["probe"] }, command, actor, now).ok;
+  const offered = <T extends Command["type"]>(commands: [T, Command][]) => commands.filter(([, c]) => accepts(c)).map(([type]) => type);
+  const today = now.toISOString().slice(0, 10);
+  const expected = expense.bills.find(isExpected);
+  const closed = expense.bills.find((b) => b.closedAs);
+  const small = !!expected && expected.amount!.paise < LEFTOVER_QUESTION_FROM.paise;
+  return {
+    // An Order's expected remainder is "Still expected", not a Bill; a closed-out one is shown with its choice.
+    bills: expense.bills
+      .filter((b) => b.fulfilledOn)
+      .map((b) => ({
+        id: b.id,
+        status: deriveBill(b),
+        // Move needs a target to check; the Bill's own side is Detach's, so both are offered or neither.
+        commands: accepts({ type: "DetachBill", billId: b.id }) ? (["MoveBill", "DetachBill"] as const) : [],
+      })),
+    refunds: expense.refunds.map((r) => ({
+      id: r.id,
+      status: deriveRefund(r),
+      commands: offered([["MarkRefundReceived", { type: "MarkRefundReceived", refundId: r.id, refundedOn: today }]]),
+    })),
+    stillExpected: expected
+      ? {
+          billId: expected.id,
+          amount: expected.amount!,
+          ask: small ? ("close_order" as const) : ("three_way" as const),
+          choices: small ? (["not_claiming"] as CloseChoice[]) : (CLOSE_CHOICES as CloseChoice[]),
+          commands: offered([
+            ["ExpectRefund", { type: "ExpectRefund", billId: expected.id, amount: { paise: 1, currency: "INR" } }],
+            ["CloseOrder", { type: "CloseOrder", billId: expected.id, choice: "not_claiming" }],
+          ]),
+        }
+      : null,
+    closedOut: closed
+      ? {
+          billId: closed.id,
+          choice: closed.closedAs!,
+          amount: closed.amount!,
+          commands: offered([["UndoCloseOrder", { type: "UndoCloseOrder", billId: closed.id }]]),
+        }
+      : null,
+  };
+}
