@@ -432,6 +432,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
             differs: b.differs,
             fulfilledOn: b.fulfilledOn,
             cancelReason: b.cancelReason,
+            closedAs: b.closedAs, // set on a remainder "No more invoices" closed out, so it is not read as Item cancelled
             status: deriveBill(b),
           })),
           refunds: refundStates.map((r) => ({
@@ -465,6 +466,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
         order: {
           // ponytail: Payment method and proof join with those entities (tasks 2.21, Phase 2).
           payment: {
+            id: row.id,
             reference: row.reference,
             amount: state.amount,
             paidOn: row.paidOn,
@@ -499,8 +501,9 @@ export function createBooks({ db, now, enqueue }: Deps) {
             const r = refundOf(refundId);
             return { id: r.id, reference: r.reference, amount: r.amount, reason: r.reason, refundedOn: r.refundedOn, status, commands };
           }),
-          stillExpected: page.stillExpected,
-          closedOut: page.closedOut,
+          // Every id goes with its Reference (ADR 0005).
+          stillExpected: page.stillExpected && { ...page.stillExpected, reference: billOf(page.stillExpected.billId).reference },
+          closedOut: page.closedOut && { ...page.closedOut, reference: billOf(page.closedOut.billId).reference },
         },
       };
     },
