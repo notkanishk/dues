@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, count, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
-import { auditLog, expenses } from "@/src/db/schema";
+import { auditLog, expenses, refunds } from "@/src/db/schema";
 import { createBooks, lockClaimant } from "./books";
 import type { Actor, LogExpense } from "./core";
 
@@ -256,5 +256,22 @@ describe("Concurrency (design D5)", () => {
     expect(
       (await db.select({ n: count() }).from(auditLog).where(and(eq(auditLog.actorId, mickey.claimantId), eq(auditLog.entity, "expense"))))[0]!.n,
     ).toBe(10);
+  });
+});
+
+describe("Derivation on read", () => {
+  it("feeds Refunds from the refunds table: expected, then received", async () => {
+    const mickey = claimant();
+    const id = expenseIdOf(await books.execute(mickey, logExpense("shop", 100000)));
+    // No Refund command yet (task 2.15): the row goes in directly.
+    const [refund] = await db.insert(refunds).values({ expenseId: id, amountPaise: 30000, reason: "cancelled" }).returning();
+
+    expect(await books.expense(mickey, id)).toMatchObject({
+      ok: true,
+      expense: { status: "open", openAmount: rupees(-30000), reason: { code: "refund_owed" }, bills: [{ status: "expected" }] },
+    });
+
+    await db.update(refunds).set({ refundedOn: "2026-11-21" }).where(eq(refunds.id, refund!.id));
+    expect(await books.expense(mickey, id)).toMatchObject({ ok: true, expense: { reason: { code: "bill_missing" } } });
   });
 });

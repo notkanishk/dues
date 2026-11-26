@@ -212,19 +212,20 @@ export function createBooks({ db, now, enqueue }: Deps) {
       }
     },
 
-    /** One Expense with its Bills; status, Open amount and Bill status derived on read (design D3). */
+    /** One Expense with its Bills; status, Open amount, why it is open and Bill status derived on read (design D3). */
     async expense(actor: Actor, id: string) {
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
       const { row, bills: billStates, state } = found;
-      const { status, openAmount } = deriveExpense(state);
+      const derived = deriveExpense(state);
       return {
         ok: true as const,
         expense: {
           id: row.id,
           reference: row.reference,
-          status,
-          openAmount,
+          status: derived.status,
+          openAmount: derived.openAmount,
+          reason: derived.reason,
           amount: state.amount,
           kind: row.kind,
           paidOn: row.paidOn,
@@ -236,13 +237,13 @@ export function createBooks({ db, now, enqueue }: Deps) {
           upiRef: row.upiRef,
           notes: row.notes,
           source: row.source,
-          bills: billStates.map((b) => ({
+          bills: billStates.map((b, i) => ({
             id: b.id,
             reference: b.reference,
             kind: b.kind,
             amount: b.amount,
             fulfilledOn: b.fulfilledOn,
-            status: deriveBill(b),
+            status: derived.bills[i]!,
           })),
         },
       };
