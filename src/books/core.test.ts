@@ -552,7 +552,7 @@ describe("Order commands", () => {
         jobs: [],
         events: [
           { type: "ExpectedBillReduced", billId: "b-1", expenseId: "e-1", amount: rupees(130000) },
-          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", amount: rupees(50000), reason: "cancelled" },
+          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", billId: "b-1", amount: rupees(50000), reason: "cancelled" },
         ],
       });
       expect(amounts(slice)).toEqual([130000, 120000]);
@@ -567,7 +567,7 @@ describe("Order commands", () => {
         ok: true,
         events: [
           { type: "BillCancelled", billId: "b-1", expenseId: "e-1", reason: "cancelled" },
-          { type: "RefundExpected", refundId: "r-2", amount: rupees(130000), reason: "cancelled" },
+          { type: "RefundExpected", refundId: "r-2", billId: "b-1", amount: rupees(130000), reason: "cancelled" },
         ],
       });
       expect(derived(slice)).toMatchObject({ openAmount: rupees(0), bills: ["cancelled", "expected"] });
@@ -597,7 +597,7 @@ describe("Order commands", () => {
         jobs: [],
         events: [
           { type: "BillCancelled", billId: "b-1", expenseId: "e-1", reason: "cancelled" },
-          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", amount: rupees(80000), reason: "cancelled" },
+          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", billId: "b-1", amount: rupees(80000), reason: "cancelled" },
         ],
       });
       expect(derived(slice)).toEqual({ status: "open", openAmount: rupees(0), reason: { code: "refund_owed" }, bills: ["cancelled"] });
@@ -647,7 +647,7 @@ describe("Order commands", () => {
         jobs: [],
         events: [
           { type: "BillCancelled", billId: "b-1", expenseId: "e-1", reason: "returned" },
-          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", amount: rupees(60000), reason: "returned" },
+          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", billId: "b-1", amount: rupees(60000), reason: "returned" },
         ],
       });
       expect(derived(slice)).toEqual({ status: "open", openAmount: rupees(0), reason: { code: "refund_owed" }, bills: ["cancelled"] });
@@ -692,7 +692,7 @@ describe("Order commands", () => {
         events: [
           { type: "BillRemovedFromClaim", billId: "b-1", expenseId: "e-1" },
           { type: "BillCancelled", billId: "b-1", expenseId: "e-1", reason: "returned" },
-          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", amount: rupees(60000), reason: "returned" },
+          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", billId: "b-1", amount: rupees(60000), reason: "returned" },
         ],
       });
       expect(after.expenses["e-1"]!.bills[0]).toMatchObject({ claim: null, cancelled: true });

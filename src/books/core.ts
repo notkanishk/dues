@@ -76,6 +76,7 @@ export type Event =
       readonly type: "RefundExpected";
       readonly refundId: string;
       readonly expenseId: string;
+      readonly billId: string; // the Bill it came from
       readonly amount: Money;
       readonly reason: RefundReason;
     }
@@ -196,7 +197,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
         paise === remainder // everything left is cancelled: the expected Bill goes, its Refund covers the remainder
           ? { type: "BillCancelled", billId: bill.id, expenseId: expense.id, reason: "cancelled" }
           : { type: "ExpectedBillReduced", billId: bill.id, expenseId: expense.id, amount: inr(remainder - paise) },
-        { type: "RefundExpected", refundId, expenseId: expense.id, amount: inr(paise), reason: "cancelled" },
+        { type: "RefundExpected", refundId, expenseId: expense.id, billId: bill.id, amount: inr(paise), reason: "cancelled" },
       ]);
     }
     case "ReturnBill": {
@@ -209,7 +210,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       return ok([
         ...(bill.claim === "draft" ? [{ type: "BillRemovedFromClaim", billId: bill.id, expenseId: expense.id } as const] : []),
         { type: "BillCancelled", billId: bill.id, expenseId: expense.id, reason: "returned" },
-        { type: "RefundExpected", refundId, expenseId: expense.id, amount: bill.amount, reason: "returned" },
+        { type: "RefundExpected", refundId, expenseId: expense.id, billId: bill.id, amount: bill.amount, reason: "returned" },
       ]);
     }
     case "MarkRefundReceived": {

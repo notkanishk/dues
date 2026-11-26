@@ -58,11 +58,12 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   const refundRows = await q.select().from(refunds).where(inArray(refunds.expenseId, found)).orderBy(refunds.id);
   return rows.map((row) => {
     // Each Bill carries its database-issued reference with its state, so reads never pair two arrays by position.
-    const ownBills: (BillState & { reference: string })[] = billRows
+    const ownBills: (BillState & { reference: string; cancelReason: string | null })[] = billRows
       .filter((b) => b.expenseId === row.id)
       .map((b) => ({
         id: b.id,
         reference: b.reference,
+        cancelReason: b.cancelReason,
         kind: b.kind as BillKind | null,
         amount: money(b.amountPaise, b.currency),
         fulfilledOn: b.fulfilledOn,
@@ -171,12 +172,13 @@ async function write(tx: Tx, event: Event, at: Date) {
     case "BillRemovedFromClaim":
       return; // ponytail: the loader never loads a Claim yet, so this cannot happen; deletes the Claim line once Claims land
     case "BillCancelled":
-      await tx.update(bills).set({ cancelledAt: at }).where(eq(bills.id, event.billId));
+      await tx.update(bills).set({ cancelledAt: at, cancelReason: event.reason }).where(eq(bills.id, event.billId));
       return;
     case "RefundExpected":
       await tx.insert(refunds).values({
         id: event.refundId,
         expenseId: event.expenseId,
+        billId: event.billId,
         amountPaise: event.amount.paise,
         currency: event.amount.currency,
         reason: event.reason,
@@ -287,6 +289,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
             kind: b.kind,
             amount: b.amount,
             fulfilledOn: b.fulfilledOn,
+            cancelReason: b.cancelReason,
             status: deriveBill(b),
           })),
           refunds: refundRows.map((r) => ({
@@ -294,6 +297,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
             reference: r.reference,
             amount: money(r.amountPaise, r.currency)!,
             reason: r.reason as RefundReason,
+            billId: r.billId,
             refundedOn: r.refundedOn,
             status: r.refundedOn === null ? ("expected" as const) : ("received" as const),
           })),

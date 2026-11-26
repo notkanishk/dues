@@ -443,6 +443,25 @@ describe("Order flow", () => {
     ]);
   });
 
+  it("stores why each Bill was cancelled and which Bill each Refund came from: a return is told apart from a cancel", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId, deliveredBillId } = await delivered(mickey);
+    ok(await books.execute(mickey, { type: "ExpectRefund", billId: expectedBillId, amount: rupees(50000) }));
+    ok(await books.execute(mickey, { type: "ReturnBill", billId: deliveredBillId }));
+    ok(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId }));
+
+    const expense = await read(mickey, expenseId);
+    expect(expense.bills.map((b) => [b.id, b.cancelReason])).toEqual([
+      [expectedBillId, "cancelled"],
+      [deliveredBillId, "returned"],
+    ]);
+    expect(expense.refunds.map((r) => [r.amount.paise, r.reason, r.billId])).toEqual([
+      [50000, "cancelled", expectedBillId],
+      [120000, "returned", deliveredBillId],
+      [130000, "cancelled", expectedBillId],
+    ]);
+  });
+
   it("refuses receiving a Refund twice, or another Claimant's, and keeps the first date", async () => {
     const mickey = claimant();
     const { expenseId, expectedBillId } = await order(mickey, 80000);

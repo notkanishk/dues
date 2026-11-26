@@ -78,11 +78,14 @@ export const bills = pgTable(
     paperlessId: integer("paperless_id"),
     remarks: text("remarks"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    // Why it was cancelled: returned is for good (expense-tracking, Return before submission); cancelled may be undone (2.13d).
+    cancelReason: text("cancel_reason"),
     createdAt: createdAt(),
   },
   (t) => [
     check("bills_reference_format", referenceFormat("B")),
     check("bills_kind", sql`${t.kind} in ('invoice', 'informal', 'payment_proof', 'no_bill')`),
+    check("bills_cancel_reason", sql`${t.cancelReason} in ('cancelled', 'returned')`),
   ],
 );
 
@@ -95,6 +98,7 @@ export const refunds = pgTable(
     id: key(),
     reference: reference(),
     expenseId: uuid("expense_id").notNull().references(() => expenses.id),
+    billId: uuid("bill_id").references(() => bills.id), // the Bill it came from; null for one no command made
     amountPaise: amountPaise().notNull(),
     currency: currency(),
     reason: text("reason").notNull(),
