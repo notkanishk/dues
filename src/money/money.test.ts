@@ -89,3 +89,24 @@ describe("Paise kept as printed; only the Claim total is rounded", () => {
     });
   });
 });
+
+// claims spec, "Total rounded up": the scenarios' own figures, typed by hand.
+describe("Total rounded up", () => {
+  it.each([
+    ["₹2,360.25", "₹2,361.00"], // Round up
+    ["₹2,360.00", "₹2,360.00"], // Already whole
+    ["₹2,360.01", "₹2,361.00"], // One paisa over
+    ["₹410.40", "₹411.00"], // Every Fund
+  ])("Claim lines summing to %s total %s", (lines, total) => {
+    expect(formatRupees(claimTotal([parseRupees(lines)!]))).toBe(total);
+  });
+
+  it("Lines unchanged: each Claim line keeps its exact paise", () => {
+    const lines = [parseRupees("₹2,000.20")!, parseRupees("₹360.05")!];
+    claimTotal(lines);
+    expect(lines).toEqual([
+      { paise: 200020, currency: "INR" },
+      { paise: 36005, currency: "INR" },
+    ]);
+  });
+});
