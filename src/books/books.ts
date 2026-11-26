@@ -42,6 +42,12 @@ export const lockClaimant = (tx: Tx, claimantId: string) =>
   tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`claimant:${claimantId}`}, 0))`);
 
 const notFound: Rejected = { ok: false, reason: "not_found" };
+const forbidden: Rejected = { ok: false, reason: "forbidden" };
+/**
+ * The role gate (identity-access): `claimant` opens the Actor's own books, `admin` everyone's (D6). Anything else is
+ * forbidden from every command and query before a row is read, so not even existence leaks.
+ */
+const mayEnter = (actor: Actor) => actor.roles.includes("claimant") || actor.roles.includes("admin");
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const money = (paise: number | null, currency: string): Money | null => (paise === null ? null : { paise, currency: currency as "INR" });
@@ -387,6 +393,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
   return {
     /** Every write. Typed rejections; throws only when the database fails, and then nothing is written. */
     async execute(actor: Actor, command: Command, opts: { idempotencyKey?: string } = {}): Promise<Result> {
+      if (!mayEnter(actor)) return forbidden;
       try {
         return await attempt(actor, command, opts.idempotencyKey);
       } catch (e) {
@@ -398,6 +405,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
 
     /** One Expense with its Bills; status, Open amount, why it is open and Bill status derived on read (design D3). */
     async expense(actor: Actor, id: string) {
+      if (!mayEnter(actor)) return forbidden;
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
       const { row, bills: billStates, refunds: refundStates, state } = found;
@@ -453,6 +461,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
      * now, "Still expected" with the leftover question, and a closed-out remainder with its Undo.
      */
     async order(actor: Actor, id: string) {
+      if (!mayEnter(actor)) return forbidden;
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
       const { row, bills: billStates, refunds: refundStates, state } = found;
