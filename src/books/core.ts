@@ -1,4 +1,5 @@
 // Books' functional core (design §1): decide and apply are pure; the shell (books.ts) does the I/O.
+import { isDeepStrictEqual } from "node:util";
 import { type Money, minus, sum, zero } from "@/src/money/money";
 
 // ponytail: the Actor lives here until Claimants (task 2.7) produces it; then it moves there.
@@ -41,7 +42,20 @@ export type CancelBill = { readonly type: "CancelBill"; readonly billId: string 
 export type ReturnBill = { readonly type: "ReturnBill"; readonly billId: string };
 /** The money is back (W2.4): the expected Refund is received on its refunded-on date. */
 export type MarkRefundReceived = { readonly type: "MarkRefundReceived"; readonly refundId: string; readonly refundedOn: string };
-export type Command = LogExpense | SplitExpectedBill | ExpectRefund | CancelBill | ReturnBill | MarkRefundReceived;
+/**
+ * Corrects an Expense's amount, payee or paid-on date (expense-tracking, Expense corrections): only the fields given
+ * change. Payment method arrives with that entity (task 2.21).
+ */
+export type CorrectExpense = {
+  readonly type: "CorrectExpense";
+  readonly expenseId: string;
+  readonly amount?: Money;
+  readonly payee?: string | null;
+  readonly paidOn?: string;
+};
+export type Command = LogExpense | SplitExpectedBill | ExpectRefund | CancelBill | ReturnBill | MarkRefundReceived | CorrectExpense;
+/** A corrected field's value before and after, for the audit log. */
+export type Change<T> = { readonly from: T; readonly to: T };
 export type RefundReason = "cancelled" | "returned" | "partial";
 
 export type Event =
@@ -80,7 +94,16 @@ export type Event =
       readonly amount: Money;
       readonly reason: RefundReason;
     }
-  | { readonly type: "RefundReceived"; readonly refundId: string; readonly expenseId: string; readonly refundedOn: string };
+  | { readonly type: "RefundReceived"; readonly refundId: string; readonly expenseId: string; readonly refundedOn: string }
+  | {
+      readonly type: "ExpenseCorrected";
+      readonly expenseId: string;
+      readonly changes: {
+        readonly amount?: Change<Money | null>;
+        readonly payee?: Change<string | null>;
+        readonly paidOn?: Change<string | null>;
+      };
+    };
 
 // No command enqueues a follow-up yet; the shell already writes whatever decide returns.
 export type Job = { readonly name: string; readonly data: unknown };
@@ -116,6 +139,8 @@ export type ExpenseState = {
   draft: boolean;
   closedReason: string | null;
   amount: Money | null;
+  payee: string | null;
+  paidOn: string | null;
   bills: BillState[];
   refunds: RefundState[];
   /** What "Not claiming" closed as written off (task 2.13d). Zero until that fact is stored. */
@@ -209,6 +234,21 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
         { type: "RefundExpected", refundId, expenseId: expense.id, billId: bill.id, amount: bill.amount, reason: "returned" },
       ]);
     }
+    case "CorrectExpense": {
+      const expense = slice.expenses[command.expenseId];
+      if (!expense) return reject("not_found");
+      if (expense.closedReason) return reject("invalid_transition");
+      if (onSubmittedClaim(expense)) return reject("locked");
+      if (command.amount !== undefined && !isPayment(command.amount)) return rejectField("amount");
+      if (command.paidOn !== undefined && !isDate(command.paidOn)) return rejectField("paidOn");
+      const changes = {
+        ...changed("amount", expense.amount, command.amount),
+        ...changed("payee", expense.payee, command.payee),
+        ...changed("paidOn", expense.paidOn, command.paidOn),
+      };
+      // Keeping a value changes nothing and writes nothing.
+      return ok(Object.keys(changes).length ? [{ type: "ExpenseCorrected", expenseId: expense.id, changes }] : []);
+    }
     case "MarkRefundReceived": {
       // Not refused on a closed Expense: closing may leave a Refund still expected (FUNCTIONAL §3.1).
       const expense = Object.values(slice.expenses).find((e) => e.refunds.some((r) => r.id === command.refundId));
@@ -222,6 +262,16 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
 }
 
 const ok = (events: Event[]): Decision => ({ ok: true, events, jobs: [] });
+
+/** A Bill on a submitted Claim locks it and its Expense's fields (design §1). Recalled to draft, it no longer does. */
+// ponytail: reimbursed counts as submitted; the spec names only submitted.
+const onSubmittedClaim = (expense: ExpenseState) => expense.bills.some((b) => b.claim === "submitted" || b.claim === "reimbursed");
+
+/** { [field]: { from, to } } when the command gives a value that differs from the current one, else nothing. */
+function changed<K extends string, T>(field: K, from: T, to: T | undefined): { [P in K]?: Change<T> } {
+  if (to === undefined || isDeepStrictEqual(from, to)) return {};
+  return { [field]: { from, to } } as { [P in K]?: Change<T> };
+}
 const reject = (reason: Rejected["reason"]): Rejected => ({ ok: false, reason });
 
 /**
@@ -263,6 +313,8 @@ export function apply(slice: Slice, event: Event): Slice {
             draft: false,
             closedReason: null,
             amount: event.amount,
+            payee: event.payee,
+            paidOn: event.paidOn,
             bills: [],
             refunds: [],
             writtenOff: zero,
@@ -297,6 +349,11 @@ export function apply(slice: Slice, event: Event): Slice {
       const expense = slice.expenses[event.expenseId]!;
       const refunds = expense.refunds.map((r) => (r.id === event.refundId ? { ...r, received: true } : r));
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, refunds } } };
+    }
+    case "ExpenseCorrected": {
+      const expense = slice.expenses[event.expenseId]!;
+      const to = Object.fromEntries(Object.entries(event.changes).map(([field, change]) => [field, change.to]));
+      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, ...to } } };
     }
   }
 }

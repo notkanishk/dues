@@ -96,6 +96,8 @@ describe("apply and derivation", () => {
                 draft: false,
                 closedReason: null,
                 amount: rupees(paise),
+                payee: null,
+                paidOn,
                 refunds: [],
                 writtenOff: rupees(0),
                 bills: [
@@ -130,6 +132,8 @@ describe("apply and derivation", () => {
     draft: false,
     closedReason: null,
     amount: rupees(paise),
+    payee: null,
+    paidOn: "2026-11-19",
     bills: bills.map((b, i) => ({
       id: `b-${i}`,
       kind: "invoice",
@@ -193,6 +197,8 @@ describe("why an Expense is open", () => {
     draft: false,
     closedReason: null,
     amount: rupees(paise),
+    payee: null,
+    paidOn: "2026-11-19",
     bills: bills.map(bill),
     refunds: [],
     writtenOff: rupees(0),
@@ -390,6 +396,8 @@ describe("Open amount and settled invariants, for any generated slice", () => {
         draft: pick([false, false, false, true]),
         closedReason: pick([null, null, null, "personal"]),
         amount,
+        payee: null,
+        paidOn: "2026-11-19",
         bills,
         refunds,
         writtenOff: rupees(pick([0, paise(), Math.max(left, 0), Math.max(left, 0)])),
@@ -489,23 +497,29 @@ describe("Open amount and settled invariants, for any generated slice", () => {
   });
 });
 
+// Shared by the command tests below: Order slices built by decide and apply, never by hand.
+// An online Order of the given Payment: Expense e-1 with its expected Bill b-1.
+const order = (paise: number): Slice => {
+  const logged = decide(fresh, logExpense("online", paise), mickey, now);
+  if (!logged.ok) throw new Error("expected Ok");
+  return logged.events.reduce(apply, fresh);
+};
+// Runs one command with the given fresh ids; returns the decision and the folded slice.
+const run = (slice: Slice, command: Command, newIds: string[] = []) => {
+  const withIds = { ...slice, newIds };
+  const decision = decide(withIds, command, mickey, now);
+  return { decision, slice: decision.ok ? decision.events.reduce(apply, withIds) : slice };
+};
+const derived = (slice: Slice) => deriveExpense(slice.expenses["e-1"]!);
+const amounts = (slice: Slice) => slice.expenses["e-1"]!.bills.map((b) => b.amount?.paise);
+
+// ₹3,000.00 Order after the first delivery: expected remainder ₹1,800.00 (b-1), Fulfilled ₹1,200.00 (b-2).
+const delivered = () =>
+  run(order(300000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(120000), fulfilledOn: "2026-11-21" }, ["b-2"]).slice;
+const refunds = (slice: Slice) => slice.expenses["e-1"]!.refunds;
+
 // Order flow (expense-tracking: Order splitting, Order cancellation and Refunds, Return before submission). Figures from the spec.
 describe("Order commands", () => {
-  // An online Order of the given Payment: Expense e-1 with its expected Bill b-1.
-  const order = (paise: number): Slice => {
-    const logged = decide(fresh, logExpense("online", paise), mickey, now);
-    if (!logged.ok) throw new Error("expected Ok");
-    return logged.events.reduce(apply, fresh);
-  };
-  // Runs one command with the given fresh ids; returns the decision and the folded slice.
-  const run = (slice: Slice, command: Command, newIds: string[] = []) => {
-    const withIds = { ...slice, newIds };
-    const decision = decide(withIds, command, mickey, now);
-    return { decision, slice: decision.ok ? decision.events.reduce(apply, withIds) : slice };
-  };
-  const derived = (slice: Slice) => deriveExpense(slice.expenses["e-1"]!);
-  const amounts = (slice: Slice) => slice.expenses["e-1"]!.bills.map((b) => b.amount?.paise);
-
   describe("SplitExpectedBill", () => {
     it("First delivery: an Invoice of ₹1,200.00 on a ₹3,000.00 Order → a Fulfilled Bill of ₹1,200.00, expected Bill ₹1,800.00", () => {
       const { decision, slice } = run(order(300000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(120000), fulfilledOn: "2026-11-21" }, ["b-2"]);
@@ -563,10 +577,6 @@ describe("Order commands", () => {
     expect(run(slice, command, ["x"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
   });
 
-  // ₹3,000.00 Order after the first delivery: expected remainder ₹1,800.00 (b-1), Fulfilled ₹1,200.00 (b-2).
-  const delivered = () =>
-    run(order(300000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(120000), fulfilledOn: "2026-11-21" }, ["b-2"]).slice;
-  const refunds = (slice: Slice) => slice.expenses["e-1"]!.refunds;
 
   describe("ExpectRefund (Item cancelled)", () => {
     it("Partial cancellation: ₹500.00 of the ₹1,800.00 remainder → remainder ₹1,300.00 and an expected Refund of ₹500.00", () => {
@@ -783,5 +793,81 @@ describe("Order commands", () => {
     ])("refuses %s", (_, slice, command, rejection) => {
       expect(run(slice(), command).decision).toEqual(rejection);
     });
+  });
+});
+
+// Expense corrections and their lock (expense-tracking). Figures from the spec.
+describe("CorrectExpense", () => {
+  const shop = (paise: number) => {
+    const logged = decide(fresh, logExpense("shop", paise), mickey, now);
+    if (!logged.ok) throw new Error("expected Ok");
+    return logged.events.reduce(apply, fresh);
+  };
+  const correct = (change: Partial<Omit<Extract<Command, { type: "CorrectExpense" }>, "type">>) =>
+    ({ type: "CorrectExpense", expenseId: "e-1", ...change }) as const;
+
+  it("Edit before submission: the Payment amount ₹1,000.00 corrected to ₹1,100.00 changes, with from and to", () => {
+    const { decision, slice } = run(shop(100000), correct({ amount: rupees(110000) }));
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [{ type: "ExpenseCorrected", expenseId: "e-1", changes: { amount: { from: rupees(100000), to: rupees(110000) } } }],
+    });
+    expect(slice.expenses["e-1"]!.amount).toEqual(rupees(110000));
+    // The Bill keeps its ₹1,000.00, so the ₹100.00 now shows as the Open amount.
+    expect(derived(slice).openAmount).toEqual(rupees(10000));
+  });
+
+  it("corrects payee and paid-on date together; a value kept as it was is left out of the event", () => {
+    const { decision, slice } = run(shop(100000), correct({ amount: rupees(100000), payee: "Courage Hardware", paidOn: "2026-11-18" }));
+    expect(decision).toMatchObject({
+      ok: true,
+      events: [
+        {
+          type: "ExpenseCorrected",
+          changes: { payee: { from: "Gizmo Parts Bazaar", to: "Courage Hardware" }, paidOn: { from: "2026-11-19", to: "2026-11-18" } },
+        },
+      ],
+    });
+    expect(decision.ok && Object.keys((decision.events[0] as { changes: object }).changes)).toEqual(["payee", "paidOn"]);
+    expect(slice.expenses["e-1"]).toMatchObject({ amount: rupees(100000), payee: "Courage Hardware", paidOn: "2026-11-18" });
+  });
+
+  it("keeping every value changes nothing: Ok with no events", () => {
+    expect(run(shop(100000), correct({ amount: rupees(100000), payee: "Gizmo Parts Bazaar" })).decision).toEqual({ ok: true, events: [], jobs: [] });
+  });
+
+  it("Edit blocked after submission: a Bill on a submitted Claim locks the amount, payee and date", () => {
+    const slice = shop(100000);
+    slice.expenses["e-1"]!.bills[0]!.claim = "submitted";
+    for (const change of [{ amount: rupees(110000) }, { payee: "Courage Hardware" }, { paidOn: "2026-11-18" }])
+      expect(run(slice, correct(change)).decision).toEqual({ ok: false, reason: "locked" });
+  });
+
+  it("Unlocked by recall: the only Claim holding its Bill back in draft, the amount is editable again", () => {
+    const slice = shop(100000);
+    slice.expenses["e-1"]!.bills[0]!.claim = "draft";
+    expect(run(slice, correct({ amount: rupees(110000) })).decision).toMatchObject({ ok: true, events: [{ type: "ExpenseCorrected" }] });
+  });
+
+  it("a draft Expense is corrected like an open one", () => {
+    const slice = shop(100000);
+    slice.expenses["e-1"]!.draft = true;
+    expect(run(slice, correct({ amount: rupees(110000) })).decision).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    ["a zero amount", correct({ amount: rupees(0) }), { ok: false, reason: "validation", field: "amount" }],
+    ["fractional paise", correct({ amount: rupees(10.5) }), { ok: false, reason: "validation", field: "amount" }],
+    ["a date that does not exist", correct({ paidOn: "2026-02-30" }), { ok: false, reason: "validation", field: "paidOn" }],
+    ["an Expense outside the Actor's slice", { ...correct({ amount: rupees(100) }), expenseId: "e-9" }, { ok: false, reason: "not_found" }],
+  ])("refuses %s", (_, command, rejection) => {
+    expect(run(shop(100000), command).decision).toEqual(rejection);
+  });
+
+  it("refuses a closed Expense", () => {
+    const slice = shop(100000);
+    slice.expenses["e-1"]!.closedReason = "personal";
+    expect(run(slice, correct({ amount: rupees(110000) })).decision).toEqual({ ok: false, reason: "invalid_transition" });
   });
 });

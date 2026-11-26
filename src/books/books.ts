@@ -89,6 +89,8 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       draft: row.draft,
       closedReason: row.closedReason,
       amount: money(row.amountPaise, row.currency),
+      payee: row.payee,
+      paidOn: row.paidOn,
       bills: ownBills,
       refunds: ownRefunds,
       writtenOff: zero, // ponytail: nothing is written off until task 2.13d stores it
@@ -110,6 +112,8 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
         return [1, await expenseOf(tx, bills, command.billId)];
       case "MarkRefundReceived":
         return [0, await expenseOf(tx, refunds, command.refundId)];
+      case "CorrectExpense":
+        return [0, [command.expenseId]];
     }
   })();
   // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
@@ -128,6 +132,7 @@ type Entity = "expense" | "bill" | "refund";
 function entityOf(event: Event): [Entity, string] {
   switch (event.type) {
     case "ExpenseLogged":
+    case "ExpenseCorrected":
       return ["expense", event.expenseId];
     case "BillAdded":
     case "ExpectedBillReduced":
@@ -211,6 +216,18 @@ async function write(tx: Tx, event: Event, at: Date) {
     case "RefundReceived":
       await tx.update(refunds).set({ refundedOn: event.refundedOn }).where(eq(refunds.id, event.refundId));
       return;
+    case "ExpenseCorrected": {
+      const { amount, payee, paidOn } = event.changes;
+      await tx
+        .update(expenses)
+        .set({
+          ...(amount && { amountPaise: amount.to?.paise ?? null }),
+          ...(payee && { payee: payee.to }),
+          ...(paidOn && { paidOn: paidOn.to }),
+        })
+        .where(eq(expenses.id, event.expenseId));
+      return;
+    }
   }
 }
 
@@ -259,7 +276,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
           idempotencyKey: i === 0 ? (key ?? null) : null,
         };
       });
-      await tx.insert(auditLog).values(entries);
+      if (entries.length) await tx.insert(auditLog).values(entries); // a correction that keeps every value writes nothing
       for (const event of decision.events) await write(tx, event, at);
       for (const job of decision.jobs) await enqueue(tx, job);
 
