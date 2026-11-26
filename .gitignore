@@ -31,3 +31,8 @@ test-results/
 .impeccable/config.local.json
 .impeccable/cache/
 .impeccable/review/
+
+# App build output
+dist/
+*.tsbuildinfo
+next-env.d.ts
