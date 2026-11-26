@@ -189,6 +189,8 @@ export type OpenReason =
 
 export function deriveBill(bill: BillState): BillStatus {
   if (bill.cancelled) return "cancelled";
+  if (bill.claim === "reimbursed") return "reimbursed";
+  if (bill.claim === "submitted") return "claimed";
   if (bill.fulfilledOn && (bill.paperlessId !== null || bill.kind === "no_bill")) return "ready";
   return "expected";
 }
@@ -211,20 +213,24 @@ function whyOpen(expense: ExpenseState, open: Money | null): OpenReason | null {
   if (live.some((b) => b.paperlessId === null && b.kind !== "no_bill")) return { code: "bill_missing" };
   // The signed Open amount: positive when Bills, Refunds and written off fall short of the Payment.
   if (open && open.paise !== 0) return { code: "mismatch", amount: open };
+  if (live.some((b) => b.claim === "submitted")) return { code: "in_claim" };
+  // ponytail: covered but nothing claimed yet (Bills ready to file) has no reason in the spec's list; null until it names one.
   return null;
 }
 
+/** The one derivation of an Expense: status, Open amount, why it is open, and each Bill's status in the Expense's order. */
 export function deriveExpense(expense: ExpenseState): {
   status: ExpenseStatus;
   openAmount: Money | null;
   reason: OpenReason | null;
+  bills: BillStatus[];
 } {
   const open = openAmount(expense);
-  if (expense.closedReason) return { status: "closed", openAmount: open, reason: null };
-  if (expense.draft) return { status: "draft", openAmount: open, reason: null };
+  const bills = expense.bills.map(deriveBill);
+  const at = (status: ExpenseStatus, reason: OpenReason | null = null) => ({ status, openAmount: open, reason, bills });
+  if (expense.closedReason) return at("closed");
+  if (expense.draft) return at("draft");
   const settled =
-    open?.paise === 0 &&
-    expense.bills.every((b) => ["reimbursed", "cancelled"].includes(deriveBill(b))) &&
-    expense.refunds.every((r) => r.received);
-  return settled ? { status: "settled", openAmount: open, reason: null } : { status: "open", openAmount: open, reason: whyOpen(expense, open) };
+    open?.paise === 0 && bills.every((b) => b === "reimbursed" || b === "cancelled") && expense.refunds.every((r) => r.received);
+  return settled ? at("settled") : at("open", whyOpen(expense, open));
 }

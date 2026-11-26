@@ -117,7 +117,7 @@ describe("apply and derivation", () => {
 
   it("folds a logged online Expense into an open Expense with an expected Bill", () => {
     const expense = afterLog("online");
-    expect(deriveExpense(expense)).toEqual({ status: "open", openAmount: rupees(0), reason: { code: "awaiting_goods" } });
+    expect(deriveExpense(expense)).toEqual({ status: "open", openAmount: rupees(0), reason: { code: "awaiting_goods" }, bills: ["expected"] });
     expect(expense.bills.map(deriveBill)).toEqual(["expected"]);
   });
 
@@ -256,5 +256,58 @@ describe("why an Expense is open", () => {
     const e = facts(100000, [{ paise: 73000 }], { writtenOff: rupees(27000) });
     expect(deriveExpense(e).openAmount).toEqual(rupees(0));
     expect(reasonOf(e)).not.toMatchObject({ code: "mismatch" });
+  });
+
+  it("In claim: all Bills covered and one claimed, not reimbursed", () => {
+    const e = facts(100000, [{ paise: 60000, claim: "submitted" }, { paise: 40000, claim: "reimbursed" }]);
+    expect(deriveExpense(e)).toEqual({
+      status: "open",
+      openAmount: rupees(0),
+      reason: { code: "in_claim" },
+      bills: ["claimed", "reimbursed"],
+    });
+  });
+
+  it("Not settled while a Bill is unreimbursed: Open amount zero, one Bill claimed → open", () => {
+    expect(deriveExpense(facts(100000, [{ paise: 100000, claim: "submitted" }])).status).toBe("open");
+  });
+
+  it("Settling: Open amount zero and every Bill reimbursed or cancelled → settled", () => {
+    const e = facts(100000, [{ paise: 70000, claim: "reimbursed" }, { paise: 30000, cancelled: true }], {
+      refunds: [{ amount: rupees(30000), received: true }],
+    });
+    expect(deriveExpense(e)).toEqual({ status: "settled", openAmount: rupees(0), reason: null, bills: ["reimbursed", "cancelled"] });
+  });
+
+  it("Expected Refund blocks settled: stays open with reason refund owed", () => {
+    const e = facts(100000, [{ paise: 70000, claim: "reimbursed" }, { paise: 30000, cancelled: true }], {
+      refunds: [{ amount: rupees(30000), received: false }],
+    });
+    expect(deriveExpense(e)).toMatchObject({ status: "open", reason: { code: "refund_owed" } });
+  });
+});
+
+describe("Bill lifecycle", () => {
+  const bill = (facts: Partial<BillState>): BillState => ({
+    id: "b-1",
+    kind: "invoice",
+    amount: rupees(80000),
+    fulfilledOn: null,
+    paperlessId: null,
+    cancelled: false,
+    claim: null,
+    ...facts,
+  });
+
+  it.each([
+    ["Fulfilled without document → expected", { fulfilledOn: "2026-11-19" }, "expected"],
+    ["Document without fulfilment → expected", { paperlessId: 7 }, "expected"],
+    ["Ready needs both", { fulfilledOn: "2026-11-19", paperlessId: 7 }, "ready"],
+    ["a no-bill Bill is ready without a document", { kind: "no_bill", fulfilledOn: "2026-11-19" }, "ready"],
+    ["Added to a submitted Claim → claimed", { fulfilledOn: "2026-11-19", paperlessId: 7, claim: "submitted" }, "claimed"],
+    ["Reimbursed", { fulfilledOn: "2026-11-19", paperlessId: 7, claim: "reimbursed" }, "reimbursed"],
+    ["Cancelled before fulfilment", { cancelled: true }, "cancelled"],
+  ] as const)("%s", (_, facts, status) => {
+    expect(deriveBill(bill(facts))).toBe(status);
   });
 });
