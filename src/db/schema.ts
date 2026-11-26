@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, char, check, date, integer, jsonb, pgSequence, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, char, check, date, foreignKey, index, integer, jsonb, pgSequence, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // Keys and References (ADR 0005). The key is a UUIDv7 from Postgres's own uuidv7(), so every
 // writer (app, psql, imports) gets the same time-ordered key without app code.
@@ -76,6 +76,8 @@ export const bills = pgTable(
     description: text("description"),
     fulfilledOn: date("fulfilled_on"),
     paperlessId: integer("paperless_id"),
+    // "differs from the document": edited after its document was attached, until the Claimant confirms it (expense-tracking).
+    differsFromDocument: boolean("differs_from_document").notNull().default(false),
     remarks: text("remarks"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     // Why it was cancelled: returned is for good (expense-tracking, Return before submission); cancelled may be undone (2.13d).
@@ -108,6 +110,27 @@ export const refunds = pgTable(
   (t) => [
     check("refunds_reference_format", referenceFormat("R")),
     check("refunds_reason", sql`${t.reason} in ('cancelled', 'returned', 'partial')`),
+    unique("refunds_id_expense_id_unique").on(t.id, t.expenseId), // target of write_offs' (refund_id, expense_id) key
+  ],
+);
+
+// Every written-off amount, one row each; Σ amount_paise per Expense is the "Σ written off" of the Open amount (FUNCTIONAL §1).
+// Today a row comes only from a Refund written off on closing (refund_id). The remainder "Not claiming" closes (task
+// 2.13d) joins the same way: a row with a bill_id column it adds, and undo removes the row.
+export const writeOffs = pgTable(
+  "write_offs",
+  {
+    id: key(),
+    expenseId: uuid("expense_id").notNull().references(() => expenses.id),
+    refundId: uuid("refund_id").unique(), // a Refund is written off once, and only on its own Expense (the key below)
+    amountPaise: amountPaise().notNull(),
+    currency: currency(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("write_offs_amount", sql`${t.amountPaise} > 0`),
+    foreignKey({ name: "write_offs_refund_expense_fk", columns: [t.refundId, t.expenseId], foreignColumns: [refunds.id, refunds.expenseId] }),
+    index("write_offs_expense_id_idx").on(t.expenseId),
   ],
 );
 

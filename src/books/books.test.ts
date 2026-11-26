@@ -276,24 +276,25 @@ describe("Derivation on read", () => {
   });
 });
 
+const ok = (result: Result): Extract<Result, { ok: true }> => {
+  if (!result.ok) throw new Error(`expected Ok, got ${JSON.stringify(result)}`);
+  return result;
+};
+// An online Order of the given Payment: its Expense id and expected Bill id.
+const order = async (actor: Actor, paise: number) => {
+  const result = ok(await books.execute(actor, logExpense("online", paise)));
+  const [logged, added] = result.events;
+  if (logged?.type !== "ExpenseLogged" || added?.type !== "BillAdded") throw new Error("expected an Order");
+  return { expenseId: logged.expenseId, expectedBillId: added.billId };
+};
+const read = async (actor: Actor, id: string) => {
+  const result = await books.expense(actor, id);
+  if (!result.ok) throw new Error("expected the Expense");
+  return result.expense;
+};
+
 // Order flow through execute (expense-tracking: Order splitting, cancellation and Refunds, Return before submission).
 describe("Order flow", () => {
-  const ok = (result: Result): Extract<Result, { ok: true }> => {
-    if (!result.ok) throw new Error(`expected Ok, got ${JSON.stringify(result)}`);
-    return result;
-  };
-  // An online Order of the given Payment: its Expense id and expected Bill id.
-  const order = async (actor: Actor, paise: number) => {
-    const result = ok(await books.execute(actor, logExpense("online", paise)));
-    const [logged, added] = result.events;
-    if (logged?.type !== "ExpenseLogged" || added?.type !== "BillAdded") throw new Error("expected an Order");
-    return { expenseId: logged.expenseId, expectedBillId: added.billId };
-  };
-  const read = async (actor: Actor, id: string) => {
-    const result = await books.expense(actor, id);
-    if (!result.ok) throw new Error("expected the Expense");
-    return result.expense;
-  };
   const billsOf = async (actor: Actor, id: string) => (await read(actor, id)).bills.map((b) => [b.amount?.paise, b.status]);
 
   it("First delivery: an Invoice of ₹1,200.00 on a ₹3,000.00 Order → a Fulfilled Bill of ₹1,200.00, expected Bill ₹1,800.00", async () => {
@@ -472,5 +473,235 @@ describe("Order flow", () => {
     ok(await books.execute(mickey, mark));
     expect(await books.execute(mickey, { ...mark, refundedOn: "2026-11-25" })).toEqual({ ok: false, reason: "invalid_transition" });
     expect((await read(mickey, expenseId)).refunds).toMatchObject([{ refundedOn: "2026-11-24", status: "received" }]);
+  });
+});
+
+// Expense corrections and their lock (expense-tracking), through execute. A submitted Claim is pinned on the pure core
+// until Claims exist: no command puts a Bill on one yet.
+describe("Expense corrections", () => {
+  it("Edit before submission: ₹1,000.00 corrected to ₹1,100.00 → the amount changes and an audit entry holds from and to", async () => {
+    const mickey = claimant();
+    const expenseId = expenseIdOf(await books.execute(mickey, logExpense("shop", 100000)));
+
+    ok(await books.execute(mickey, { type: "CorrectExpense", expenseId, amount: rupees(110000), payee: "Courage Hardware", paidOn: "2026-11-18" }));
+
+    expect(await read(mickey, expenseId)).toMatchObject({
+      amount: rupees(110000),
+      payee: "Courage Hardware",
+      paidOn: "2026-11-18",
+      openAmount: rupees(10000),
+      bills: [{ amount: rupees(100000) }],
+    });
+    const last = (await auditRowsOf(mickey)).at(-1)!;
+    expect(last).toMatchObject({ command: "CorrectExpense", event: "ExpenseCorrected", entity: "expense", entityId: expenseId, fromState: "open", toState: "open" });
+    expect(last.payload).toEqual({
+      type: "ExpenseCorrected",
+      expenseId,
+      changes: {
+        amount: { from: rupees(100000), to: rupees(110000) },
+        payee: { from: "Gizmo Parts Bazaar", to: "Courage Hardware" },
+        paidOn: { from: "2026-11-19", to: "2026-11-18" },
+      },
+    });
+  });
+
+  it("keeping every value writes no audit entry; another Claimant's Expense is not_found", async () => {
+    const mickey = claimant();
+    const expenseId = expenseIdOf(await books.execute(mickey, logExpense("shop", 100000)));
+    expect(await books.execute(mickey, { type: "CorrectExpense", expenseId, amount: rupees(100000) })).toEqual({ ok: true, events: [] });
+    expect(await books.execute(claimant(), { type: "CorrectExpense", expenseId, amount: rupees(1) })).toEqual({ ok: false, reason: "not_found" });
+    expect(await auditRowsOf(mickey)).toHaveLength(2);
+    expect(await read(mickey, expenseId)).toMatchObject({ amount: rupees(100000) });
+  });
+
+  // An Order expects one Bill for the full Payment (W2.1); mismatch exists only once nothing is expected (FUNCTIONAL §3.1).
+  it("Order Payment corrected: ₹1,000.00 → ₹900.00 moves the expected Bill to ₹900.00, Open amount ₹0.00 to the end", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 100000);
+
+    const corrected = ok(await books.execute(mickey, { type: "CorrectExpense", expenseId, amount: rupees(90000) }));
+    expect(corrected.events).toEqual([
+      { type: "ExpenseCorrected", expenseId, changes: { amount: { from: rupees(100000), to: rupees(90000) } } },
+      { type: "ExpectedBillReduced", billId: expectedBillId, expenseId, amount: rupees(90000) },
+    ]);
+    expect(await read(mickey, expenseId)).toMatchObject({
+      amount: rupees(90000),
+      openAmount: rupees(0),
+      reason: { code: "awaiting_goods" },
+      bills: [{ amount: rupees(90000), status: "expected" }],
+    });
+    expect((await auditRowsOf(mickey)).slice(-2).map((r) => [r.event, r.entity])).toEqual([
+      ["ExpenseCorrected", "expense"],
+      ["ExpectedBillReduced", "bill"],
+    ]);
+
+    // A ₹600.00 Invoice leaves ₹300.00 expected; cancelling it makes a ₹300.00 Refund. Nothing goes negative.
+    ok(await books.execute(mickey, { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(60000), fulfilledOn: "2026-11-21" }));
+    ok(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId }));
+    const expense = await read(mickey, expenseId);
+    expect(expense.openAmount).toEqual(rupees(0));
+    expect(expense.bills.map((b) => [b.amount?.paise, b.status])).toEqual([
+      [30000, "cancelled"],
+      [60000, "expected"],
+    ]);
+    expect(expense.refunds.map((r) => r.amount.paise)).toEqual([30000]);
+  });
+
+  it("Order Payment corrected up: ₹1,000.00 → ₹1,250.00 grows the expected Bill to ₹1,250.00", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 100000);
+    const corrected = ok(await books.execute(mickey, { type: "CorrectExpense", expenseId, amount: rupees(125000) }));
+    expect(corrected.events[1]).toEqual({ type: "ExpectedBillIncreased", billId: expectedBillId, expenseId, amount: rupees(125000) });
+    expect(await read(mickey, expenseId)).toMatchObject({ openAmount: rupees(0), bills: [{ amount: rupees(125000), status: "expected" }] });
+  });
+
+  it("refuses a Payment correction that leaves nothing expected: ₹3,000.00 with ₹1,200.00 delivered, to ₹1,200.00 or ₹1,000.00", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 300000);
+    ok(await books.execute(mickey, { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }));
+    const before = await auditRowsOf(mickey);
+    for (const paise of [120000, 100000])
+      expect(await books.execute(mickey, { type: "CorrectExpense", expenseId, amount: rupees(paise) })).toEqual({
+        ok: false,
+        reason: "validation",
+        field: "amount",
+      });
+    expect(await auditRowsOf(mickey)).toEqual(before);
+    expect(await read(mickey, expenseId)).toMatchObject({ amount: rupees(300000), bills: [{ amount: rupees(180000) }, { amount: rupees(120000) }] });
+  });
+});
+
+// Bill corrections after a document is attached (expense-tracking), through execute.
+describe("Bill corrections", () => {
+  it("Reader got the amount wrong: ₹1,180.00 → ₹1,108.00 shows differs from the document until confirmed, each step audited", async () => {
+    const mickey = claimant();
+    const expenseId = expenseIdOf(await books.execute(mickey, logExpense("shop", 118000)));
+    // No command attaches a document yet (LogDocument, Phase 2): the link and kind go in directly.
+    await db.update(bills).set({ paperlessId: 7, kind: "invoice" }).where(eq(bills.expenseId, expenseId));
+    const billId = (await read(mickey, expenseId)).bills[0]!.id;
+
+    ok(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(110800), billNo: "GPB/2611/042", billDate: "2026-11-18" }));
+    expect((await read(mickey, expenseId)).bills).toMatchObject([
+      { amount: rupees(110800), billNo: "GPB/2611/042", billDate: "2026-11-18", differs: true, status: "ready" },
+    ]);
+    const corrected = (await auditRowsOf(mickey)).at(-1)!;
+    expect(corrected).toMatchObject({ command: "CorrectBill", event: "BillCorrected", entity: "bill", entityId: billId, fromState: "ready", toState: "ready" });
+    expect(corrected.payload).toMatchObject({ changes: { amount: { from: rupees(118000), to: rupees(110800) } }, differs: true });
+
+    ok(await books.execute(mickey, { type: "ConfirmDiffers", billId }));
+    expect((await read(mickey, expenseId)).bills).toMatchObject([{ amount: rupees(110800), differs: false }]);
+    expect((await auditRowsOf(mickey)).at(-1)).toMatchObject({ command: "ConfirmDiffers", event: "DiffersConfirmed", entityId: billId });
+  });
+
+  it("refuses a Bill without its document and changes nothing", async () => {
+    const mickey = claimant();
+    const expenseId = expenseIdOf(await books.execute(mickey, logExpense("shop", 118000)));
+    const billId = (await read(mickey, expenseId)).bills[0]!.id;
+    expect(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(110800) })).toEqual({ ok: false, reason: "invalid_transition" });
+    expect((await read(mickey, expenseId)).bills).toMatchObject([{ amount: rupees(118000), differs: false }]);
+    expect(await auditRowsOf(mickey)).toHaveLength(2);
+  });
+
+  it("a delivered Bill corrected on an Order still expecting goods moves the difference to the expected Bill", async () => {
+    const mickey = claimant();
+    // ₹3,000.00 Order, ₹1,200.00 delivered with its Invoice document: ₹1,800.00 still expected.
+    const { expenseId, expectedBillId } = await order(mickey, 300000);
+    const split = ok(
+      await books.execute(mickey, { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }),
+    );
+    const billId = (split.events[1] as { billId: string }).billId;
+    await db.update(bills).set({ paperlessId: 7, kind: "invoice" }).where(eq(bills.id, billId));
+
+    const corrected = ok(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(100000) }));
+    expect(corrected.events[1]).toEqual({ type: "ExpectedBillIncreased", billId: expectedBillId, expenseId, amount: rupees(200000) });
+    expect(await read(mickey, expenseId)).toMatchObject({
+      openAmount: rupees(0),
+      bills: [{ amount: rupees(200000), status: "expected" }, { amount: rupees(100000), differs: true }],
+    });
+
+    // ₹3,000.00 would leave nothing expected: refused, nothing changes.
+    expect(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(300000) })).toEqual({ ok: false, reason: "validation", field: "amount" });
+    ok(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(150000) }));
+    expect((await read(mickey, expenseId)).bills.map((b) => b.amount?.paise)).toEqual([150000, 150000]);
+  });
+});
+
+// Closing an Expense (expense-tracking; FUNCTIONAL §3.1), through execute. A submitted Claim is pinned on the pure core.
+describe("Closing an Expense", () => {
+  // ₹3,000.00 Order: ₹1,200.00 delivered, then ₹500.00 of the ₹1,800.00 remainder cancelled (an expected Refund).
+  const withRefund = async (actor: Actor) => {
+    const { expenseId, expectedBillId } = await order(actor, 300000);
+    ok(await books.execute(actor, { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }));
+    ok(await books.execute(actor, { type: "ExpectRefund", billId: expectedBillId, amount: rupees(50000) }));
+    const expense = await read(actor, expenseId);
+    return { expenseId, refundId: expense.refunds[0]!.id };
+  };
+  const retag = (expenseId: string, add: string[]) => ({
+    name: "paperless.setTags",
+    data: { expenseId, remove: ["reimb:ready", "reimb:claimed", "reimb:reimbursed"], add },
+  });
+
+  it("Close as personal: unclaimed Bills cancelled, the ₹500.00 Refund written off, closed, and the retag job enqueued", async () => {
+    const mickey = claimant();
+    const { expenseId, refundId } = await withRefund(mickey);
+    jobs.length = 0;
+
+    ok(await books.execute(mickey, { type: "CloseExpense", expenseId, reason: "personal", refunds: { [refundId]: "written_off" } }));
+
+    const expense = await read(mickey, expenseId);
+    expect(expense).toMatchObject({ status: "closed", closedReason: "personal", reason: null });
+    expect(expense.bills.map((b) => [b.amount?.paise, b.status, b.cancelReason])).toEqual([
+      [130000, "cancelled", "cancelled"],
+      [120000, "cancelled", "cancelled"],
+    ]);
+    expect(expense.refunds).toMatchObject([{ amount: rupees(50000), status: "written_off", refundedOn: null }]);
+    // ₹3,000.00 − no live Bills − no Refunds left in Σ Refunds − ₹500.00 written off.
+    expect(expense.openAmount).toEqual(rupees(250000));
+    expect(jobs).toEqual([retag(expenseId, ["personal"])]);
+    expect((await auditRowsOf(mickey)).slice(-4).map((r) => [r.event, r.entity, r.fromState, r.toState])).toEqual([
+      ["BillCancelled", "bill", "expected", "cancelled"],
+      ["BillCancelled", "bill", "expected", "cancelled"],
+      ["RefundWrittenOff", "refund", "expected", "written_off"],
+      ["ExpenseClosed", "expense", "open", "closed"],
+    ]);
+  });
+
+  it("sums every written-off amount: ₹500.00 and ₹300.00 written off on closing count ₹800.00", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 300000);
+    ok(await books.execute(mickey, { type: "ExpectRefund", billId: expectedBillId, amount: rupees(50000) }));
+    ok(await books.execute(mickey, { type: "ExpectRefund", billId: expectedBillId, amount: rupees(30000) }));
+    const [first, second] = (await read(mickey, expenseId)).refunds;
+
+    const refunds = { [first!.id]: "written_off", [second!.id]: "written_off" } as const;
+    ok(await books.execute(mickey, { type: "CloseExpense", expenseId, reason: "written_off", refunds }));
+
+    // ₹3,000.00 − ₹800.00 written off; the ₹2,200.00 remainder Bill is cancelled.
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "closed", closedReason: "written_off", openAmount: rupees(220000) });
+  });
+
+  it("Duplicate keeps the Refund expected, adds no tag, and the Refund is still received later", async () => {
+    const mickey = claimant();
+    const { expenseId, refundId } = await withRefund(mickey);
+    jobs.length = 0;
+    ok(await books.execute(mickey, { type: "CloseExpense", expenseId, reason: "duplicate", refunds: { [refundId]: "expected" } }));
+    expect(jobs).toEqual([retag(expenseId, [])]);
+    ok(await books.execute(mickey, { type: "MarkRefundReceived", refundId, refundedOn: "2026-11-26" }));
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "closed", openAmount: rupees(250000), refunds: [{ status: "received" }] });
+  });
+
+  it("refuses closing without an answer for each expected Refund: nothing changes and no job is enqueued", async () => {
+    const mickey = claimant();
+    const { expenseId } = await withRefund(mickey);
+    const before = await auditRowsOf(mickey);
+    jobs.length = 0;
+    expect(await books.execute(mickey, { type: "CloseExpense", expenseId, reason: "personal", refunds: {} })).toEqual({
+      ok: false,
+      reason: "validation",
+      field: "refunds",
+    });
+    expect(jobs).toEqual([]);
+    expect(await auditRowsOf(mickey)).toEqual(before);
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "open", closedReason: null });
   });
 });

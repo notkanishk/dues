@@ -2,14 +2,15 @@
 import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { auditLog, bills, expenses, idempotencyKeys, refunds } from "@/src/db/schema";
-import { type Money, zero } from "@/src/money/money";
+import { auditLog, bills, expenses, idempotencyKeys, refunds, writeOffs } from "@/src/db/schema";
+import { type Money, sum } from "@/src/money/money";
 import {
   type Actor,
   apply,
   type BillKind,
   type BillState,
   type BillStatus,
+  type CloseReason,
   type Command,
   decide,
   deriveBill,
@@ -58,6 +59,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   const found = rows.map((r) => r.id);
   const billRows = await q.select().from(bills).where(inArray(bills.expenseId, found)).orderBy(bills.id);
   const refundRows = await q.select().from(refunds).where(inArray(refunds.expenseId, found)).orderBy(refunds.id);
+  const writeOffRows = await q.select().from(writeOffs).where(inArray(writeOffs.expenseId, found));
   return rows.map((row) => {
     // Each Bill carries its database-issued reference with its state, so reads never pair two arrays by position.
     const ownBills: (BillState & { reference: string; cancelReason: string | null })[] = billRows
@@ -68,8 +70,11 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         cancelReason: b.cancelReason,
         kind: b.kind as BillKind | null,
         amount: money(b.amountPaise, b.currency),
+        billNo: b.billNo,
+        billDate: b.billDate,
         fulfilledOn: b.fulfilledOn,
         paperlessId: b.paperlessId,
+        differs: b.differsFromDocument,
         cancelled: b.cancelledAt !== null,
         claim: null, // ponytail: no Claims table yet; filled from Claim membership when Claims land
       }));
@@ -83,15 +88,19 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         amount: money(r.amountPaise, r.currency)!,
         reason: r.reason as RefundReason,
         received: r.refundedOn !== null,
+        writtenOff: writeOffRows.some((w) => w.refundId === r.id),
       }));
+    const ownWriteOffs = writeOffRows.filter((w) => w.expenseId === row.id).map((w) => money(w.amountPaise, w.currency)!);
     const state: ExpenseState = {
       id: row.id,
       draft: row.draft,
-      closedReason: row.closedReason,
+      closedReason: row.closedReason as CloseReason | null, // the expenses_closed_reason check keeps it one of these
       amount: money(row.amountPaise, row.currency),
+      payee: row.payee,
+      paidOn: row.paidOn,
       bills: ownBills,
       refunds: ownRefunds,
-      writtenOff: zero, // ponytail: nothing is written off until task 2.13d stores it
+      writtenOff: sum(ownWriteOffs), // Σ written off (FUNCTIONAL §1), every row summed
     };
     return { row, bills: ownBills, refunds: ownRefunds, state };
   });
@@ -108,8 +117,14 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
       case "CancelBill":
       case "ReturnBill":
         return [1, await expenseOf(tx, bills, command.billId)];
+      case "CorrectBill":
+      case "ConfirmDiffers":
+        return [0, await expenseOf(tx, bills, command.billId)];
       case "MarkRefundReceived":
         return [0, await expenseOf(tx, refunds, command.refundId)];
+      case "CorrectExpense":
+      case "CloseExpense":
+        return [0, [command.expenseId]];
     }
   })();
   // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
@@ -128,14 +143,20 @@ type Entity = "expense" | "bill" | "refund";
 function entityOf(event: Event): [Entity, string] {
   switch (event.type) {
     case "ExpenseLogged":
+    case "ExpenseCorrected":
+    case "ExpenseClosed":
       return ["expense", event.expenseId];
     case "BillAdded":
     case "ExpectedBillReduced":
+    case "ExpectedBillIncreased":
     case "BillRemovedFromClaim":
     case "BillCancelled":
+    case "BillCorrected":
+    case "DiffersConfirmed":
       return ["bill", event.billId];
     case "RefundExpected":
     case "RefundReceived":
+    case "RefundWrittenOff":
       return ["refund", event.refundId];
   }
 }
@@ -190,6 +211,7 @@ async function write(tx: Tx, event: Event, at: Date) {
       });
       return;
     case "ExpectedBillReduced":
+    case "ExpectedBillIncreased":
       await tx.update(bills).set({ amountPaise: event.amount.paise }).where(eq(bills.id, event.billId));
       return;
     case "BillRemovedFromClaim":
@@ -211,6 +233,46 @@ async function write(tx: Tx, event: Event, at: Date) {
     case "RefundReceived":
       await tx.update(refunds).set({ refundedOn: event.refundedOn }).where(eq(refunds.id, event.refundId));
       return;
+    case "BillCorrected": {
+      const { amount, billNo, billDate } = event.changes;
+      await tx
+        .update(bills)
+        .set({
+          ...(amount && { amountPaise: amount.to?.paise ?? null }),
+          ...(billNo && { billNo: billNo.to }),
+          ...(billDate && { billDate: billDate.to }),
+          differsFromDocument: event.differs,
+        })
+        .where(eq(bills.id, event.billId));
+      return;
+    }
+    case "DiffersConfirmed":
+      await tx.update(bills).set({ differsFromDocument: false }).where(eq(bills.id, event.billId));
+      return;
+    case "RefundWrittenOff":
+      await tx.insert(writeOffs).values({
+        expenseId: event.expenseId,
+        refundId: event.refundId,
+        amountPaise: event.amount.paise,
+        currency: event.amount.currency,
+        createdAt: at,
+      });
+      return;
+    case "ExpenseClosed":
+      await tx.update(expenses).set({ closedReason: event.reason }).where(eq(expenses.id, event.expenseId));
+      return;
+    case "ExpenseCorrected": {
+      const { amount, payee, paidOn } = event.changes;
+      await tx
+        .update(expenses)
+        .set({
+          ...(amount && { amountPaise: amount.to?.paise ?? null }),
+          ...(payee && { payee: payee.to }),
+          ...(paidOn && { paidOn: paidOn.to }),
+        })
+        .where(eq(expenses.id, event.expenseId));
+      return;
+    }
   }
 }
 
@@ -259,7 +321,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
           idempotencyKey: i === 0 ? (key ?? null) : null,
         };
       });
-      await tx.insert(auditLog).values(entries);
+      if (entries.length) await tx.insert(auditLog).values(entries); // a correction that keeps every value writes nothing
       for (const event of decision.events) await write(tx, event, at);
       for (const job of decision.jobs) await enqueue(tx, job);
 
@@ -293,6 +355,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
           id: row.id,
           reference: row.reference,
           status: derived.status,
+          closedReason: row.closedReason,
           openAmount: derived.openAmount,
           reason: derived.reason,
           amount: state.amount,
@@ -311,6 +374,9 @@ export function createBooks({ db, now, enqueue }: Deps) {
             reference: b.reference,
             kind: b.kind,
             amount: b.amount,
+            billNo: b.billNo,
+            billDate: b.billDate,
+            differs: b.differs,
             fulfilledOn: b.fulfilledOn,
             cancelReason: b.cancelReason,
             status: deriveBill(b),
