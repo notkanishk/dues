@@ -17,6 +17,7 @@ const logExpense = async (claimantId: string) =>
 // Drizzle wraps the Postgres error; its SQLSTATE is on the cause.
 const refusedWith = (code: string, query: Promise<unknown>) => expect(query).rejects.toMatchObject({ cause: { code } });
 const CHECK_VIOLATION = "23514";
+const GENERATED_ALWAYS = "428C9";
 const refusedAsImmutable = (query: Promise<unknown>) => refusedWith(CHECK_VIOLATION, query);
 
 beforeAll(async () => {
@@ -75,6 +76,33 @@ describe("Keys and References", () => {
     await refusedAsImmutable(db.update(expenses).set({ reference: "E-999999999" }).where(eq(expenses.id, expense.id)));
     const [found] = await db.select().from(expenses).where(eq(expenses.id, expense.id));
     expect(found?.reference).toBe(expense.reference);
+  });
+
+  it("refuses a Reference supplied on insert; only the database issues them", async () => {
+    // A supplied E-500 would collide later with the one the sequence issues.
+    await refusedWith(GENERATED_ALWAYS, db.insert(expenses).values({ claimantId: mickey, amountPaise: 100, reference: "E-500" }));
+    const expense = await logExpense(mickey);
+    await refusedWith(
+      GENERATED_ALWAYS,
+      db.insert(bills).values({ expenseId: expense.id, kind: "invoice", reference: "B-500" }),
+    );
+  });
+
+  it("accepts an update that sets a Reference to its own value", async () => {
+    const expense = await logExpense(mickey);
+    const [found] = await db
+      .update(expenses)
+      .set({ reference: expense.reference, notes: "same Reference" })
+      .where(eq(expenses.id, expense.id))
+      .returning();
+    expect(found).toMatchObject({ reference: expense.reference, notes: "same Reference" });
+  });
+
+  it("never stores a padded Reference like E-0042", async () => {
+    await refusedWith(GENERATED_ALWAYS, db.insert(expenses).values({ claimantId: mickey, reference: "E-0042" }));
+    const expense = await logExpense(mickey);
+    await refusedAsImmutable(db.update(expenses).set({ reference: "E-0042" }).where(eq(expenses.id, expense.id)));
+    expect(await db.select().from(expenses).where(eq(expenses.reference, "E-0042"))).toEqual([]);
   });
 
   it("keeps the vendor's Bill number apart from the Reference through a correction", async () => {

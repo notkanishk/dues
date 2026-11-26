@@ -18,7 +18,7 @@ CREATE TABLE "audit_log" (
 --> statement-breakpoint
 CREATE TABLE "bills" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
-	"reference" text DEFAULT 'B-' || nextval('bill_reference_seq') NOT NULL,
+	"reference" text NOT NULL,
 	"expense_id" uuid NOT NULL,
 	"kind" text NOT NULL,
 	"bill_no" text,
@@ -38,7 +38,7 @@ CREATE TABLE "bills" (
 --> statement-breakpoint
 CREATE TABLE "expenses" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
-	"reference" text DEFAULT 'E-' || nextval('expense_reference_seq') NOT NULL,
+	"reference" text NOT NULL,
 	"claimant_id" uuid NOT NULL,
 	"paid_on" date,
 	"amount_paise" bigint,
@@ -64,7 +64,7 @@ CREATE TABLE "expenses" (
 --> statement-breakpoint
 CREATE TABLE "owed_to_university" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
-	"reference" text DEFAULT 'O-' || nextval('owed_to_university_reference_seq') NOT NULL,
+	"reference" text NOT NULL,
 	"claimant_id" uuid NOT NULL,
 	"bill_id" uuid NOT NULL,
 	"amount_paise" bigint NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE "owed_to_university" (
 --> statement-breakpoint
 CREATE TABLE "refunds" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
-	"reference" text DEFAULT 'R-' || nextval('refund_reference_seq') NOT NULL,
+	"reference" text NOT NULL,
 	"expense_id" uuid NOT NULL,
 	"amount_paise" bigint NOT NULL,
 	"currency" char(3) DEFAULT 'INR' NOT NULL,
@@ -92,7 +92,25 @@ CREATE TABLE "refunds" (
 ALTER TABLE "bills" ADD CONSTRAINT "bills_expense_id_expenses_id_fk" FOREIGN KEY ("expense_id") REFERENCES "public"."expenses"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "owed_to_university" ADD CONSTRAINT "owed_to_university_bill_id_bills_id_fk" FOREIGN KEY ("bill_id") REFERENCES "public"."bills"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "refunds" ADD CONSTRAINT "refunds_expense_id_expenses_id_fk" FOREIGN KEY ("expense_id") REFERENCES "public"."expenses"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
--- Hand-written (drizzle-kit does not model triggers): a Reference never changes once issued (ADR 0005).
+-- Hand-written (drizzle-kit does not model triggers). Only the database issues a Reference, from
+-- the type's sequence; a supplied one is refused, as for a GENERATED ALWAYS column (ADR 0005).
+CREATE FUNCTION "public"."issue_reference"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	IF NEW.reference IS NOT NULL THEN
+		RAISE EXCEPTION 'Reference % was supplied; the database issues References', NEW.reference USING ERRCODE = 'generated_always';
+	END IF;
+	NEW.reference := TG_ARGV[0] || '-' || nextval(TG_ARGV[1]::regclass);
+	RETURN NEW;
+END $$;--> statement-breakpoint
+CREATE TRIGGER "expenses_reference_issue" BEFORE INSERT ON "expenses"
+	FOR EACH ROW EXECUTE FUNCTION "public"."issue_reference"('E', 'expense_reference_seq');--> statement-breakpoint
+CREATE TRIGGER "bills_reference_issue" BEFORE INSERT ON "bills"
+	FOR EACH ROW EXECUTE FUNCTION "public"."issue_reference"('B', 'bill_reference_seq');--> statement-breakpoint
+CREATE TRIGGER "refunds_reference_issue" BEFORE INSERT ON "refunds"
+	FOR EACH ROW EXECUTE FUNCTION "public"."issue_reference"('R', 'refund_reference_seq');--> statement-breakpoint
+CREATE TRIGGER "owed_to_university_reference_issue" BEFORE INSERT ON "owed_to_university"
+	FOR EACH ROW EXECUTE FUNCTION "public"."issue_reference"('O', 'owed_to_university_reference_seq');--> statement-breakpoint
+-- A Reference never changes once issued (ADR 0005).
 CREATE FUNCTION "public"."reference_is_immutable"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
 	RAISE EXCEPTION 'Reference % cannot change', OLD.reference USING ERRCODE = 'check_violation';

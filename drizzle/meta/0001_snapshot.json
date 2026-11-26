@@ -1,5 +1,5 @@
 {
-  "id": "b3af8f18-ebbc-4ce9-bf27-29b80e90a8eb",
+  "id": "eed1b676-e7e1-4f88-be36-4e06d8e4f736",
   "prevId": "0ae1f6bf-135d-435f-8f07-6b838a995d3e",
   "version": "7",
   "dialect": "postgresql",
@@ -100,8 +100,7 @@
           "name": "reference",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'B-' || nextval('bill_reference_seq')"
+          "notNull": true
         },
         "expense_id": {
           "name": "expense_id",
@@ -232,8 +231,7 @@
           "name": "reference",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'E-' || nextval('expense_reference_seq')"
+          "notNull": true
         },
         "claimant_id": {
           "name": "claimant_id",
@@ -384,8 +382,7 @@
           "name": "reference",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'O-' || nextval('owed_to_university_reference_seq')"
+          "notNull": true
         },
         "claimant_id": {
           "name": "claimant_id",
@@ -476,8 +473,7 @@
           "name": "reference",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'R-' || nextval('refund_reference_seq')"
+          "notNull": true
         },
         "expense_id": {
           "name": "expense_id",

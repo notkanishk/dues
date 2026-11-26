@@ -3,11 +3,16 @@ import { bigint, boolean, char, check, date, integer, jsonb, pgSequence, pgTable
 
 // Keys and References (ADR 0005). The key is a UUIDv7 from Postgres's own uuidv7(), so every
 // writer (app, psql, imports) gets the same time-ordered key without app code.
-// The Reference is a type letter plus one global sequence per type, unpadded; a CHECK keeps
-// the format and a trigger (in the migration) refuses any change once issued.
+// The Reference is a type letter plus one global sequence per type, unpadded. Only the database
+// issues it: a BEFORE INSERT trigger (in the migration) takes the next value and refuses a supplied
+// one, a CHECK keeps the format, and a BEFORE UPDATE trigger refuses any change once issued.
+// The column has no default; the app sends DEFAULT (null) and the trigger fills it.
 const key = () => uuid("id").primaryKey().default(sql`uuidv7()`);
-const reference = (letter: string, seq: string) =>
-  text("reference").notNull().unique().default(sql.raw(`'${letter}-' || nextval('${seq}')`));
+const reference = () =>
+  text("reference")
+    .notNull()
+    .unique()
+    .$defaultFn(() => sql`default`);
 const referenceFormat = (letter: string) => sql.raw(`reference ~ '^${letter}-[1-9][0-9]*$'`);
 
 // Money is integer paise plus a currency code (platform-foundations). bigint in the database;
@@ -25,7 +30,7 @@ export const expenses = pgTable(
   "expenses",
   {
     id: key(),
-    reference: reference("E", "expense_reference_seq"),
+    reference: reference(),
     claimantId: uuid("claimant_id").notNull(), // FK once the Claimants table exists (task 2.7)
     paidOn: date("paid_on"),
     amountPaise: amountPaise(),
@@ -59,7 +64,7 @@ export const bills = pgTable(
   "bills",
   {
     id: key(),
-    reference: reference("B", "bill_reference_seq"),
+    reference: reference(),
     expenseId: uuid("expense_id").notNull().references(() => expenses.id),
     kind: text("kind").notNull(),
     billNo: text("bill_no"), // as the vendor printed it; never the Reference
@@ -86,7 +91,7 @@ export const refunds = pgTable(
   "refunds",
   {
     id: key(),
-    reference: reference("R", "refund_reference_seq"),
+    reference: reference(),
     expenseId: uuid("expense_id").notNull().references(() => expenses.id),
     amountPaise: amountPaise().notNull(),
     currency: currency(),
@@ -107,7 +112,7 @@ export const owedToUniversity = pgTable(
   "owed_to_university",
   {
     id: key(),
-    reference: reference("O", "owed_to_university_reference_seq"),
+    reference: reference(),
     claimantId: uuid("claimant_id").notNull(),
     billId: uuid("bill_id").notNull().references(() => bills.id),
     amountPaise: amountPaise().notNull(),
