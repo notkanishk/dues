@@ -117,3 +117,9 @@ describe("a Claim total outside the possible range throws", () => {
     expect(() => claimTotal([{ paise: 9007199254740991, currency: "INR" }])).toThrow(RangeError);
   });
 });
+
+describe("a negative Claim total is impossible", () => {
+  it("throws when Claim lines sum below zero", () => {
+    expect(() => claimTotal([{ paise: 100, currency: "INR" }, { paise: -250, currency: "INR" }])).toThrow(RangeError);
+  });
+});

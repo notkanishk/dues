@@ -44,6 +44,7 @@ export function formAmount(m: Money): string {
 /** A Claim's total: Σ Claim lines rounded up to whole rupees. The only rounded figure in Dues. */
 export function claimTotal(lines: readonly Money[]): Money {
   const { paise } = sum(lines);
+  if (paise < 0) throw new RangeError("Claim total below zero");
   const rest = paise % 100;
   const total = rest > 0 ? paise - rest + 100 : paise;
   if (!Number.isSafeInteger(total)) throw new RangeError("Claim total out of range");
