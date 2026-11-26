@@ -1007,4 +1007,21 @@ describe("Authorization at the Actor Seam", () => {
     expect(await books.order(dexter, t.expenseId)).toEqual({ ok: false, reason: "not_found" });
     expect(await snapshot(mickey, t)).toEqual(before);
   });
+
+  it("Admin change audited: an admin reads another Claimant's Expense in full and corrects ₹3,000.00 to ₹3,100.00; actor is the admin, owner the Claimant", async () => {
+    const mickey = claimant();
+    const root = admin();
+    const t = await books3000(mickey);
+    expect(await books.expense(root, t.expenseId)).toEqual(await books.expense(mickey, t.expenseId));
+    expect(await books.order(root, t.expenseId)).toEqual(await books.order(mickey, t.expenseId));
+
+    ok(await books.execute(root, { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) }));
+    expect(await read(mickey, t.expenseId)).toMatchObject({ amount: rupees(310000) });
+    expect(await auditRowsOf(root)).toMatchObject([
+      { command: "CorrectExpense", event: "ExpenseCorrected", entityId: t.expenseId, actorId: root.claimantId, ownerId: mickey.claimantId },
+      { command: "CorrectExpense", event: "ExpectedBillIncreased", entityId: t.expectedBillId, actorId: root.claimantId, ownerId: mickey.claimantId },
+    ]);
+    // The Claimant's own changes name the Claimant as both.
+    expect((await auditRowsOf(mickey)).every((r) => r.ownerId === mickey.claimantId)).toBe(true);
+  });
 });
