@@ -176,6 +176,7 @@ describe("Amounts", () => {
 
 describe("Audit log", () => {
   const UNIQUE_VIOLATION = "23505";
+  const APPEND_ONLY = "23001"; // restrict_violation
 
   it("records who, what, when and the states", async () => {
     const expense = await logExpense(mickey);
@@ -203,5 +204,14 @@ describe("Audit log", () => {
     const key = randomUUID();
     await db.insert(auditLog).values([auditEntry(expense.id), auditEntry(expense.id), auditEntry(expense.id, key)]);
     await refusedWith(UNIQUE_VIOLATION, db.insert(auditLog).values(auditEntry(expense.id, key)));
+  });
+
+  it("is never edited or deleted", async () => {
+    const expense = await logExpense(mickey);
+    const [entry] = await db.insert(auditLog).values(auditEntry(expense.id)).returning();
+    await refusedWith(APPEND_ONLY, db.update(auditLog).set({ toState: "closed" }).where(eq(auditLog.id, entry!.id)));
+    await refusedWith(APPEND_ONLY, db.delete(auditLog).where(eq(auditLog.id, entry!.id)));
+    const [found] = await db.select().from(auditLog).where(eq(auditLog.id, entry!.id));
+    expect(found?.toState).toBe("open");
   });
 });

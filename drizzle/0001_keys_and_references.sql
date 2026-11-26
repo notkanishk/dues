@@ -123,4 +123,11 @@ CREATE TRIGGER "bills_reference_immutable" BEFORE UPDATE OF "reference" ON "bill
 CREATE TRIGGER "refunds_reference_immutable" BEFORE UPDATE OF "reference" ON "refunds"
 	FOR EACH ROW WHEN (NEW.reference IS DISTINCT FROM OLD.reference) EXECUTE FUNCTION "public"."reference_is_immutable"();--> statement-breakpoint
 CREATE TRIGGER "owed_to_university_reference_immutable" BEFORE UPDATE OF "reference" ON "owed_to_university"
-	FOR EACH ROW WHEN (NEW.reference IS DISTINCT FROM OLD.reference) EXECUTE FUNCTION "public"."reference_is_immutable"();
+	FOR EACH ROW WHEN (NEW.reference IS DISTINCT FROM OLD.reference) EXECUTE FUNCTION "public"."reference_is_immutable"();--> statement-breakpoint
+-- The audit log is append-only: an entry is never edited or deleted (platform-foundations).
+CREATE FUNCTION "public"."audit_log_is_append_only"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	RAISE EXCEPTION 'audit_log is append-only; % refused', TG_OP USING ERRCODE = 'restrict_violation';
+END $$;--> statement-breakpoint
+CREATE TRIGGER "audit_log_append_only" BEFORE UPDATE OR DELETE ON "audit_log"
+	FOR EACH ROW EXECUTE FUNCTION "public"."audit_log_is_append_only"();
