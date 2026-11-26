@@ -10,6 +10,7 @@ import {
   type BillKind,
   type BillState,
   type BillStatus,
+  type CloseReason,
   type Command,
   decide,
   deriveBill,
@@ -93,7 +94,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
     const state: ExpenseState = {
       id: row.id,
       draft: row.draft,
-      closedReason: row.closedReason,
+      closedReason: row.closedReason as CloseReason | null, // the expenses_closed_reason check keeps it one of these
       amount: money(row.amountPaise, row.currency),
       payee: row.payee,
       paidOn: row.paidOn,

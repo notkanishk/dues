@@ -194,7 +194,7 @@ export type RefundState = { id: string; amount: Money; reason: RefundReason; rec
 export type ExpenseState = {
   id: string;
   draft: boolean;
-  closedReason: string | null;
+  closedReason: CloseReason | null;
   amount: Money | null;
   payee: string | null;
   paidOn: string | null;
