@@ -114,6 +114,25 @@ describe("Transactions", () => {
     expect(await auditRowsOf(mickey)).toEqual([]);
   });
 
+  it("writes the audit row before the state row it describes (design D2)", async () => {
+    const mickey = claimant();
+    // Scoped to this Claimant, so other test files sharing the database are untouched.
+    await pool.query(`create or replace function test_audit_first() returns trigger language plpgsql as $$
+      begin
+        if new.claimant_id = '${mickey.claimantId}' and not exists (
+          select 1 from audit_log where entity = 'expense' and entity_id = new.id
+        ) then raise exception 'state row before its audit row'; end if;
+        return new;
+      end $$`);
+    await pool.query("create or replace trigger test_audit_first before insert on expenses for each row execute function test_audit_first()");
+    try {
+      expect(await books.execute(mickey, logExpense("online", 100))).toMatchObject({ ok: true });
+    } finally {
+      await pool.query("drop trigger test_audit_first on expenses; drop function test_audit_first()");
+    }
+    expect(await expensesOf(mickey)).toBe(1);
+  });
+
   it("a failure after the writes rolls back every audit and state row", async () => {
     const mickey = claimant();
     // The idempotency record is the last write; make it fail once the audit and state rows are in.
