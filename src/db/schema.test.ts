@@ -38,12 +38,14 @@ beforeAll(() => {
 afterAll(() => pool.end());
 
 describe("Keys and References", () => {
-  it("gives two Claimants' Expenses different, consecutive References", async () => {
+  // One global sequence: different and increasing. Not necessarily consecutive, since other test files
+  // (and, in production, other Claimants) take numbers from the same sequence at the same time.
+  it("gives two Claimants' Expenses different References from one global sequence", async () => {
     const first = await logExpense(mickey);
     const second = await logExpense(dexter);
-    const n = Number(first.reference.slice(2));
     expect(first.reference).toMatch(/^E-[1-9]\d*$/);
-    expect(second.reference).toBe(`E-${n + 1}`);
+    expect(second.reference).toMatch(/^E-[1-9]\d*$/);
+    expect(Number(second.reference.slice(2))).toBeGreaterThan(Number(first.reference.slice(2)));
   });
 
   it("keys every record with a UUIDv7", async () => {
