@@ -18,3 +18,18 @@ export function sum(amounts: readonly Money[]): Money {
   if (!Number.isSafeInteger(paise)) throw new RangeError("Money sum out of range");
   return { paise, currency: "INR" };
 }
+
+const indian = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
+
+/** Whole rupees and the paise remainder, both integers (no division that can leave a fraction). */
+function split(paise: number): { sign: string; rupees: number; rest: string } {
+  const abs = Math.abs(paise);
+  const rest = abs % 100;
+  return { sign: paise < 0 ? "-" : "", rupees: (abs - rest) / 100, rest: String(rest).padStart(2, "0") };
+}
+
+/** "₹1,23,456.70": ₹, Indian grouping, always two decimals, paise exactly as stored. */
+export function formatRupees(m: Money): string {
+  const { sign, rupees, rest } = split(m.paise);
+  return `${sign}₹${indian.format(rupees)}.${rest}`;
+}

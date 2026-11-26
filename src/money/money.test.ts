@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRupees, sum } from "./money";
+import { formatRupees, parseRupees, sum } from "./money";
 
 // platform-foundations: "Money stored as integer paise". Expected values are the spec's own literals.
 describe("Money stored as integer paise", () => {
@@ -39,5 +39,24 @@ describe("Sums stay exact", () => {
 
   it("sums nothing to zero", () => {
     expect(sum([])).toEqual({ paise: 0, currency: "INR" });
+  });
+});
+
+describe("display: ₹, Indian grouping, two decimals, paise as printed", () => {
+  it("displays 250050 paise as ₹2,500.50", () => {
+    expect(formatRupees(parseRupees("₹2,500.50")!)).toBe("₹2,500.50");
+  });
+
+  it.each([
+    [12345670, "₹1,23,456.70"],
+    [123456789, "₹12,34,567.89"],
+    [1000000000, "₹1,00,00,000.00"],
+    [118025, "₹1,180.25"],
+    [9950, "₹99.50"],
+    [7, "₹0.07"],
+    [0, "₹0.00"],
+    [-150, "-₹1.50"],
+  ])("%i paise shows %s", (paise, shown) => {
+    expect(formatRupees({ paise, currency: "INR" })).toBe(shown);
   });
 });
