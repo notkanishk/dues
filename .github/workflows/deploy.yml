@@ -19,7 +19,8 @@ jobs:
 
   image:
     needs: test
-    if: github.repository == 'notkanishk/dues'
+    # A manual run deploys only main, never another branch.
+    if: github.repository == 'notkanishk/dues' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
