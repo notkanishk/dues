@@ -1024,4 +1024,61 @@ describe("Authorization at the Actor Seam", () => {
     // The Claimant's own changes name the Claimant as both.
     expect((await auditRowsOf(mickey)).every((r) => r.ownerId === mickey.claimantId)).toBe(true);
   });
+
+  // Another writer holds these Claimants' locks mid-command until release() (design D5).
+  const holdLocks = async (...claimantIds: string[]) => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const isLocked = new Promise<void>((r) => (locked = r));
+    const writer = db.transaction(async (tx) => {
+      for (const id of claimantIds) await lockClaimant(tx, id);
+      locked();
+      await held;
+    });
+    await isLocked;
+    return async () => {
+      release();
+      await writer;
+    };
+  };
+
+  it("an admin's command on another Claimant's Expense takes that Claimant's lock, not the admin's own", async () => {
+    const mickey = claimant();
+    const root = admin();
+    const t = await books3000(mickey);
+    const release = await holdLocks(mickey.claimantId);
+    const correcting = books.execute(root, { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) });
+    expect(await settle(correcting)).toBe("waiting");
+    // The admin's own lock is free: an admin acting on their own books is not held up.
+    expect(await settle(books.execute(root, logExpense("shop", 100)))).toBe("done");
+    await release();
+    expect(await settle(correcting, 5000)).toBe("done");
+    expect(await read(mickey, t.expenseId)).toMatchObject({ amount: rupees(310000) });
+  });
+
+  it("an admin moving a Bill between two Claimants takes both locks, and the Bill lands in the second's books", async () => {
+    const [first, second] = [claimant(), claimant()].sort((a, b) => a.claimantId.localeCompare(b.claimantId));
+    const root = admin();
+    const from = await books3000(second);
+    const to = await books3000(first);
+    for (const held of [first!.claimantId, second!.claimantId]) {
+      const release = await holdLocks(held);
+      const moving = books.execute(root, { type: "MoveBill", billId: from.deliveredBillId, toExpenseId: to.expenseId });
+      expect(await settle(moving), `held ${held === first!.claimantId ? "first" : "second"}`).toBe("waiting");
+      await release();
+      const moved = await moving;
+      if (moved.ok) {
+        expect((await read(first!, to.expenseId)).bills.map((b) => b.id)).toContain(from.deliveredBillId);
+        // Each entry's owner is the owner of the Expense it changes: the Bill and the shrunk Order are the first's, the regrown Order the second's.
+        const ownerOf = (e: (typeof moved.events)[number]) => (("expenseId" in e ? e.expenseId : e.toExpenseId) === to.expenseId ? first : second)!.claimantId;
+        expect((await auditRowsOf(root)).slice(-moved.events.length)).toMatchObject(
+          moved.events.map((e) => ({ event: e.type, actorId: root.claimantId, ownerId: ownerOf(e) })),
+        );
+        expect(new Set(moved.events.map(ownerOf)).size).toBe(2);
+        // Moved back for the second round.
+        ok(await books.execute(root, { type: "MoveBill", billId: from.deliveredBillId, toExpenseId: from.expenseId }));
+      } else throw new Error(`refused: ${moved.reason}`);
+    }
+  });
 });
