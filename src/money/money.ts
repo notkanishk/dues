@@ -22,8 +22,9 @@ export function sum(amounts: readonly Money[]): Money {
 
 const indian = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
-/** Whole rupees and the paise remainder, both integers (no division that can leave a fraction). */
+/** Whole rupees and the paise remainder, both integers (no division that can leave a fraction). Throws on paise that are not a safe integer. */
 function split(paise: number): { sign: string; rupees: number; rest: string } {
+  if (!Number.isSafeInteger(paise)) throw new RangeError("Money paise must be a safe integer");
   const abs = Math.abs(paise);
   const rest = abs % 100;
   return { sign: paise < 0 ? "-" : "", rupees: (abs - rest) / 100, rest: String(rest).padStart(2, "0") };

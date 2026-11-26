@@ -123,3 +123,11 @@ describe("a negative Claim total is impossible", () => {
     expect(() => claimTotal([{ paise: 100, currency: "INR" }, { paise: -250, currency: "INR" }])).toThrow(RangeError);
   });
 });
+
+describe("formatting refuses paise that are not a safe integer", () => {
+  it.each([1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53])("%d paise", (paise) => {
+    const m = { paise, currency: "INR" as const };
+    expect(() => formatRupees(m)).toThrow(RangeError);
+    expect(() => formAmount(m)).toThrow(RangeError);
+  });
+});
