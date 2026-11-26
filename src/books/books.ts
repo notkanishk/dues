@@ -237,13 +237,13 @@ export function createBooks({ db, now, enqueue }: Deps) {
           upiRef: row.upiRef,
           notes: row.notes,
           source: row.source,
-          bills: billStates.map((b, i) => ({
+          bills: billStates.map((b) => ({
             id: b.id,
             reference: b.reference,
             kind: b.kind,
             amount: b.amount,
             fulfilledOn: b.fulfilledOn,
-            status: derived.bills[i]!,
+            status: deriveBill(b),
           })),
         },
       };
