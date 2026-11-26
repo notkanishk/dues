@@ -64,9 +64,23 @@ if [[ "${1:-}" == "--check" ]]; then echo "ok: $(hostname) ${DUES_ENV}"; exit 0;
 ref="${1:-}"
 [[ "$ref" =~ ^${IMAGE_REPO//./\\.}@sha256:[a-f0-9]{64}$ ]] || { echo "refused: image must be ${IMAGE_REPO}@sha256:<digest>" >&2; exit 2; }
 [[ -f compose.yaml ]] || { echo "no /opt/dues/compose.yaml yet" >&2; exit 3; }
-printf 'DUES_IMAGE=%s\n' "$ref" > .image.env
+printf 'DUES_IMAGE=%s\n' "$ref" > .image.env.next
 logger -t dues-deploy "deploying $ref"
-docker compose --env-file .image.env pull --quiet
+# Pull while the old stack still serves: a registry outage fails here with nothing stopped.
+docker compose --env-file .image.env.next pull --quiet
+# A database copy before anything changes, every deploy; the last 14 are kept.
+# Restore: docker compose exec -T postgres pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean < <file>
+if docker compose --env-file .image.env.next ps --status running --services | grep -qx postgres; then
+  install -d -o root -g root -m 0700 /var/backups/dues
+  digest="${ref##*:}"
+  f="/var/backups/dues/pre-deploy-$(date -u +%Y%m%dT%H%M%SZ)-${digest:0:12}.dump"
+  docker compose --env-file .image.env.next exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > "$f"
+  [[ -s "$f" ]] || { rm -f "$f"; echo "backup empty; not deploying" >&2; exit 4; }
+  chmod 0600 "$f"
+  logger -t dues-deploy "backup $f ($(du -h "$f" | cut -f1))"
+  ls -1t /var/backups/dues/pre-deploy-*.dump | tail -n +15 | xargs -r rm -f
+fi
+mv .image.env.next .image.env
 docker compose --env-file .image.env up -d --remove-orphans --wait
 docker image prune -f >/dev/null
 logger -t dues-deploy "deployed $ref"
