@@ -526,7 +526,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           {
             type: "ExpenseLogged",
             expenseId,
-            claimantId: actor.claimantId,
+            claimantId: expense.claimantId, // the Order's owner, whoever detaches (an admin included)
             kind: expense.kind,
             amount: bill.amount,
             // ponytail: W4's invoice-only Expense takes the bill date; until a Reading gives one, the Order's date.

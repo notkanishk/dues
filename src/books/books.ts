@@ -177,7 +177,7 @@ async function expenseOf(tx: Tx, table: typeof bills | typeof refunds, id: strin
   return (await tx.select({ id: table.expenseId }).from(table).where(eq(table.id, id))).map((r) => r.id);
 }
 
-/** A Bill moved by an admin between two Claimants, after the owners were read: rerun under the right locks. */
+/** An event would change a Claimant whose lock is not held (an admin moved the Bill after the owners were read): rerun. */
 class OwnersMoved extends Error {}
 
 /** The Expense an event changes; its owner is the audit entry's owner. A moved Bill belongs where it lands. */
@@ -382,7 +382,6 @@ export function createBooks({ db, now, enqueue }: Deps) {
       }
 
       const slice = await loadSlice(tx, actor, command);
-      if (Object.values(slice.expenses).some((e) => !owners.includes(e.claimantId))) throw new OwnersMoved();
       const at = now();
       const decision = decide(slice, command, actor, at);
       if (!decision.ok) return decision; // a rejected command changes nothing
@@ -408,6 +407,8 @@ export function createBooks({ db, now, enqueue }: Deps) {
           idempotencyKey: i === 0 ? (key ?? null) : null,
         };
       });
+      // Every change is to a Claimant whose lock is held; else a Bill changed owner before the lock (rerun), never written unlocked.
+      if (entries.some((e) => !owners.includes(e.ownerId))) throw new OwnersMoved();
       if (entries.length) await tx.insert(auditLog).values(entries); // a correction that keeps every value writes nothing
       for (const event of decision.events) await write(tx, event, at);
       for (const job of decision.jobs) await enqueue(tx, job);
