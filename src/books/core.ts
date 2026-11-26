@@ -182,7 +182,10 @@ export function apply(slice: Slice, event: Event): Slice {
 // Status, Open amount, "why it's open" and Bill status are derived on read and never stored (design D3).
 export type BillStatus = "expected" | "ready" | "claimed" | "reimbursed" | "cancelled";
 export type ExpenseStatus = "draft" | "open" | "settled" | "closed";
-/** Exactly one reason an open Expense is open, in the spec's order; null for any other status. */
+/**
+ * The first of the spec's five reasons an open Expense is open, in the spec's order; null for any other status,
+ * and null for an open Expense that waits on none of them (see whyOpen).
+ */
 export type OpenReason =
   | { readonly code: "awaiting_goods" | "refund_owed" | "bill_missing" | "in_claim" }
   | { readonly code: "mismatch"; readonly amount: Money };
@@ -214,7 +217,8 @@ function whyOpen(expense: ExpenseState, open: Money | null): OpenReason | null {
   // The signed Open amount: positive when Bills, Refunds and written off fall short of the Payment.
   if (open && open.paise !== 0) return { code: "mismatch", amount: open };
   if (live.some((b) => deriveBill(b) === "claimed")) return { code: "in_claim" };
-  // ponytail: covered but nothing claimed yet (Bills ready to file) has no reason in the spec's list; null until it names one.
+  // ponytail: open question for the owner. An open Expense with nothing left to wait for (every Bill covered and
+  // nothing claimed, or a blank amount with nothing expected) has none of the five reasons; null until the spec names one.
   return null;
 }
 

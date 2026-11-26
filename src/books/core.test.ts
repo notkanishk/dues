@@ -272,6 +272,22 @@ describe("why an Expense is open", () => {
     expect(reasonOf(facts(100000, [{ paise: 100000, claim: "draft" }]))).toEqual({ code: "in_claim" });
   });
 
+  // Open question for the owner: these open Expenses wait on nothing in the spec's five reasons. Pinned as null until decided.
+  it("no reason yet: every Bill covered and ready, nothing claimed → open with reason null", () => {
+    expect(deriveExpense(facts(100000, [{ paise: 100000 }]))).toEqual({
+      status: "open",
+      openAmount: rupees(0),
+      reason: null,
+      bills: ["ready"],
+    });
+  });
+
+  it("no reason yet: a blank Bill amount with nothing expected → open with no Open amount and reason null", () => {
+    const e = facts(100000, [{ paise: 0 }]);
+    e.bills[0]!.amount = null;
+    expect(deriveExpense(e)).toEqual({ status: "open", openAmount: null, reason: null, bills: ["ready"] });
+  });
+
   it("Not settled while a Bill is unreimbursed: Open amount zero, one Bill claimed → open", () => {
     expect(deriveExpense(facts(100000, [{ paise: 100000, claim: "submitted" }])).status).toBe("open");
   });
