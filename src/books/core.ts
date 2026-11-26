@@ -63,6 +63,8 @@ export type CorrectBill = {
   readonly amount?: Money;
   readonly billNo?: string | null;
   readonly billDate?: string | null;
+  /** The form's remarks column; a No bill must keep one (expense-tracking, Bill kinds and remarks). */
+  readonly remarks?: string | null;
 };
 /** The Claimant confirms the document shows the edited values: the "differs from the document" mark is cleared. */
 export type ConfirmDiffers = { readonly type: "ConfirmDiffers"; readonly billId: string };
@@ -178,6 +180,7 @@ export type Event =
         readonly amount?: Change<Money | null>;
         readonly billNo?: Change<string | null>;
         readonly billDate?: Change<string | null>;
+        readonly remarks?: Change<string | null>;
       };
       /** "differs from the document" after this edit: set by an edit to a Bill with a document, kept until confirmed. */
       readonly differs: boolean;
@@ -374,13 +377,16 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (command.amount !== undefined && !isPayment(command.amount)) return rejectField("amount");
       if (command.billNo != null && bill.kind !== "invoice") return rejectField("billNo"); // only an Invoice has one
       if (command.billDate != null && !isDate(command.billDate)) return rejectField("billDate");
-      const changes = {
+      if (command.remarks !== undefined && bill.kind === "no_bill" && !command.remarks?.trim()) return rejectField("remarks");
+      const read = {
         ...changed("amount", bill.amount, command.amount),
         ...changed("billNo", bill.billNo, command.billNo),
         ...changed("billDate", bill.billDate, command.billDate),
       };
+      const changes = { ...read, ...changed("remarks", bill.remarks, command.remarks) };
       if (!Object.keys(changes).length) return ok([]);
-      const differs = bill.differs || bill.paperlessId !== null;
+      // Only a value the document shows can differ from it; a remark is the Claimant's own.
+      const differs = bill.differs || (bill.paperlessId !== null && Object.keys(read).length > 0);
       const { from, to } = changes.amount ?? {};
       const moved = bill.fulfilledOn && from && to ? moveExpected(expense, from.paise - to.paise) : [];
       if (!Array.isArray(moved)) return moved;
