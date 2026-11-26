@@ -3,7 +3,7 @@ import { eq, TransactionRollbackError } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "./index";
-import { bills, expenses, owedToUniversity, refunds } from "./schema";
+import { bills, expenseReferenceSeq, expenses, owedToUniversity, refunds } from "./schema";
 
 // Needs a real Postgres: DATABASE_URL (CI service container, or a scratch postgres:19.0).
 // Keys and References, platform-foundations spec and ADR 0005.
@@ -14,9 +14,10 @@ const dexter = randomUUID();
 const logExpense = async (claimantId: string) =>
   (await db.insert(expenses).values({ claimantId, amountPaise: 25050 }).returning())[0]!;
 
-// Drizzle wraps the Postgres error; the trigger's message is on its cause.
-const refusedAsImmutable = (query: Promise<unknown>) =>
-  expect(query).rejects.toMatchObject({ cause: { message: expect.stringMatching(/cannot change/) } });
+// Drizzle wraps the Postgres error; its SQLSTATE is on the cause.
+const refusedWith = (code: string, query: Promise<unknown>) => expect(query).rejects.toMatchObject({ cause: { code } });
+const CHECK_VIOLATION = "23514";
+const refusedAsImmutable = (query: Promise<unknown>) => refusedWith(CHECK_VIOLATION, query);
 
 beforeAll(async () => {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set; these tests need a real Postgres");
@@ -48,20 +49,24 @@ describe("Keys and References", () => {
   });
 
   it("issues E-10000 with no padding", async () => {
-    // Jump the sequence, insert inside a rolled-back transaction, then put the sequence back,
-    // so reruns on the same database neither collide nor skip.
-    const { rows } = await pool.query("select last_value from expense_reference_seq");
-    await pool.query("select setval('expense_reference_seq', 9999)");
+    // Jump the sequence, insert inside a rolled-back transaction, then put the sequence back
+    // exactly (is_called too), so reruns on the same database neither collide nor skip.
+    const seq = expenseReferenceSeq.seqName!;
+    const { rows } = await pool.query(`select last_value, is_called from ${seq}`);
     let reference = "";
-    await db
-      .transaction(async (tx) => {
-        reference = (await tx.insert(expenses).values({ claimantId: mickey, amountPaise: 100 }).returning())[0]!.reference;
-        tx.rollback();
-      })
-      .catch((e) => {
-        if (!(e instanceof TransactionRollbackError)) throw e;
-      });
-    await pool.query("select setval('expense_reference_seq', $1)", [rows[0].last_value]);
+    try {
+      await pool.query("select setval($1, 9999)", [seq]);
+      await db
+        .transaction(async (tx) => {
+          reference = (await tx.insert(expenses).values({ claimantId: mickey, amountPaise: 100 }).returning())[0]!.reference;
+          tx.rollback();
+        })
+        .catch((e) => {
+          if (!(e instanceof TransactionRollbackError)) throw e;
+        });
+    } finally {
+      await pool.query("select setval($1, $2, $3)", [seq, rows[0].last_value, rows[0].is_called]);
+    }
     expect(reference).toBe("E-10000");
   });
 
