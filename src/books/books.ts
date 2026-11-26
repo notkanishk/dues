@@ -68,8 +68,11 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         cancelReason: b.cancelReason,
         kind: b.kind as BillKind | null,
         amount: money(b.amountPaise, b.currency),
+        billNo: b.billNo,
+        billDate: b.billDate,
         fulfilledOn: b.fulfilledOn,
         paperlessId: b.paperlessId,
+        differs: b.differsFromDocument,
         cancelled: b.cancelledAt !== null,
         claim: null, // ponytail: no Claims table yet; filled from Claim membership when Claims land
       }));
@@ -110,6 +113,9 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
       case "CancelBill":
       case "ReturnBill":
         return [1, await expenseOf(tx, bills, command.billId)];
+      case "CorrectBill":
+      case "ConfirmDiffers":
+        return [0, await expenseOf(tx, bills, command.billId)];
       case "MarkRefundReceived":
         return [0, await expenseOf(tx, refunds, command.refundId)];
       case "CorrectExpense":
@@ -138,6 +144,8 @@ function entityOf(event: Event): [Entity, string] {
     case "ExpectedBillReduced":
     case "BillRemovedFromClaim":
     case "BillCancelled":
+    case "BillCorrected":
+    case "DiffersConfirmed":
       return ["bill", event.billId];
     case "RefundExpected":
     case "RefundReceived":
@@ -215,6 +223,22 @@ async function write(tx: Tx, event: Event, at: Date) {
       return;
     case "RefundReceived":
       await tx.update(refunds).set({ refundedOn: event.refundedOn }).where(eq(refunds.id, event.refundId));
+      return;
+    case "BillCorrected": {
+      const { amount, billNo, billDate } = event.changes;
+      await tx
+        .update(bills)
+        .set({
+          ...(amount && { amountPaise: amount.to?.paise ?? null }),
+          ...(billNo && { billNo: billNo.to }),
+          ...(billDate && { billDate: billDate.to }),
+          differsFromDocument: event.differs,
+        })
+        .where(eq(bills.id, event.billId));
+      return;
+    }
+    case "DiffersConfirmed":
+      await tx.update(bills).set({ differsFromDocument: false }).where(eq(bills.id, event.billId));
       return;
     case "ExpenseCorrected": {
       const { amount, payee, paidOn } = event.changes;
@@ -328,6 +352,9 @@ export function createBooks({ db, now, enqueue }: Deps) {
             reference: b.reference,
             kind: b.kind,
             amount: b.amount,
+            billNo: b.billNo,
+            billDate: b.billDate,
+            differs: b.differs,
             fulfilledOn: b.fulfilledOn,
             cancelReason: b.cancelReason,
             status: deriveBill(b),

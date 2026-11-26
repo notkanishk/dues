@@ -53,7 +53,29 @@ export type CorrectExpense = {
   readonly payee?: string | null;
   readonly paidOn?: string;
 };
-export type Command = LogExpense | SplitExpectedBill | ExpectRefund | CancelBill | ReturnBill | MarkRefundReceived | CorrectExpense;
+/**
+ * Corrects a Bill's amount, Bill number or date after its document is attached, or a No bill's (expense-tracking, Bill
+ * corrections). A change to a Bill with a document marks it "differs from the document" until ConfirmDiffers.
+ */
+export type CorrectBill = {
+  readonly type: "CorrectBill";
+  readonly billId: string;
+  readonly amount?: Money;
+  readonly billNo?: string | null;
+  readonly billDate?: string | null;
+};
+/** The Claimant confirms the document shows the edited values: the "differs from the document" mark is cleared. */
+export type ConfirmDiffers = { readonly type: "ConfirmDiffers"; readonly billId: string };
+export type Command =
+  | LogExpense
+  | SplitExpectedBill
+  | ExpectRefund
+  | CancelBill
+  | ReturnBill
+  | MarkRefundReceived
+  | CorrectExpense
+  | CorrectBill
+  | ConfirmDiffers;
 /** A corrected field's value before and after, for the audit log. */
 export type Change<T> = { readonly from: T; readonly to: T };
 export type RefundReason = "cancelled" | "returned" | "partial";
@@ -103,7 +125,20 @@ export type Event =
         readonly payee?: Change<string | null>;
         readonly paidOn?: Change<string | null>;
       };
-    };
+    }
+  | {
+      readonly type: "BillCorrected";
+      readonly billId: string;
+      readonly expenseId: string;
+      readonly changes: {
+        readonly amount?: Change<Money | null>;
+        readonly billNo?: Change<string | null>;
+        readonly billDate?: Change<string | null>;
+      };
+      /** "differs from the document" after this edit: set by an edit to a Bill with a document, kept until confirmed. */
+      readonly differs: boolean;
+    }
+  | { readonly type: "DiffersConfirmed"; readonly billId: string; readonly expenseId: string };
 
 // No command enqueues a follow-up yet; the shell already writes whatever decide returns.
 export type Job = { readonly name: string; readonly data: unknown };
@@ -127,8 +162,12 @@ export type BillState = {
   id: string;
   kind: BillKind | null;
   amount: Money | null;
+  billNo: string | null;
+  billDate: string | null;
   fulfilledOn: string | null;
   paperlessId: number | null;
+  /** "differs from the document": edited after its document was attached, not yet confirmed against it. */
+  differs: boolean;
   cancelled: boolean;
   /** The state of the Claim it is on; a Bill is claimed from the moment it is added, draft included. Null until Claims exist (the loader fills it then). */
   claim: "draft" | "submitted" | "reimbursed" | null;
@@ -249,6 +288,32 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       // Keeping a value changes nothing and writes nothing.
       return ok(Object.keys(changes).length ? [{ type: "ExpenseCorrected", expenseId: expense.id, changes }] : []);
     }
+    case "CorrectBill": {
+      const found = findBill(slice, command.billId);
+      if (!found.ok) return found;
+      const { expense, bill } = found;
+      if (bill.cancelled) return reject("invalid_transition");
+      // ponytail: the spec defines corrections after a document is attached, and a No bill has none to wait for;
+      // any other Bill (an Order's expected remainder, a Bill still waiting for its document) is refused.
+      if (bill.paperlessId === null && bill.kind !== "no_bill") return reject("invalid_transition");
+      if (command.amount !== undefined && !isPayment(command.amount)) return rejectField("amount");
+      if (command.billNo != null && bill.kind !== "invoice") return rejectField("billNo"); // only an Invoice has one
+      if (command.billDate != null && !isDate(command.billDate)) return rejectField("billDate");
+      const changes = {
+        ...changed("amount", bill.amount, command.amount),
+        ...changed("billNo", bill.billNo, command.billNo),
+        ...changed("billDate", bill.billDate, command.billDate),
+      };
+      if (!Object.keys(changes).length) return ok([]);
+      const differs = bill.differs || bill.paperlessId !== null;
+      return ok([{ type: "BillCorrected", billId: bill.id, expenseId: expense.id, changes, differs }]);
+    }
+    case "ConfirmDiffers": {
+      const found = findBill(slice, command.billId);
+      if (!found.ok) return found;
+      if (!found.bill.differs) return reject("invalid_transition");
+      return ok([{ type: "DiffersConfirmed", billId: found.bill.id, expenseId: found.expense.id }]);
+    }
     case "MarkRefundReceived": {
       // Not refused on a closed Expense: closing may leave a Refund still expected (FUNCTIONAL §3.1).
       const expense = Object.values(slice.expenses).find((e) => e.refunds.some((r) => r.id === command.refundId));
@@ -327,8 +392,11 @@ export function apply(slice: Slice, event: Event): Slice {
         id: event.billId,
         kind: event.kind,
         amount: event.amount,
+        billNo: null,
+        billDate: null,
         fulfilledOn: event.fulfilledOn,
         paperlessId: null,
+        differs: false,
         cancelled: false,
         claim: null,
       };
@@ -350,13 +418,20 @@ export function apply(slice: Slice, event: Event): Slice {
       const refunds = expense.refunds.map((r) => (r.id === event.refundId ? { ...r, received: true } : r));
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, refunds } } };
     }
+    case "BillCorrected":
+      return updateBill(slice, event.expenseId, event.billId, { ...after(event.changes), differs: event.differs });
+    case "DiffersConfirmed":
+      return updateBill(slice, event.expenseId, event.billId, { differs: false });
     case "ExpenseCorrected": {
       const expense = slice.expenses[event.expenseId]!;
-      const to = Object.fromEntries(Object.entries(event.changes).map(([field, change]) => [field, change.to]));
-      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, ...to } } };
+      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, ...after(event.changes) } } };
     }
   }
 }
+
+/** Each corrected field's value after the change. */
+const after = (changes: Readonly<Record<string, Change<unknown>>>) =>
+  Object.fromEntries(Object.entries(changes).map(([field, change]) => [field, change.to]));
 
 function updateBill(slice: Slice, expenseId: string, billId: string, change: Partial<BillState>): Slice {
   const expense = slice.expenses[expenseId]!;

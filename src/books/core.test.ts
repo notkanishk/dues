@@ -105,8 +105,11 @@ describe("apply and derivation", () => {
                     id: "b-1",
                     kind: null,
                     amount: rupees(paise),
+                    billNo: null,
+                    billDate: null,
                     fulfilledOn: kind === "online" ? null : paidOn,
                     paperlessId: null,
+                    differs: false,
                     cancelled: false,
                     claim: null,
                   },
@@ -140,6 +143,9 @@ describe("apply and derivation", () => {
       amount: rupees(b),
       fulfilledOn: "2026-11-19",
       paperlessId: 7,
+      billNo: null,
+      billDate: null,
+      differs: false,
       cancelled: false,
       claim: null,
     })),
@@ -188,6 +194,9 @@ describe("why an Expense is open", () => {
     amount: rupees(paise),
     fulfilledOn: "2026-11-19",
     paperlessId: 7,
+    billNo: null,
+    billDate: null,
+    differs: false,
     cancelled: false,
     claim: null,
     ...facts,
@@ -323,6 +332,9 @@ describe("Bill lifecycle", () => {
     amount: rupees(80000),
     fulfilledOn: null,
     paperlessId: null,
+    billNo: null,
+    billDate: null,
+    differs: false,
     cancelled: false,
     claim: null,
     ...facts,
@@ -382,6 +394,9 @@ describe("Open amount and settled invariants, for any generated slice", () => {
           amount: maybeBlank(paise()),
           fulfilledOn: pick(["2026-11-19", null]),
           paperlessId: pick([7, null]),
+          billNo: null,
+          billDate: null,
+          differs: false,
           cancelled: pick([false, false, true]),
           claim: pick([null, "draft", "submitted", "reimbursed", "reimbursed"] as const),
         }),
@@ -869,5 +884,100 @@ describe("CorrectExpense", () => {
     const slice = shop(100000);
     slice.expenses["e-1"]!.closedReason = "personal";
     expect(run(slice, correct({ amount: rupees(110000) })).decision).toEqual({ ok: false, reason: "invalid_transition" });
+  });
+});
+
+// Bill corrections after a document is attached (expense-tracking). Figures from the spec.
+describe("CorrectBill and ConfirmDiffers", () => {
+  // A shop Bill of ₹1,180.00 whose Invoice document is attached (no command attaches one until LogDocument, Phase 2).
+  const documented = () => {
+    const logged = decide(fresh, logExpense("shop", 118000), mickey, now);
+    if (!logged.ok) throw new Error("expected Ok");
+    const slice = logged.events.reduce(apply, fresh);
+    Object.assign(slice.expenses["e-1"]!.bills[0]!, { paperlessId: 7, kind: "invoice" });
+    return slice;
+  };
+  const bill = (slice: Slice) => slice.expenses["e-1"]!.bills[0]!;
+  const correct = (change: Partial<Omit<Extract<Command, { type: "CorrectBill" }>, "type">>) =>
+    ({ type: "CorrectBill", billId: "b-1", ...change }) as const;
+  const confirm = { type: "ConfirmDiffers", billId: "b-1" } as const;
+
+  it("Reader got the amount wrong: ₹1,180.00 changed to ₹1,108.00 → the Bill differs from the document, with from and to", () => {
+    const { decision, slice } = run(documented(), correct({ amount: rupees(110800) }));
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [{ type: "BillCorrected", billId: "b-1", expenseId: "e-1", changes: { amount: { from: rupees(118000), to: rupees(110800) } }, differs: true }],
+    });
+    expect(bill(slice)).toMatchObject({ amount: rupees(110800), differs: true });
+    expect(derived(slice).openAmount).toEqual(rupees(7200));
+  });
+
+  it("Confirmed against the document: the differs mark is cleared", () => {
+    const edited = run(documented(), correct({ amount: rupees(110800) })).slice;
+    const { decision, slice } = run(edited, confirm);
+    expect(decision).toEqual({ ok: true, jobs: [], events: [{ type: "DiffersConfirmed", billId: "b-1", expenseId: "e-1" }] });
+    expect(bill(slice)).toMatchObject({ amount: rupees(110800), differs: false });
+  });
+
+  it("corrects Bill number and date too; a value kept as it was is left out", () => {
+    const { decision, slice } = run(documented(), correct({ amount: rupees(118000), billNo: "GPB/2611/042", billDate: "2026-11-18" }));
+    expect(decision).toMatchObject({
+      ok: true,
+      events: [{ changes: { billNo: { from: null, to: "GPB/2611/042" }, billDate: { from: null, to: "2026-11-18" } }, differs: true }],
+    });
+    expect(decision.ok && Object.keys((decision.events[0] as { changes: object }).changes)).toEqual(["billNo", "billDate"]);
+    expect(bill(slice)).toMatchObject({ billNo: "GPB/2611/042", billDate: "2026-11-18" });
+  });
+
+  it("keeping every value changes nothing and does not mark the Bill", () => {
+    expect(run(documented(), correct({ amount: rupees(118000) })).decision).toEqual({ ok: true, events: [], jobs: [] });
+  });
+
+  it("Locked after submission: a Bill on a submitted Claim refuses the edit and the confirm", () => {
+    const slice = run(documented(), correct({ amount: rupees(110800) })).slice;
+    bill(slice).claim = "submitted";
+    expect(run(slice, correct({ amount: rupees(118000) })).decision).toEqual({ ok: false, reason: "locked" });
+    expect(run(slice, confirm).decision).toEqual({ ok: false, reason: "locked" });
+  });
+
+  it("a Bill on a draft Claim stays editable", () => {
+    const slice = documented();
+    bill(slice).claim = "draft";
+    expect(run(slice, correct({ amount: rupees(110800) })).decision).toMatchObject({ ok: true, events: [{ type: "BillCorrected" }] });
+  });
+
+  it("a No bill has no document: it is corrected and never differs", () => {
+    const slice = documented();
+    Object.assign(bill(slice), { paperlessId: null, kind: "no_bill" });
+    const { decision } = run(slice, correct({ amount: rupees(110800) }));
+    expect(decision).toMatchObject({ ok: true, events: [{ type: "BillCorrected", differs: false }] });
+  });
+
+  it.each([
+    ["a Bill without its document (the spec defines corrections after one is attached)", (s: Slice) => Object.assign(bill(s), { paperlessId: null })],
+    ["a cancelled Bill", (s: Slice) => Object.assign(bill(s), { cancelled: true })],
+  ])("refuses %s as invalid_transition", (_, change) => {
+    const slice = documented();
+    change(slice);
+    expect(run(slice, correct({ amount: rupees(110800) })).decision).toEqual({ ok: false, reason: "invalid_transition" });
+  });
+
+  it.each([
+    ["a zero amount", correct({ amount: rupees(0) }), "amount"],
+    ["a date that does not exist", correct({ billDate: "2026-02-30" }), "billDate"],
+  ])("refuses %s as validation", (_, command, field) => {
+    expect(run(documented(), command).decision).toEqual({ ok: false, reason: "validation", field });
+  });
+
+  it("refuses a Bill number on anything but an Invoice", () => {
+    const slice = documented();
+    bill(slice).kind = "informal";
+    expect(run(slice, correct({ billNo: "42" })).decision).toEqual({ ok: false, reason: "validation", field: "billNo" });
+  });
+
+  it("refuses confirming a Bill that does not differ, or one outside the Actor's slice", () => {
+    expect(run(documented(), confirm).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(run(documented(), { ...confirm, billId: "b-9" }).decision).toEqual({ ok: false, reason: "not_found" });
   });
 });

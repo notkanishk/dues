@@ -76,6 +76,8 @@ export const bills = pgTable(
     description: text("description"),
     fulfilledOn: date("fulfilled_on"),
     paperlessId: integer("paperless_id"),
+    // "differs from the document": edited after its document was attached, until the Claimant confirms it (expense-tracking).
+    differsFromDocument: boolean("differs_from_document").notNull().default(false),
     remarks: text("remarks"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     // Why it was cancelled: returned is for good (expense-tracking, Return before submission); cancelled may be undone (2.13d).

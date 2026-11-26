@@ -1,0 +1,1 @@
+ALTER TABLE "bills" ADD COLUMN "differs_from_document" boolean DEFAULT false NOT NULL;

@@ -514,3 +514,35 @@ describe("Expense corrections", () => {
     expect(await read(mickey, expenseId)).toMatchObject({ amount: rupees(100000) });
   });
 });
+
+// Bill corrections after a document is attached (expense-tracking), through execute.
+describe("Bill corrections", () => {
+  it("Reader got the amount wrong: ₹1,180.00 → ₹1,108.00 shows differs from the document until confirmed, each step audited", async () => {
+    const mickey = claimant();
+    const expenseId = expenseIdOf(await books.execute(mickey, logExpense("shop", 118000)));
+    // No command attaches a document yet (LogDocument, Phase 2): the link and kind go in directly.
+    await db.update(bills).set({ paperlessId: 7, kind: "invoice" }).where(eq(bills.expenseId, expenseId));
+    const billId = (await read(mickey, expenseId)).bills[0]!.id;
+
+    ok(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(110800), billNo: "GPB/2611/042", billDate: "2026-11-18" }));
+    expect((await read(mickey, expenseId)).bills).toMatchObject([
+      { amount: rupees(110800), billNo: "GPB/2611/042", billDate: "2026-11-18", differs: true, status: "ready" },
+    ]);
+    const corrected = (await auditRowsOf(mickey)).at(-1)!;
+    expect(corrected).toMatchObject({ command: "CorrectBill", event: "BillCorrected", entity: "bill", entityId: billId, fromState: "ready", toState: "ready" });
+    expect(corrected.payload).toMatchObject({ changes: { amount: { from: rupees(118000), to: rupees(110800) } }, differs: true });
+
+    ok(await books.execute(mickey, { type: "ConfirmDiffers", billId }));
+    expect((await read(mickey, expenseId)).bills).toMatchObject([{ amount: rupees(110800), differs: false }]);
+    expect((await auditRowsOf(mickey)).at(-1)).toMatchObject({ command: "ConfirmDiffers", event: "DiffersConfirmed", entityId: billId });
+  });
+
+  it("refuses a Bill without its document and changes nothing", async () => {
+    const mickey = claimant();
+    const expenseId = expenseIdOf(await books.execute(mickey, logExpense("shop", 118000)));
+    const billId = (await read(mickey, expenseId)).bills[0]!.id;
+    expect(await books.execute(mickey, { type: "CorrectBill", billId, amount: rupees(110800) })).toEqual({ ok: false, reason: "invalid_transition" });
+    expect((await read(mickey, expenseId)).bills).toMatchObject([{ amount: rupees(118000), differs: false }]);
+    expect(await auditRowsOf(mickey)).toHaveLength(2);
+  });
+});
