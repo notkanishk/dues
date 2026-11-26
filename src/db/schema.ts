@@ -11,8 +11,9 @@ const reference = (letter: string, seq: string) =>
 const referenceFormat = (letter: string) => sql.raw(`reference ~ '^${letter}-[1-9][0-9]*$'`);
 
 // Money is integer paise plus a currency code (platform-foundations). bigint in the database;
-// read as a JS number, exact up to 2^53 paise.
-const amountPaise = () => bigint("amount_paise", { mode: "number" }).notNull();
+// read as a JS number, exact up to 2^53 paise. Nullable on Expenses and Bills: a payment whose
+// amount can't be read is still recorded, amount blank (document-intake, reminders).
+const amountPaise = () => bigint("amount_paise", { mode: "number" });
 const currency = () => char("currency", { length: 3 }).notNull().default("INR");
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
@@ -87,7 +88,7 @@ export const refunds = pgTable(
     id: key(),
     reference: reference("R", "refund_reference_seq"),
     expenseId: uuid("expense_id").notNull().references(() => expenses.id),
-    amountPaise: amountPaise(),
+    amountPaise: amountPaise().notNull(),
     currency: currency(),
     reason: text("reason").notNull(),
     refundedOn: date("refunded_on"),
@@ -109,7 +110,7 @@ export const owedToUniversity = pgTable(
     reference: reference("O", "owed_to_university_reference_seq"),
     claimantId: uuid("claimant_id").notNull(),
     billId: uuid("bill_id").notNull().references(() => bills.id),
-    amountPaise: amountPaise(),
+    amountPaise: amountPaise().notNull(),
     currency: currency(),
     repaidOn: date("repaid_on"),
     createdAt: createdAt(),

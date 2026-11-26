@@ -109,3 +109,24 @@ describe("Keys and References", () => {
     await refusedAsImmutable(db.update(owedToUniversity).set({ reference: "O-999999999" }).where(eq(owedToUniversity.id, owed!.id)));
   });
 });
+
+describe("Amounts", () => {
+  const NOT_NULL_VIOLATION = "23502";
+
+  it("lets an Expense and its Payment proof Bill wait with the amount blank", async () => {
+    // document-intake: a payment confirmation whose amount can't be read still makes the Expense.
+    const [expense] = await db.insert(expenses).values({ claimantId: mickey }).returning();
+    const [bill] = await db.insert(bills).values({ expenseId: expense!.id, kind: "payment_proof" }).returning();
+    expect(expense!.amountPaise).toBeNull();
+    expect(bill!.amountPaise).toBeNull();
+  });
+
+  it("refuses a Refund or Owed to university without an amount", async () => {
+    const expense = await logExpense(dexter);
+    const [bill] = await db.insert(bills).values({ expenseId: expense.id, kind: "invoice", amountPaise: 600 }).returning();
+    // @ts-expect-error amountPaise is required here
+    await refusedWith(NOT_NULL_VIOLATION, db.insert(refunds).values({ expenseId: expense.id, reason: "returned" }));
+    // @ts-expect-error amountPaise is required here
+    await refusedWith(NOT_NULL_VIOLATION, db.insert(owedToUniversity).values({ claimantId: dexter, billId: bill!.id }));
+  });
+});

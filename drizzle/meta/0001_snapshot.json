@@ -1,5 +1,5 @@
 {
-  "id": "7b4a7bf6-2fe9-40f9-947a-dec84b9b0040",
+  "id": "b3af8f18-ebbc-4ce9-bf27-29b80e90a8eb",
   "prevId": "0ae1f6bf-135d-435f-8f07-6b838a995d3e",
   "version": "7",
   "dialect": "postgresql",
@@ -131,7 +131,7 @@
           "name": "amount_paise",
           "type": "bigint",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "currency": {
           "name": "currency",
@@ -251,7 +251,7 @@
           "name": "amount_paise",
           "type": "bigint",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "currency": {
           "name": "currency",
