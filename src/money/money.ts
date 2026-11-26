@@ -22,6 +22,9 @@ export function sum(amounts: readonly Money[]): Money {
   return { paise, currency: "INR" };
 }
 
+/** Exact difference a − b; may go below zero (a signed Open amount). */
+export const minus = (a: Money, b: Money): Money => sum([a, { paise: -b.paise, currency: b.currency }]);
+
 const indian = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
 /** Whole rupees and the paise remainder, both integers (no division that can leave a fraction). Throws on paise that are not a safe integer. */

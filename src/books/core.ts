@@ -1,5 +1,5 @@
 // Books' functional core (design §1): decide and apply are pure; the shell (books.ts) does the I/O.
-import { type Money, sum, zero } from "@/src/money/money";
+import { type Money, minus, sum, zero } from "@/src/money/money";
 
 // ponytail: the Actor lives here until Claimants (task 2.7) produces it; then it moves there.
 export type Actor = {
@@ -178,10 +178,10 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       const { expense, bill, remainder } = found;
       if (!isDate(command.fulfilledOn)) return rejectField("fulfilledOn");
       // ponytail: an Invoice for the whole remainder fulfils the expected Bill itself; that is not a split.
-      if (!isPayment(command.amount) || command.amount.paise >= remainder) return rejectField("amount");
+      if (!isPayment(command.amount) || command.amount.paise >= remainder.paise) return rejectField("amount");
       const [newBillId] = slice.newIds as [string];
       return ok([
-        { type: "ExpectedBillReduced", billId: bill.id, expenseId: expense.id, amount: inr(remainder - command.amount.paise) },
+        { type: "ExpectedBillReduced", billId: bill.id, expenseId: expense.id, amount: minus(remainder, command.amount) },
         { type: "BillAdded", billId: newBillId, expenseId: expense.id, kind: null, amount: command.amount, fulfilledOn: command.fulfilledOn },
       ]);
     }
@@ -190,14 +190,14 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       const found = expectedBill(slice, command.billId);
       if (!found.ok) return found;
       const { expense, bill, remainder } = found;
-      if (command.type === "ExpectRefund" && (!isPayment(command.amount) || command.amount.paise > remainder)) return rejectField("amount");
-      const paise = command.type === "ExpectRefund" ? command.amount.paise : remainder;
+      if (command.type === "ExpectRefund" && (!isPayment(command.amount) || command.amount.paise > remainder.paise)) return rejectField("amount");
+      const cancelled = command.type === "ExpectRefund" ? command.amount : remainder;
       const [refundId] = slice.newIds as [string];
       return ok([
-        paise === remainder // everything left is cancelled: the expected Bill goes, its Refund covers the remainder
+        cancelled.paise === remainder.paise // everything left is cancelled: the expected Bill goes, its Refund covers the remainder
           ? { type: "BillCancelled", billId: bill.id, expenseId: expense.id, reason: "cancelled" }
-          : { type: "ExpectedBillReduced", billId: bill.id, expenseId: expense.id, amount: inr(remainder - paise) },
-        { type: "RefundExpected", refundId, expenseId: expense.id, billId: bill.id, amount: inr(paise), reason: "cancelled" },
+          : { type: "ExpectedBillReduced", billId: bill.id, expenseId: expense.id, amount: minus(remainder, cancelled) },
+        { type: "RefundExpected", refundId, expenseId: expense.id, billId: bill.id, amount: cancelled, reason: "cancelled" },
       ]);
     }
     case "ReturnBill": {
@@ -226,7 +226,6 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
 }
 
 const ok = (events: Event[]): Decision => ({ ok: true, events, jobs: [] });
-const inr = (paise: number): Money => ({ paise, currency: "INR" });
 const reject = (reason: Rejected["reason"]): Rejected => ({ ok: false, reason });
 
 /**
@@ -251,7 +250,7 @@ function expectedBill(slice: Slice, billId: string) {
   if (!found.ok) return found;
   const { bill } = found;
   if (bill.cancelled || bill.fulfilledOn || bill.claim || !bill.amount) return reject("invalid_transition");
-  return { ...found, remainder: bill.amount.paise };
+  return { ...found, remainder: bill.amount };
 }
 
 const rejectField = (field: string): Rejected => ({ ok: false, reason: "validation", field });
@@ -342,7 +341,7 @@ function openAmount(expense: ExpenseState): Money | null {
     expense.writtenOff,
   ];
   if (!expense.amount || covering.some((m) => m === null)) return null;
-  return { paise: expense.amount.paise - sum(covering as Money[]).paise, currency: "INR" };
+  return minus(expense.amount, sum(covering as Money[]));
 }
 
 function whyOpen(expense: ExpenseState, open: Money | null): OpenReason | null {
