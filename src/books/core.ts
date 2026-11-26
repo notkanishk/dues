@@ -37,7 +37,7 @@ export type SplitExpectedBill = {
 export type ExpectRefund = { readonly type: "ExpectRefund"; readonly billId: string; readonly amount: Money };
 /** Cancels an expected Bill before fulfilment, all of what is left of it (W2.3, Bill lifecycle). */
 export type CancelBill = { readonly type: "CancelBill"; readonly billId: string };
-/** A delivered Bill sent back before it is on a Claim (W2.5): cancelled for good, its amount an expected Refund. */
+/** A delivered Bill sent back before it is on a submitted Claim (W2.5): off any draft Claim, cancelled for good, its amount an expected Refund. */
 export type ReturnBill = { readonly type: "ReturnBill"; readonly billId: string };
 /** The money is back (W2.4): the expected Refund is received on its refunded-on date. */
 export type MarkRefundReceived = { readonly type: "MarkRefundReceived"; readonly refundId: string; readonly refundedOn: string };
@@ -70,6 +70,7 @@ export type Event =
       readonly fulfilledOn: string | null;
     }
   | { readonly type: "ExpectedBillReduced"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
+  | { readonly type: "BillRemovedFromClaim"; readonly billId: string; readonly expenseId: string }
   | { readonly type: "BillCancelled"; readonly billId: string; readonly expenseId: string; readonly reason: "cancelled" | "returned" }
   | {
       readonly type: "RefundExpected";
@@ -203,12 +204,10 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (!found.ok) return found;
       const { expense, bill } = found;
       if (bill.cancelled) return reject("invalid_transition"); // cancelled is for good, even after a recall
-      // ponytail: a Bill on any Claim is refused for now. After submission it becomes Owed to university, and a draft
-      // Claim must let go of it first; both arrive with the Claims tasks.
-      if (bill.claim) return reject("locked");
       if (!bill.fulfilledOn || !bill.amount) return reject("invalid_transition"); // goods never came: cancel instead
       const [refundId] = slice.newIds as [string];
       return ok([
+        ...(bill.claim === "draft" ? [{ type: "BillRemovedFromClaim", billId: bill.id, expenseId: expense.id } as const] : []),
         { type: "BillCancelled", billId: bill.id, expenseId: expense.id, reason: "returned" },
         { type: "RefundExpected", refundId, expenseId: expense.id, amount: bill.amount, reason: "returned" },
       ]);
@@ -229,16 +228,23 @@ const ok = (events: Event[]): Decision => ({ ok: true, events, jobs: [] });
 const inr = (paise: number): Money => ({ paise, currency: "INR" });
 const reject = (reason: Rejected["reason"]): Rejected => ({ ok: false, reason });
 
-/** The Bill and its open Expense (not draft, not closed), or not_found when it is not in the Actor's slice (the loader scoped it). */
+/**
+ * The Bill and its open Expense (not draft, not closed), or not_found when it is not in the Actor's slice (the loader
+ * scoped it). A Bill on a submitted Claim is locked for every command (design §1).
+ */
 function findBill(slice: Slice, billId: string) {
   for (const expense of Object.values(slice.expenses)) {
     const bill = expense.bills.find((b) => b.id === billId);
-    if (bill) return expense.draft || expense.closedReason ? reject("invalid_transition") : { ok: true as const, expense, bill };
+    if (!bill) continue;
+    if (expense.draft || expense.closedReason) return reject("invalid_transition");
+    // ponytail: reimbursed counts as submitted; returning after submission (Owed to university) arrives with Claims.
+    if (bill.claim === "submitted" || bill.claim === "reimbursed") return reject("locked");
+    return { ok: true as const, expense, bill };
   }
   return reject("not_found");
 }
 
-/** An Order's expected Bill: not cancelled, goods not yet arrived, not on a Claim, with an amount. */
+/** An Order's expected Bill: not cancelled, goods not yet arrived, not on a draft Claim, with an amount. */
 function expectedBill(slice: Slice, billId: string) {
   const found = findBill(slice, billId);
   if (!found.ok) return found;
@@ -282,6 +288,8 @@ export function apply(slice: Slice, event: Event): Slice {
     }
     case "ExpectedBillReduced":
       return updateBill(slice, event.expenseId, event.billId, { amount: event.amount });
+    case "BillRemovedFromClaim":
+      return updateBill(slice, event.expenseId, event.billId, { claim: null });
     case "BillCancelled":
       return updateBill(slice, event.expenseId, event.billId, { cancelled: true });
     case "RefundExpected": {

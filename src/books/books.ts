@@ -168,6 +168,8 @@ async function write(tx: Tx, event: Event, at: Date) {
     case "ExpectedBillReduced":
       await tx.update(bills).set({ amountPaise: event.amount.paise }).where(eq(bills.id, event.billId));
       return;
+    case "BillRemovedFromClaim":
+      return; // ponytail: the loader never loads a Claim yet, so this cannot happen; deletes the Claim line once Claims land
     case "BillCancelled":
       await tx.update(bills).set({ cancelledAt: at }).where(eq(bills.id, event.billId));
       return;

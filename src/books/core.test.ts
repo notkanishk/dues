@@ -676,11 +676,40 @@ describe("Order commands", () => {
       expect(run(order(80000), { type: "ReturnBill", billId: "b-1" }, ["r-1"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
     });
 
-    it.each(["draft", "submitted", "reimbursed"] as const)("refuses a Bill on a %s Claim as locked (Owed to university waits for Claims)", (claim) => {
+    it.each(["submitted", "reimbursed"] as const)("refuses a Bill on a %s Claim as locked (Owed to university waits for Claims)", (claim) => {
       const slice = ready();
       slice.expenses["e-1"]!.bills[0]!.claim = claim;
       expect(run(slice, { type: "ReturnBill", billId: "b-1" }, ["r-1"]).decision).toEqual({ ok: false, reason: "locked" });
     });
+
+    it("a Bill on a draft Claim is returned: taken off the draft, then cancelled, with its Refund", () => {
+      const slice = ready();
+      slice.expenses["e-1"]!.bills[0]!.claim = "draft";
+      const { decision, slice: after } = run(slice, { type: "ReturnBill", billId: "b-1" }, ["r-1"]);
+      expect(decision).toEqual({
+        ok: true,
+        jobs: [],
+        events: [
+          { type: "BillRemovedFromClaim", billId: "b-1", expenseId: "e-1" },
+          { type: "BillCancelled", billId: "b-1", expenseId: "e-1", reason: "returned" },
+          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", amount: rupees(60000), reason: "returned" },
+        ],
+      });
+      expect(after.expenses["e-1"]!.bills[0]).toMatchObject({ claim: null, cancelled: true });
+      expect(derived(after)).toMatchObject({ openAmount: rupees(0), reason: { code: "refund_owed" }, bills: ["cancelled"] });
+    });
+
+    it.each([
+      { type: "SplitExpectedBill", billId: "b-1", amount: rupees(100), fulfilledOn: "2026-11-21" },
+      { type: "ExpectRefund", billId: "b-1", amount: rupees(100) },
+      { type: "CancelBill", billId: "b-1" },
+    ] as const)("$type on a Bill on a submitted Claim is locked too", (command) => {
+      const slice = order(80000);
+      slice.expenses["e-1"]!.bills[0]!.claim = "submitted";
+      expect(run(slice, command, ["x"]).decision).toEqual({ ok: false, reason: "locked" });
+    });
+
+    it.todo("Claims: returning a Bill on a draft Claim drops it from that Claim's lines and total (needs the Claims table)");
   });
 
   describe("MarkRefundReceived and settling", () => {
