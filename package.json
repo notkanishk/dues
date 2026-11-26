@@ -8,7 +8,7 @@
     "build": "rm -f tsconfig.tsbuildinfo && bun --bun next build && bun run build:worker",
     "build:worker": "bun build worker/index.ts scripts/start-web.ts --target=bun --outdir=dist --external=pg-native",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --pool=threads",
+    "test": "bun --bun vitest run",
     "test:compose": "bash scripts/compose-smoke.sh",
     "db:generate": "drizzle-kit generate",
     "worker": "bun worker/index.ts"
