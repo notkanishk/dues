@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRupees } from "./money";
+import { parseRupees, sum } from "./money";
 
 // platform-foundations: "Money stored as integer paise". Expected values are the spec's own literals.
 describe("Money stored as integer paise", () => {
@@ -29,4 +29,15 @@ describe("parsing typed amounts never goes through a float", () => {
       expect(parseRupees(text)).toBeNull();
     },
   );
+});
+
+describe("Sums stay exact", () => {
+  it("adds Bills of ₹0.10, ₹0.20 and ₹0.30 to exactly 60 paise", () => {
+    const bills = ["₹0.10", "₹0.20", "₹0.30"].map((t) => parseRupees(t)!);
+    expect(sum(bills)).toEqual({ paise: 60, currency: "INR" });
+  });
+
+  it("sums nothing to zero", () => {
+    expect(sum([])).toEqual({ paise: 0, currency: "INR" });
+  });
 });
