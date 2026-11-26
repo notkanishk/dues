@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { auditLog, bills, expenses, idempotencyKeys, refunds } from "@/src/db/schema";
-import type { Money } from "@/src/money/money";
+import { type Money, zero } from "@/src/money/money";
 import {
   type Actor,
   apply,
@@ -67,6 +67,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         fulfilledOn: b.fulfilledOn,
         paperlessId: b.paperlessId,
         cancelled: b.cancelledAt !== null,
+        claim: null, // ponytail: no Claims table yet; filled from Claim membership when Claims land
       }));
     const state: ExpenseState = {
       id: row.id,
@@ -77,6 +78,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       refunds: refundRows
         .filter((r) => r.expenseId === row.id)
         .map((r) => ({ amount: money(r.amountPaise, r.currency)!, received: r.refundedOn !== null })),
+      writtenOff: zero, // ponytail: nothing is written off until task 2.13d stores it
     };
     return { row, bills: ownBills, state };
   });
@@ -210,19 +212,20 @@ export function createBooks({ db, now, enqueue }: Deps) {
       }
     },
 
-    /** One Expense with its Bills; status, Open amount and Bill status derived on read (design D3). */
+    /** One Expense with its Bills; status, Open amount, why it is open and Bill status derived on read (design D3). */
     async expense(actor: Actor, id: string) {
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
       const { row, bills: billStates, state } = found;
-      const { status, openAmount } = deriveExpense(state);
+      const derived = deriveExpense(state);
       return {
         ok: true as const,
         expense: {
           id: row.id,
           reference: row.reference,
-          status,
-          openAmount,
+          status: derived.status,
+          openAmount: derived.openAmount,
+          reason: derived.reason,
           amount: state.amount,
           kind: row.kind,
           paidOn: row.paidOn,

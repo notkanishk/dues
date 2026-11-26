@@ -1,5 +1,5 @@
 // Books' functional core (design §1): decide and apply are pure; the shell (books.ts) does the I/O.
-import { type Money, sum } from "@/src/money/money";
+import { type Money, sum, zero } from "@/src/money/money";
 
 // ponytail: the Actor lives here until Claimants (task 2.7) produces it; then it moves there.
 export type Actor = {
@@ -75,6 +75,8 @@ export type BillState = {
   fulfilledOn: string | null;
   paperlessId: number | null;
   cancelled: boolean;
+  /** The state of the Claim it is on; a Bill is claimed from the moment it is added, draft included. Null until Claims exist (the loader fills it then). */
+  claim: "draft" | "submitted" | "reimbursed" | null;
 };
 export type RefundState = { amount: Money; received: boolean };
 export type ExpenseState = {
@@ -84,6 +86,8 @@ export type ExpenseState = {
   amount: Money | null;
   bills: BillState[];
   refunds: RefundState[];
+  /** What "Not claiming" closed as written off (task 2.13d). Zero until that fact is stored. */
+  writtenOff: Money;
 };
 /** What a command touches, loaded by the shell under the Claimant's lock. newIds are fresh UUIDv7 keys from Postgres. */
 export type Slice = { readonly newIds: readonly string[]; readonly expenses: Readonly<Record<string, ExpenseState>> };
@@ -148,7 +152,15 @@ export function apply(slice: Slice, event: Event): Slice {
         ...slice,
         expenses: {
           ...slice.expenses,
-          [event.expenseId]: { id: event.expenseId, draft: false, closedReason: null, amount: event.amount, bills: [], refunds: [] },
+          [event.expenseId]: {
+            id: event.expenseId,
+            draft: false,
+            closedReason: null,
+            amount: event.amount,
+            bills: [],
+            refunds: [],
+            writtenOff: zero,
+          },
         },
       };
     case "BillAdded": {
@@ -160,37 +172,69 @@ export function apply(slice: Slice, event: Event): Slice {
         fulfilledOn: event.fulfilledOn,
         paperlessId: null,
         cancelled: false,
+        claim: null,
       };
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, bills: [...expense.bills, bill] } } };
     }
   }
 }
 
-// Status is derived on read and never stored (design D3). Claimed and reimbursed arrive with Claims;
-// the written-off term and "why it's open" with tasks 2.10, 2.11 and 2.13d.
+// Status, Open amount, "why it's open" and Bill status are derived on read and never stored (design D3).
 export type BillStatus = "expected" | "ready" | "claimed" | "reimbursed" | "cancelled";
 export type ExpenseStatus = "draft" | "open" | "settled" | "closed";
+/**
+ * The first of the spec's five reasons an open Expense is open, in the spec's order; null for any other status,
+ * and null for an open Expense that waits on none of them (see whyOpen).
+ */
+export type OpenReason =
+  | { readonly code: "awaiting_goods" | "refund_owed" | "bill_missing" | "in_claim" }
+  | { readonly code: "mismatch"; readonly amount: Money };
 
 export function deriveBill(bill: BillState): BillStatus {
   if (bill.cancelled) return "cancelled";
+  if (bill.claim === "reimbursed") return "reimbursed";
+  if (bill.claim) return "claimed"; // draft or submitted: removal from a draft sets it back to null, so ready again
   if (bill.fulfilledOn && (bill.paperlessId !== null || bill.kind === "no_bill")) return "ready";
   return "expected";
 }
 
-/** Open amount = Payment − Σ Bills (not cancelled) − Σ Refunds; null while any of those amounts is blank. */
+/** Open amount = Payment − Σ Bills (not cancelled) − Σ Refunds − written off; null while any of those amounts is blank. */
 function openAmount(expense: ExpenseState): Money | null {
-  const covering = [...expense.bills.filter((b) => !b.cancelled).map((b) => b.amount), ...expense.refunds.map((r) => r.amount)];
+  const covering = [
+    ...expense.bills.filter((b) => !b.cancelled).map((b) => b.amount),
+    ...expense.refunds.map((r) => r.amount),
+    expense.writtenOff,
+  ];
   if (!expense.amount || covering.some((m) => m === null)) return null;
   return { paise: expense.amount.paise - sum(covering as Money[]).paise, currency: "INR" };
 }
 
-export function deriveExpense(expense: ExpenseState): { status: ExpenseStatus; openAmount: Money | null } {
+function whyOpen(expense: ExpenseState, open: Money | null): OpenReason | null {
+  const live = expense.bills.filter((b) => !b.cancelled);
+  if (live.some((b) => !b.fulfilledOn)) return { code: "awaiting_goods" };
+  if (expense.refunds.some((r) => !r.received)) return { code: "refund_owed" };
+  if (live.some((b) => b.paperlessId === null && b.kind !== "no_bill")) return { code: "bill_missing" };
+  // The signed Open amount: positive when Bills, Refunds and written off fall short of the Payment.
+  if (open && open.paise !== 0) return { code: "mismatch", amount: open };
+  if (live.some((b) => deriveBill(b) === "claimed")) return { code: "in_claim" };
+  // ponytail: open question for the owner. An open Expense with nothing left to wait for (every Bill covered and
+  // nothing claimed, or a blank amount with nothing expected) has none of the five reasons; null until the spec names one.
+  return null;
+}
+
+/** The one derivation of an Expense: status, Open amount, why it is open, and each Bill's status in the Expense's order. */
+export function deriveExpense(expense: ExpenseState): {
+  status: ExpenseStatus;
+  openAmount: Money | null;
+  reason: OpenReason | null;
+  bills: BillStatus[];
+} {
   const open = openAmount(expense);
-  if (expense.closedReason) return { status: "closed", openAmount: open };
-  if (expense.draft) return { status: "draft", openAmount: open };
+  const bills = expense.bills.map(deriveBill);
+  const at = (status: ExpenseStatus, reason: OpenReason | null = null) => ({ status, openAmount: open, reason, bills });
+  if (expense.closedReason) return at("closed");
+  if (expense.draft) return at("draft");
   const settled =
-    open?.paise === 0 &&
-    expense.bills.every((b) => ["reimbursed", "cancelled"].includes(deriveBill(b))) &&
-    expense.refunds.every((r) => r.received);
-  return { status: settled ? "settled" : "open", openAmount: open };
+    open?.paise === 0 && bills.every((b) => b === "reimbursed" || b === "cancelled") && expense.refunds.every((r) => r.received);
+  return settled ? at("settled") : at("open", whyOpen(expense, open));
 }

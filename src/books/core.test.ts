@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type Actor, apply, decide, deriveBill, deriveExpense, type ExpenseState, type Slice } from "./core";
+import { formatRupees } from "@/src/money/money";
+import { type Actor, apply, type BillState, decide, deriveBill, deriveExpense, type ExpenseState, type Slice } from "./core";
 
 // Pure core: no database. Expected values are written by hand from the spec scenarios.
 const mickey: Actor = { claimantId: "00000000-0000-7000-8000-00000000000a", roles: ["claimant"], via: "session" };
@@ -96,6 +97,7 @@ describe("apply and derivation", () => {
                 closedReason: null,
                 amount: rupees(paise),
                 refunds: [],
+                writtenOff: rupees(0),
                 bills: [
                   {
                     id: "b-1",
@@ -104,6 +106,7 @@ describe("apply and derivation", () => {
                     fulfilledOn: kind === "online" ? null : paidOn,
                     paperlessId: null,
                     cancelled: false,
+                    claim: null,
                   },
                 ],
               },
@@ -114,7 +117,7 @@ describe("apply and derivation", () => {
 
   it("folds a logged online Expense into an open Expense with an expected Bill", () => {
     const expense = afterLog("online");
-    expect(deriveExpense(expense)).toEqual({ status: "open", openAmount: rupees(0) });
+    expect(deriveExpense(expense)).toEqual({ status: "open", openAmount: rupees(0), reason: { code: "awaiting_goods" }, bills: ["expected"] });
     expect(expense.bills.map(deriveBill)).toEqual(["expected"]);
   });
 
@@ -134,8 +137,10 @@ describe("apply and derivation", () => {
       fulfilledOn: "2026-11-19",
       paperlessId: 7,
       cancelled: false,
+      claim: null,
     })),
     refunds: refunds.map((r) => ({ amount: rupees(r.paise), received: r.received })),
+    writtenOff: rupees(0),
   });
 
   it("Partly covered: Payment ₹1,000.00, one Bill ₹400.00 → Open amount ₹600.00", () => {
@@ -154,11 +159,10 @@ describe("apply and derivation", () => {
     expect(deriveExpense(expense(100000, [100000])).status).toBe("open");
   });
 
-  it("a cancelled Bill no longer covers the Payment (its expected Refund does)", () => {
-    const e = expense(100000, [100000]);
-    e.bills[0]!.cancelled = true;
-    expect(deriveExpense(e)).toEqual({ status: "open", openAmount: rupees(100000) });
-    expect(deriveBill(e.bills[0]!)).toBe("cancelled");
+  it("a cancelled Bill no longer covers the Payment (its expected Refund does): refund owed, not awaiting goods", () => {
+    const e = expense(100000, [100000], [{ paise: 100000, received: false }]);
+    e.bills[0] = { ...e.bills[0]!, cancelled: true, fulfilledOn: null, paperlessId: null };
+    expect(deriveExpense(e)).toEqual({ status: "open", openAmount: rupees(0), reason: { code: "refund_owed" }, bills: ["cancelled"] });
   });
 
   it("a ready Bill is Fulfilled and has its document", () => {
@@ -168,5 +172,241 @@ describe("apply and derivation", () => {
   it("draft and closed come from the stored facts", () => {
     expect(deriveExpense({ ...expense(100, []), draft: true }).status).toBe("draft");
     expect(deriveExpense({ ...expense(100, []), closedReason: "personal" }).status).toBe("closed");
+  });
+});
+
+// "Why an Expense is open" and the Bill lifecycle (expense-tracking spec), derived on read (design D3).
+describe("why an Expense is open", () => {
+  type BillFacts = Partial<BillState> & { paise: number };
+  const bill = ({ paise, ...facts }: BillFacts, i = 0): BillState => ({
+    id: `b-${i}`,
+    kind: "invoice",
+    amount: rupees(paise),
+    fulfilledOn: "2026-11-19",
+    paperlessId: 7,
+    cancelled: false,
+    claim: null,
+    ...facts,
+  });
+  const facts = (paise: number, bills: BillFacts[], more: Partial<ExpenseState> = {}): ExpenseState => ({
+    id: "e-1",
+    draft: false,
+    closedReason: null,
+    amount: rupees(paise),
+    bills: bills.map(bill),
+    refunds: [],
+    writtenOff: rupees(0),
+    ...more,
+  });
+  const reasonOf = (e: ExpenseState) => deriveExpense(e).reason;
+
+  it("Awaiting goods: an online Expense with an expected Bill", () => {
+    expect(reasonOf(facts(129900, [{ paise: 129900, kind: null, fulfilledOn: null, paperlessId: null }]))).toEqual({
+      code: "awaiting_goods",
+    });
+  });
+
+  it("Refund owed: no Bill expected and a Refund expected", () => {
+    const e = facts(100000, [{ paise: 70000 }], { refunds: [{ amount: rupees(30000), received: false }] });
+    expect(reasonOf(e)).toEqual({ code: "refund_owed" });
+  });
+
+  it("awaiting goods comes before refund owed", () => {
+    const e = facts(100000, [{ paise: 70000, fulfilledOn: null, paperlessId: null }], {
+      refunds: [{ amount: rupees(30000), received: false }],
+    });
+    expect(reasonOf(e)).toEqual({ code: "awaiting_goods" });
+  });
+
+  it("Bill missing: a Bill is Fulfilled and has no document", () => {
+    expect(reasonOf(facts(25000, [{ paise: 25000, kind: null, paperlessId: null }]))).toEqual({ code: "bill_missing" });
+  });
+
+  it("refund owed comes before bill missing", () => {
+    const e = facts(100000, [{ paise: 70000, paperlessId: null }], { refunds: [{ amount: rupees(30000), received: false }] });
+    expect(reasonOf(e)).toEqual({ code: "refund_owed" });
+  });
+
+  it("No bill is never bill missing: a Fulfilled no-bill Bill without a document", () => {
+    const reason = reasonOf(facts(6000, [{ paise: 6000, kind: "no_bill", paperlessId: null }]));
+    expect(reason).not.toEqual({ code: "bill_missing" });
+  });
+
+  it("a cancelled Bill without a document is not bill missing", () => {
+    const e = facts(100000, [{ paise: 60000, claim: "submitted" }, { paise: 40000, paperlessId: null, cancelled: true }], {
+      refunds: [{ amount: rupees(40000), received: true }],
+    });
+    expect(deriveExpense(e)).toMatchObject({ status: "open", reason: { code: "in_claim" } });
+  });
+
+  it("Mismatch: nothing expected and Bills plus Refunds ₹50.00 short of the Payment → \"mismatch ₹50.00\", at once", () => {
+    // Derivation takes no clock, so nothing can make it wait.
+    const e = facts(100000, [{ paise: 70000 }], { refunds: [{ amount: rupees(25000), received: true }] });
+    const reason = reasonOf(e);
+    expect(reason).toEqual({ code: "mismatch", amount: rupees(5000) });
+    expect(reason?.code === "mismatch" && formatRupees(reason.amount)).toBe("₹50.00");
+  });
+
+  it("Overpaid: Bills ₹50.00 over the Payment → mismatch keeps the signed amount, −₹50.00", () => {
+    expect(reasonOf(facts(100000, [{ paise: 105000 }]))).toEqual({ code: "mismatch", amount: rupees(-5000) });
+  });
+
+  it("bill missing comes before mismatch", () => {
+    expect(reasonOf(facts(100000, [{ paise: 95000, paperlessId: null }]))).toEqual({ code: "bill_missing" });
+  });
+
+  it("Written off: Payment ₹1,000.00, a Bill of ₹730.00 and ₹270.00 written off → Open amount ₹0.00, no mismatch", () => {
+    const e = facts(100000, [{ paise: 73000 }], { writtenOff: rupees(27000) });
+    expect(deriveExpense(e).openAmount).toEqual(rupees(0));
+    expect(reasonOf(e)).not.toMatchObject({ code: "mismatch" });
+  });
+
+  it("In claim: all Bills covered and one claimed, not reimbursed", () => {
+    const e = facts(100000, [{ paise: 60000, claim: "submitted" }, { paise: 40000, claim: "reimbursed" }]);
+    expect(deriveExpense(e)).toEqual({
+      status: "open",
+      openAmount: rupees(0),
+      reason: { code: "in_claim" },
+      bills: ["claimed", "reimbursed"],
+    });
+  });
+
+  it("In claim from the moment a Bill is added to a draft Claim", () => {
+    expect(reasonOf(facts(100000, [{ paise: 100000, claim: "draft" }]))).toEqual({ code: "in_claim" });
+  });
+
+  // Open question for the owner: these open Expenses wait on nothing in the spec's five reasons. Pinned as null until decided.
+  it("no reason yet: every Bill covered and ready, nothing claimed → open with reason null", () => {
+    expect(deriveExpense(facts(100000, [{ paise: 100000 }]))).toEqual({
+      status: "open",
+      openAmount: rupees(0),
+      reason: null,
+      bills: ["ready"],
+    });
+  });
+
+  it("no reason yet: a blank Bill amount with nothing expected → open with no Open amount and reason null", () => {
+    const e = facts(100000, [{ paise: 0 }]);
+    e.bills[0]!.amount = null;
+    expect(deriveExpense(e)).toEqual({ status: "open", openAmount: null, reason: null, bills: ["ready"] });
+  });
+
+  it("Not settled while a Bill is unreimbursed: Open amount zero, one Bill claimed → open", () => {
+    expect(deriveExpense(facts(100000, [{ paise: 100000, claim: "submitted" }])).status).toBe("open");
+  });
+
+  it("Settling: Open amount zero and every Bill reimbursed or cancelled → settled", () => {
+    const e = facts(100000, [{ paise: 70000, claim: "reimbursed" }, { paise: 30000, cancelled: true }], {
+      refunds: [{ amount: rupees(30000), received: true }],
+    });
+    expect(deriveExpense(e)).toEqual({ status: "settled", openAmount: rupees(0), reason: null, bills: ["reimbursed", "cancelled"] });
+  });
+
+  it("Expected Refund blocks settled: stays open with reason refund owed", () => {
+    const e = facts(100000, [{ paise: 70000, claim: "reimbursed" }, { paise: 30000, cancelled: true }], {
+      refunds: [{ amount: rupees(30000), received: false }],
+    });
+    expect(deriveExpense(e)).toMatchObject({ status: "open", reason: { code: "refund_owed" } });
+  });
+});
+
+describe("Bill lifecycle", () => {
+  const bill = (facts: Partial<BillState>): BillState => ({
+    id: "b-1",
+    kind: "invoice",
+    amount: rupees(80000),
+    fulfilledOn: null,
+    paperlessId: null,
+    cancelled: false,
+    claim: null,
+    ...facts,
+  });
+
+  it.each([
+    ["Fulfilled without document → expected", { fulfilledOn: "2026-11-19" }, "expected"],
+    ["Document without fulfilment → expected", { paperlessId: 7 }, "expected"],
+    ["Ready needs both", { fulfilledOn: "2026-11-19", paperlessId: 7 }, "ready"],
+    ["a no-bill Bill is ready without a document", { kind: "no_bill", fulfilledOn: "2026-11-19" }, "ready"],
+    ["Added to a draft Claim → claimed", { fulfilledOn: "2026-11-19", paperlessId: 7, claim: "draft" }, "claimed"],
+    ["On a submitted Claim → claimed", { fulfilledOn: "2026-11-19", paperlessId: 7, claim: "submitted" }, "claimed"],
+    ["Reimbursed", { fulfilledOn: "2026-11-19", paperlessId: 7, claim: "reimbursed" }, "reimbursed"],
+    ["Cancelled before fulfilment", { cancelled: true }, "cancelled"],
+  ] as const)("%s", (_, facts, status) => {
+    expect(deriveBill(bill(facts))).toBe(status);
+  });
+
+  it("Remove from draft: a claimed Bill taken off its draft Claim returns to ready", () => {
+    const onDraft = bill({ fulfilledOn: "2026-11-19", paperlessId: 7, claim: "draft" });
+    expect(deriveBill(onDraft)).toBe("claimed");
+    expect(deriveBill({ ...onDraft, claim: null })).toBe("ready");
+  });
+});
+
+// Property (design §1): for any slice, Open amount = Payment − Σ Bills − Σ Refunds − written off (null while any is blank),
+// and an Expense that is neither draft nor closed is settled ⇔ Open amount zero ∧ every Refund received ∧ every Bill reimbursed or cancelled.
+describe("Open amount and settled invariants, for any generated slice", () => {
+  // ponytail: a seeded generator instead of a property-testing dependency; same seed, same 2,000 slices.
+  let seed = 0x5eed;
+  const next = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (t ^ (t >>> 14)) >>> 0;
+  };
+  const paise = () => next() % 10_000_000; // up to ₹1,00,000.00
+  const pick = <T>(xs: readonly T[]) => xs[next() % xs.length]!;
+  const many = <T>(make: () => T) => Array.from({ length: next() % 5 }, make);
+  const maybeBlank = (p: number) => (next() % 10 === 0 ? null : rupees(p)); // one amount in ten left blank
+
+  it("hold in integer paise for 2,000 slices, blank amounts included", () => {
+    const seen = { settled: 0, openAtZero: 0, blank: 0 };
+    for (let n = 0; n < 2000; n++) {
+      const bills = many(
+        (): BillState => ({
+          id: "b",
+          kind: pick(["invoice", "no_bill", null] as const),
+          amount: maybeBlank(paise()),
+          fulfilledOn: pick(["2026-11-19", null]),
+          paperlessId: pick([7, null]),
+          cancelled: pick([false, false, true]),
+          claim: pick([null, "draft", "submitted", "reimbursed", "reimbursed"] as const),
+        }),
+      );
+      const refunds = many(() => ({ amount: rupees(paise()), received: pick([true, true, false]) }));
+      const amount = maybeBlank(paise() + 1);
+      // Half the time written off takes up whatever is left, so Open amount zero is common, not a fluke.
+      const live = bills.filter((b) => !b.cancelled);
+      const left = (amount?.paise ?? 0) - live.reduce((t, b) => t + (b.amount?.paise ?? 0), 0) - refunds.reduce((t, r) => t + r.amount.paise, 0);
+      const expense: ExpenseState = {
+        id: "e-1",
+        draft: pick([false, false, false, true]),
+        closedReason: pick([null, null, null, "personal"]),
+        amount,
+        bills,
+        refunds,
+        writtenOff: rupees(pick([0, paise(), Math.max(left, 0), Math.max(left, 0)])),
+      };
+
+      const blank = !amount || live.some((b) => !b.amount);
+      let expected = amount?.paise ?? 0;
+      for (const b of live) expected -= b.amount?.paise ?? 0;
+      for (const r of refunds) expected -= r.amount.paise;
+      expected -= expense.writtenOff.paise;
+
+      const { openAmount, status } = deriveExpense(expense);
+      expect(openAmount).toEqual(blank ? null : rupees(expected));
+
+      if (expense.draft || expense.closedReason) continue;
+      const settles =
+        openAmount?.paise === 0 && refunds.every((r) => r.received) && bills.every((b) => b.cancelled || b.claim === "reimbursed");
+      expect(status === "settled").toBe(settles);
+      if (settles) seen.settled++;
+      else if (openAmount?.paise === 0) seen.openAtZero++;
+      if (blank) seen.blank++;
+    }
+    // Both sides of the equivalence, and blank amounts, are actually exercised.
+    expect(seen.settled).toBeGreaterThan(20);
+    expect(seen.openAtZero).toBeGreaterThan(20);
+    expect(seen.blank).toBeGreaterThan(20);
   });
 });
