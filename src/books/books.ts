@@ -67,6 +67,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         fulfilledOn: b.fulfilledOn,
         paperlessId: b.paperlessId,
         cancelled: b.cancelledAt !== null,
+        claim: null, // ponytail: no Claims table yet; filled from Claim membership when Claims land
       }));
     const state: ExpenseState = {
       id: row.id,
@@ -77,6 +78,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       refunds: refundRows
         .filter((r) => r.expenseId === row.id)
         .map((r) => ({ amount: money(r.amountPaise, r.currency)!, received: r.refundedOn !== null })),
+      writtenOff: { paise: 0, currency: "INR" }, // ponytail: nothing is written off until task 2.13d stores it
     };
     return { row, bills: ownBills, state };
   });

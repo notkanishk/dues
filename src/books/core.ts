@@ -75,6 +75,8 @@ export type BillState = {
   fulfilledOn: string | null;
   paperlessId: number | null;
   cancelled: boolean;
+  /** The Claim it is on, once that Claim is submitted. Null until Claims exist (the loader fills it then). */
+  claim: "submitted" | "reimbursed" | null;
 };
 export type RefundState = { amount: Money; received: boolean };
 export type ExpenseState = {
@@ -84,6 +86,8 @@ export type ExpenseState = {
   amount: Money | null;
   bills: BillState[];
   refunds: RefundState[];
+  /** What "Not claiming" closed as written off (task 2.13d). Zero until that fact is stored. */
+  writtenOff: Money;
 };
 /** What a command touches, loaded by the shell under the Claimant's lock. newIds are fresh UUIDv7 keys from Postgres. */
 export type Slice = { readonly newIds: readonly string[]; readonly expenses: Readonly<Record<string, ExpenseState>> };
@@ -148,7 +152,15 @@ export function apply(slice: Slice, event: Event): Slice {
         ...slice,
         expenses: {
           ...slice.expenses,
-          [event.expenseId]: { id: event.expenseId, draft: false, closedReason: null, amount: event.amount, bills: [], refunds: [] },
+          [event.expenseId]: {
+            id: event.expenseId,
+            draft: false,
+            closedReason: null,
+            amount: event.amount,
+            bills: [],
+            refunds: [],
+            writtenOff: { paise: 0, currency: "INR" },
+          },
         },
       };
     case "BillAdded": {
@@ -160,16 +172,20 @@ export function apply(slice: Slice, event: Event): Slice {
         fulfilledOn: event.fulfilledOn,
         paperlessId: null,
         cancelled: false,
+        claim: null,
       };
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, bills: [...expense.bills, bill] } } };
     }
   }
 }
 
-// Status is derived on read and never stored (design D3). Claimed and reimbursed arrive with Claims;
-// the written-off term and "why it's open" with tasks 2.10, 2.11 and 2.13d.
+// Status, Open amount, "why it's open" and Bill status are derived on read and never stored (design D3).
 export type BillStatus = "expected" | "ready" | "claimed" | "reimbursed" | "cancelled";
 export type ExpenseStatus = "draft" | "open" | "settled" | "closed";
+/** Exactly one reason an open Expense is open, in the spec's order; null for any other status. */
+export type OpenReason =
+  | { readonly code: "awaiting_goods" | "refund_owed" | "bill_missing" | "in_claim" }
+  | { readonly code: "mismatch"; readonly amount: Money };
 
 export function deriveBill(bill: BillState): BillStatus {
   if (bill.cancelled) return "cancelled";
@@ -184,13 +200,23 @@ function openAmount(expense: ExpenseState): Money | null {
   return { paise: expense.amount.paise - sum(covering as Money[]).paise, currency: "INR" };
 }
 
-export function deriveExpense(expense: ExpenseState): { status: ExpenseStatus; openAmount: Money | null } {
+function whyOpen(expense: ExpenseState): OpenReason | null {
+  const live = expense.bills.filter((b) => !b.cancelled);
+  if (live.some((b) => !b.fulfilledOn)) return { code: "awaiting_goods" };
+  return null;
+}
+
+export function deriveExpense(expense: ExpenseState): {
+  status: ExpenseStatus;
+  openAmount: Money | null;
+  reason: OpenReason | null;
+} {
   const open = openAmount(expense);
-  if (expense.closedReason) return { status: "closed", openAmount: open };
-  if (expense.draft) return { status: "draft", openAmount: open };
+  if (expense.closedReason) return { status: "closed", openAmount: open, reason: null };
+  if (expense.draft) return { status: "draft", openAmount: open, reason: null };
   const settled =
     open?.paise === 0 &&
     expense.bills.every((b) => ["reimbursed", "cancelled"].includes(deriveBill(b))) &&
     expense.refunds.every((r) => r.received);
-  return { status: settled ? "settled" : "open", openAmount: open };
+  return settled ? { status: "settled", openAmount: open, reason: null } : { status: "open", openAmount: open, reason: whyOpen(expense) };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Actor, apply, decide, deriveBill, deriveExpense, type ExpenseState, type Slice } from "./core";
+import { type Actor, apply, type BillState, decide, deriveBill, deriveExpense, type ExpenseState, type Slice } from "./core";
 
 // Pure core: no database. Expected values are written by hand from the spec scenarios.
 const mickey: Actor = { claimantId: "00000000-0000-7000-8000-00000000000a", roles: ["claimant"], via: "session" };
@@ -96,6 +96,7 @@ describe("apply and derivation", () => {
                 closedReason: null,
                 amount: rupees(paise),
                 refunds: [],
+                writtenOff: rupees(0),
                 bills: [
                   {
                     id: "b-1",
@@ -104,6 +105,7 @@ describe("apply and derivation", () => {
                     fulfilledOn: kind === "online" ? null : paidOn,
                     paperlessId: null,
                     cancelled: false,
+                    claim: null,
                   },
                 ],
               },
@@ -114,7 +116,7 @@ describe("apply and derivation", () => {
 
   it("folds a logged online Expense into an open Expense with an expected Bill", () => {
     const expense = afterLog("online");
-    expect(deriveExpense(expense)).toEqual({ status: "open", openAmount: rupees(0) });
+    expect(deriveExpense(expense)).toEqual({ status: "open", openAmount: rupees(0), reason: { code: "awaiting_goods" } });
     expect(expense.bills.map(deriveBill)).toEqual(["expected"]);
   });
 
@@ -134,8 +136,10 @@ describe("apply and derivation", () => {
       fulfilledOn: "2026-11-19",
       paperlessId: 7,
       cancelled: false,
+      claim: null,
     })),
     refunds: refunds.map((r) => ({ amount: rupees(r.paise), received: r.received })),
+    writtenOff: rupees(0),
   });
 
   it("Partly covered: Payment ₹1,000.00, one Bill ₹400.00 → Open amount ₹600.00", () => {
@@ -157,7 +161,7 @@ describe("apply and derivation", () => {
   it("a cancelled Bill no longer covers the Payment (its expected Refund does)", () => {
     const e = expense(100000, [100000]);
     e.bills[0]!.cancelled = true;
-    expect(deriveExpense(e)).toEqual({ status: "open", openAmount: rupees(100000) });
+    expect(deriveExpense(e)).toMatchObject({ status: "open", openAmount: rupees(100000) });
     expect(deriveBill(e.bills[0]!)).toBe("cancelled");
   });
 
@@ -168,5 +172,37 @@ describe("apply and derivation", () => {
   it("draft and closed come from the stored facts", () => {
     expect(deriveExpense({ ...expense(100, []), draft: true }).status).toBe("draft");
     expect(deriveExpense({ ...expense(100, []), closedReason: "personal" }).status).toBe("closed");
+  });
+});
+
+// "Why an Expense is open" and the Bill lifecycle (expense-tracking spec), derived on read (design D3).
+describe("why an Expense is open", () => {
+  type BillFacts = Partial<BillState> & { paise: number };
+  const bill = ({ paise, ...facts }: BillFacts, i = 0): BillState => ({
+    id: `b-${i}`,
+    kind: "invoice",
+    amount: rupees(paise),
+    fulfilledOn: "2026-11-19",
+    paperlessId: 7,
+    cancelled: false,
+    claim: null,
+    ...facts,
+  });
+  const facts = (paise: number, bills: BillFacts[], more: Partial<ExpenseState> = {}): ExpenseState => ({
+    id: "e-1",
+    draft: false,
+    closedReason: null,
+    amount: rupees(paise),
+    bills: bills.map(bill),
+    refunds: [],
+    writtenOff: rupees(0),
+    ...more,
+  });
+  const reasonOf = (e: ExpenseState) => deriveExpense(e).reason;
+
+  it("Awaiting goods: an online Expense with an expected Bill", () => {
+    expect(reasonOf(facts(129900, [{ paise: 129900, kind: null, fulfilledOn: null, paperlessId: null }]))).toEqual({
+      code: "awaiting_goods",
+    });
   });
 });
