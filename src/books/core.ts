@@ -75,8 +75,8 @@ export type BillState = {
   fulfilledOn: string | null;
   paperlessId: number | null;
   cancelled: boolean;
-  /** The Claim it is on, once that Claim is submitted. Null until Claims exist (the loader fills it then). */
-  claim: "submitted" | "reimbursed" | null;
+  /** The state of the Claim it is on; a Bill is claimed from the moment it is added, draft included. Null until Claims exist (the loader fills it then). */
+  claim: "draft" | "submitted" | "reimbursed" | null;
 };
 export type RefundState = { amount: Money; received: boolean };
 export type ExpenseState = {
@@ -190,7 +190,7 @@ export type OpenReason =
 export function deriveBill(bill: BillState): BillStatus {
   if (bill.cancelled) return "cancelled";
   if (bill.claim === "reimbursed") return "reimbursed";
-  if (bill.claim === "submitted") return "claimed";
+  if (bill.claim) return "claimed"; // draft or submitted: removal from a draft sets it back to null, so ready again
   if (bill.fulfilledOn && (bill.paperlessId !== null || bill.kind === "no_bill")) return "ready";
   return "expected";
 }
@@ -213,7 +213,7 @@ function whyOpen(expense: ExpenseState, open: Money | null): OpenReason | null {
   if (live.some((b) => b.paperlessId === null && b.kind !== "no_bill")) return { code: "bill_missing" };
   // The signed Open amount: positive when Bills, Refunds and written off fall short of the Payment.
   if (open && open.paise !== 0) return { code: "mismatch", amount: open };
-  if (live.some((b) => b.claim === "submitted")) return { code: "in_claim" };
+  if (live.some((b) => deriveBill(b) === "claimed")) return { code: "in_claim" };
   // ponytail: covered but nothing claimed yet (Bills ready to file) has no reason in the spec's list; null until it names one.
   return null;
 }

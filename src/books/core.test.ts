@@ -268,6 +268,10 @@ describe("why an Expense is open", () => {
     });
   });
 
+  it("In claim from the moment a Bill is added to a draft Claim", () => {
+    expect(reasonOf(facts(100000, [{ paise: 100000, claim: "draft" }]))).toEqual({ code: "in_claim" });
+  });
+
   it("Not settled while a Bill is unreimbursed: Open amount zero, one Bill claimed → open", () => {
     expect(deriveExpense(facts(100000, [{ paise: 100000, claim: "submitted" }])).status).toBe("open");
   });
@@ -304,11 +308,18 @@ describe("Bill lifecycle", () => {
     ["Document without fulfilment → expected", { paperlessId: 7 }, "expected"],
     ["Ready needs both", { fulfilledOn: "2026-11-19", paperlessId: 7 }, "ready"],
     ["a no-bill Bill is ready without a document", { kind: "no_bill", fulfilledOn: "2026-11-19" }, "ready"],
-    ["Added to a submitted Claim → claimed", { fulfilledOn: "2026-11-19", paperlessId: 7, claim: "submitted" }, "claimed"],
+    ["Added to a draft Claim → claimed", { fulfilledOn: "2026-11-19", paperlessId: 7, claim: "draft" }, "claimed"],
+    ["On a submitted Claim → claimed", { fulfilledOn: "2026-11-19", paperlessId: 7, claim: "submitted" }, "claimed"],
     ["Reimbursed", { fulfilledOn: "2026-11-19", paperlessId: 7, claim: "reimbursed" }, "reimbursed"],
     ["Cancelled before fulfilment", { cancelled: true }, "cancelled"],
   ] as const)("%s", (_, facts, status) => {
     expect(deriveBill(bill(facts))).toBe(status);
+  });
+
+  it("Remove from draft: a claimed Bill taken off its draft Claim returns to ready", () => {
+    const onDraft = bill({ fulfilledOn: "2026-11-19", paperlessId: 7, claim: "draft" });
+    expect(deriveBill(onDraft)).toBe("claimed");
+    expect(deriveBill({ ...onDraft, claim: null })).toBe("ready");
   });
 });
 
