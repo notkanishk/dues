@@ -228,9 +228,9 @@ async function write(tx: Tx, event: Event, at: Date) {
         amountPaise: event.amount.paise,
         currency: event.amount.currency,
         fulfilledOn: event.fulfilledOn,
-        description: event.description ?? null,
-        remarks: event.remarks ?? null,
-        fromBillId: event.fromBillId ?? null,
+        description: event.description,
+        remarks: event.remarks,
+        fromBillId: event.fromBillId,
         createdAt: at,
       });
       return;

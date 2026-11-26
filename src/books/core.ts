@@ -143,10 +143,10 @@ export type Event =
       readonly kind: BillKind | null; // null until a document says what it is
       readonly amount: Money;
       readonly fulfilledOn: string | null;
-      /** A leftover's No bill (W2.9): the Order's What for, its remark and the expected Bill it came from. */
-      readonly description?: string | null;
-      readonly remarks?: string;
-      readonly fromBillId?: string;
+      /** A leftover's No bill (W2.9): the Order's What for, its remark and the expected Bill it came from; else null. */
+      readonly description: string | null;
+      readonly remarks: string | null;
+      readonly fromBillId: string | null;
     }
   | { readonly type: "BillMoved"; readonly billId: string; readonly fromExpenseId: string; readonly toExpenseId: string }
   | { readonly type: "ExpectedBillReduced"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
@@ -238,8 +238,8 @@ export type BillState = {
 };
 export type RefundState = {
   id: string;
-  /** The Bill it came from; absent in hand-built test slices. */
-  billId?: string | null;
+  /** The Bill it came from. */
+  billId: string | null;
   amount: Money;
   reason: RefundReason;
   received: boolean;
@@ -303,6 +303,9 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           kind: null,
           amount: command.amount,
           fulfilledOn: command.kind === "online" ? null : command.paidOn,
+          description: null,
+          remarks: null,
+          fromBillId: null,
         },
       ]);
     }
@@ -316,7 +319,17 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       const [newBillId] = slice.newIds as [string];
       return ok([
         { type: "ExpectedBillReduced", billId: bill.id, expenseId: expense.id, amount: minus(remainder, command.amount) },
-        { type: "BillAdded", billId: newBillId, expenseId: expense.id, kind: null, amount: command.amount, fulfilledOn: command.fulfilledOn },
+        {
+          type: "BillAdded",
+          billId: newBillId,
+          expenseId: expense.id,
+          kind: null,
+          amount: command.amount,
+          fulfilledOn: command.fulfilledOn,
+          description: null,
+          remarks: null,
+          fromBillId: null,
+        },
       ]);
     }
     case "ExpectRefund":
@@ -641,10 +654,10 @@ export function apply(slice: Slice, event: Event): Slice {
         fulfilledOn: event.fulfilledOn,
         paperlessId: null,
         differs: false,
-        remarks: event.remarks ?? null,
+        remarks: event.remarks,
         cancelled: false,
         closedAs: null,
-        fromBillId: event.fromBillId ?? null,
+        fromBillId: event.fromBillId,
         claim: null,
       };
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, bills: [...expense.bills, bill] } } };
