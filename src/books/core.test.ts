@@ -1002,6 +1002,23 @@ describe("CorrectBill and ConfirmDiffers", () => {
     expect(bill(slice)).toMatchObject({ billNo: "GPB/2611/042", billDate: "2026-11-18" });
   });
 
+  it("a remark is not a document value: editing it never marks the Bill as differing", () => {
+    const { decision, slice } = run(documented(), correct({ remarks: "Bought for the laser cutter" }));
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [{ type: "BillCorrected", billId: "b-1", expenseId: "e-1", changes: { remarks: { from: null, to: "Bought for the laser cutter" } }, differs: false }],
+    });
+    expect(bill(slice)).toMatchObject({ remarks: "Bought for the laser cutter", differs: false });
+  });
+
+  it("Claim without a bill: the No bill's remark \"No invoice from seller\" can be edited, never emptied", () => {
+    const closed = run(order(27000), { type: "CloseOrder", billId: "b-1", choice: "claim_without_bill" }, ["b-2"]).slice;
+    const edit = (remarks: string) => run(closed, { type: "CorrectBill", billId: "b-2", remarks });
+    expect(edit("No invoice from seller; refund refused").slice.expenses["e-1"]!.bills[1]!.remarks).toBe("No invoice from seller; refund refused");
+    expect(edit("  ").decision).toEqual({ ok: false, reason: "validation", field: "remarks" });
+  });
+
   it("keeping every value changes nothing and does not mark the Bill", () => {
     expect(run(documented(), correct({ amount: rupees(118000) })).decision).toEqual({ ok: true, events: [], jobs: [] });
   });
