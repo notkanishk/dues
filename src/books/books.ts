@@ -14,6 +14,7 @@ import {
   type CloseReason,
   type Command,
   decide,
+  orderPage,
   deriveBill,
   deriveExpense,
   deriveRefund,
@@ -63,12 +64,13 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   const writeOffRows = await q.select().from(writeOffs).where(inArray(writeOffs.expenseId, found));
   return rows.map((row) => {
     // Each Bill carries its database-issued reference with its state, so reads never pair two arrays by position.
-    const ownBills: (BillState & { reference: string; cancelReason: string | null })[] = billRows
+    const ownBills: (BillState & { reference: string; cancelReason: string | null; description: string | null })[] = billRows
       .filter((b) => b.expenseId === row.id)
       .map((b) => ({
         id: b.id,
         reference: b.reference,
         cancelReason: b.cancelReason,
+        description: b.description,
         kind: b.kind as BillKind | null,
         amount: money(b.amountPaise, b.currency),
         billNo: b.billNo,
@@ -441,6 +443,63 @@ export function createBooks({ db, now, enqueue }: Deps) {
             refundedOn: r.refundedOn,
             status: deriveRefund(r),
           })),
+        },
+      };
+    },
+
+    /**
+     * The Order page from Books (W2.9): the Payment first, each delivered Bill and each Refund with the commands open
+     * now, "Still expected" with the leftover question, and a closed-out remainder with its Undo.
+     */
+    async order(actor: Actor, id: string) {
+      const [found] = await loadExpenses(db, actor, [id]);
+      if (!found) return notFound;
+      const { row, bills: billStates, refunds: refundStates, state } = found;
+      const page = orderPage({ newIds: [], expenses: { [state.id]: state } }, state.id, actor, now())!;
+      const derived = deriveExpense(state);
+      const billOf = (billId: string) => billStates.find((b) => b.id === billId)!;
+      const refundOf = (refundId: string) => refundStates.find((r) => r.id === refundId)!;
+      return {
+        ok: true as const,
+        order: {
+          // ponytail: Payment method and proof join with those entities (tasks 2.21, Phase 2).
+          payment: {
+            reference: row.reference,
+            amount: state.amount,
+            paidOn: row.paidOn,
+            payee: row.payee,
+            orderRef: row.orderRef,
+            upiRef: row.upiRef,
+            whatFor: row.whatFor,
+          },
+          status: derived.status,
+          openAmount: derived.openAmount,
+          reason: derived.reason,
+          bills: page.bills.map(({ id: billId, status, commands }) => {
+            const b = billOf(billId);
+            return {
+              id: b.id,
+              reference: b.reference,
+              kind: b.kind,
+              amount: b.amount,
+              // ponytail: a Bill has no seller yet; the "Sold by" a Reading gives arrives with Phase 2.
+              seller: null,
+              description: b.description,
+              remarks: b.remarks,
+              billNo: b.billNo,
+              billDate: b.billDate,
+              differs: b.differs,
+              fulfilledOn: b.fulfilledOn,
+              status,
+              commands,
+            };
+          }),
+          refunds: page.refunds.map(({ id: refundId, status, commands }) => {
+            const r = refundOf(refundId);
+            return { id: r.id, reference: r.reference, amount: r.amount, reason: r.reason, refundedOn: r.refundedOn, status, commands };
+          }),
+          stillExpected: page.stillExpected,
+          closedOut: page.closedOut,
         },
       };
     },
