@@ -10,6 +10,7 @@ import {
   type BillKind,
   type BillState,
   type BillStatus,
+  type CloseChoice,
   type CloseReason,
   type Command,
   decide,
@@ -75,7 +76,10 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         fulfilledOn: b.fulfilledOn,
         paperlessId: b.paperlessId,
         differs: b.differsFromDocument,
+        remarks: b.remarks,
         cancelled: b.cancelledAt !== null,
+        closedAs: b.closedAs as CloseChoice | null, // the bills_closed_as check keeps it one of these
+        fromBillId: b.fromBillId,
         claim: null, // ponytail: no Claims table yet; filled from Claim membership when Claims land
       }));
     const ownRefunds = refundRows
@@ -95,9 +99,11 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       id: row.id,
       draft: row.draft,
       closedReason: row.closedReason as CloseReason | null, // the expenses_closed_reason check keeps it one of these
+      kind: row.kind as ExpenseState["kind"], // the expenses_kind check
       amount: money(row.amountPaise, row.currency),
       payee: row.payee,
       paidOn: row.paidOn,
+      whatFor: row.whatFor,
       bills: ownBills,
       refunds: ownRefunds,
       writtenOff: sum(ownWriteOffs), // Σ written off (FUNCTIONAL §1), every row summed
@@ -113,12 +119,14 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
       case "LogExpense":
         return [2, []];
       case "SplitExpectedBill":
+      case "CloseOrder":
       case "ExpectRefund":
       case "CancelBill":
       case "ReturnBill":
         return [1, await expenseOf(tx, bills, command.billId)];
       case "CorrectBill":
       case "ConfirmDiffers":
+      case "UndoCloseOrder":
         return [0, await expenseOf(tx, bills, command.billId)];
       case "MarkRefundReceived":
         return [0, await expenseOf(tx, refunds, command.refundId)];
@@ -153,10 +161,16 @@ function entityOf(event: Event): [Entity, string] {
     case "BillCancelled":
     case "BillCorrected":
     case "DiffersConfirmed":
+    case "ExpectedBillClosedOut":
+    case "ExpectedBillReopened":
+    case "RemainderWrittenOff":
+    case "RemainderWriteOffWithdrawn":
+    case "BillWithdrawn":
       return ["bill", event.billId];
     case "RefundExpected":
     case "RefundReceived":
     case "RefundWrittenOff":
+    case "RefundWithdrawn":
       return ["refund", event.refundId];
   }
 }
@@ -207,6 +221,9 @@ async function write(tx: Tx, event: Event, at: Date) {
         amountPaise: event.amount.paise,
         currency: event.amount.currency,
         fulfilledOn: event.fulfilledOn,
+        description: event.description ?? null,
+        remarks: event.remarks ?? null,
+        fromBillId: event.fromBillId ?? null,
         createdAt: at,
       });
       return;
@@ -257,6 +274,31 @@ async function write(tx: Tx, event: Event, at: Date) {
         currency: event.amount.currency,
         createdAt: at,
       });
+      return;
+    case "ExpectedBillClosedOut":
+      await tx.update(bills).set({ cancelledAt: at, cancelReason: "cancelled", closedAs: event.choice }).where(eq(bills.id, event.billId));
+      return;
+    case "ExpectedBillReopened":
+      await tx.update(bills).set({ cancelledAt: null, cancelReason: null, closedAs: null }).where(eq(bills.id, event.billId));
+      return;
+    case "RemainderWrittenOff":
+      await tx.insert(writeOffs).values({
+        expenseId: event.expenseId,
+        billId: event.billId,
+        amountPaise: event.amount.paise,
+        currency: event.amount.currency,
+        createdAt: at,
+      });
+      return;
+    // Undo takes the row back; the audit log keeps that it existed (design D2).
+    case "RemainderWriteOffWithdrawn":
+      await tx.delete(writeOffs).where(eq(writeOffs.billId, event.billId));
+      return;
+    case "RefundWithdrawn":
+      await tx.delete(refunds).where(eq(refunds.id, event.refundId));
+      return;
+    case "BillWithdrawn":
+      await tx.delete(bills).where(eq(bills.id, event.billId));
       return;
     case "ExpenseClosed":
       await tx.update(expenses).set({ closedReason: event.reason }).where(eq(expenses.id, event.expenseId));

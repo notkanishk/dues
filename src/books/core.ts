@@ -77,6 +77,19 @@ export type CloseExpense = {
   readonly refunds: Readonly<Record<string, "expected" | "written_off">>;
 };
 export type CloseReason = "personal" | "duplicate" | "written_off";
+/**
+ * "No more invoices" on an Order (W2.9), and "Close the order?" for a leftover under ₹10 (yes is not_claiming): the
+ * expected Bill is closed out and its remainder becomes an expected Refund, a ready No bill, or written off.
+ */
+export type CloseOrder = { readonly type: "CloseOrder"; readonly billId: string; readonly choice: CloseChoice };
+export type CloseChoice = "refund_coming" | "claim_without_bill" | "not_claiming";
+const CLOSE_CHOICES: readonly string[] = ["refund_coming", "claim_without_bill", "not_claiming"] satisfies CloseChoice[];
+/** Undoes CloseOrder from the Order page (W2.9): what it made is taken back and the remainder is expected again. */
+export type UndoCloseOrder = { readonly type: "UndoCloseOrder"; readonly billId: string };
+/** A leftover under this is offered "₹1 left. Close the order?"; from it up, the three-way question (decision 55). */
+export const LEFTOVER_QUESTION_FROM: Money = { paise: 1000, currency: "INR" };
+/** The remark a leftover's No bill starts with (FUNCTIONAL §2 Bill, W2.9); the Claimant can edit it. */
+export const NO_INVOICE_REMARK = "No invoice from seller";
 const CLOSE_REASONS: readonly string[] = ["personal", "duplicate", "written_off"] satisfies CloseReason[];
 export type Command =
   | LogExpense
@@ -88,7 +101,9 @@ export type Command =
   | CorrectExpense
   | CorrectBill
   | ConfirmDiffers
-  | CloseExpense;
+  | CloseExpense
+  | CloseOrder
+  | UndoCloseOrder;
 /** A corrected field's value before and after, for the audit log. */
 export type Change<T> = { readonly from: T; readonly to: T };
 export type RefundReason = "cancelled" | "returned" | "partial";
@@ -117,6 +132,10 @@ export type Event =
       readonly kind: BillKind | null; // null until a document says what it is
       readonly amount: Money;
       readonly fulfilledOn: string | null;
+      /** A leftover's No bill (W2.9): the Order's What for, its remark and the expected Bill it came from. */
+      readonly description?: string | null;
+      readonly remarks?: string;
+      readonly fromBillId?: string;
     }
   | { readonly type: "ExpectedBillReduced"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
   /** A correction moved more onto an Order's expected Bill; amount is its new remainder (ExpectedBillReduced's twin). */
@@ -156,7 +175,16 @@ export type Event =
   | { readonly type: "DiffersConfirmed"; readonly billId: string; readonly expenseId: string }
   /** An expected Refund the Claimant will not get back: it leaves Σ Refunds and its amount joins Σ written off. */
   | { readonly type: "RefundWrittenOff"; readonly refundId: string; readonly expenseId: string; readonly amount: Money }
-  | { readonly type: "ExpenseClosed"; readonly expenseId: string; readonly reason: CloseReason };
+  | { readonly type: "ExpenseClosed"; readonly expenseId: string; readonly reason: CloseReason }
+  /** "No more invoices": the expected Bill stops waiting; amount is the remainder it held. */
+  | { readonly type: "ExpectedBillClosedOut"; readonly billId: string; readonly expenseId: string; readonly choice: CloseChoice; readonly amount: Money }
+  /** Not claiming: the closed-out remainder joins Σ written off. */
+  | { readonly type: "RemainderWrittenOff"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
+  // Undo of a close: each takes back what the choice made; the expected Bill then waits again.
+  | { readonly type: "RefundWithdrawn"; readonly refundId: string; readonly expenseId: string; readonly amount: Money }
+  | { readonly type: "BillWithdrawn"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
+  | { readonly type: "RemainderWriteOffWithdrawn"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
+  | { readonly type: "ExpectedBillReopened"; readonly billId: string; readonly expenseId: string };
 
 // Follow-ups the shell enqueues in the command's transaction (design D8); a Reaction carries them out.
 export type Job = { readonly name: string; readonly data: unknown };
@@ -186,21 +214,36 @@ export type BillState = {
   paperlessId: number | null;
   /** "differs from the document": edited after its document was attached, not yet confirmed against it. */
   differs: boolean;
+  remarks: string | null;
   cancelled: boolean;
+  /** How "No more invoices" closed out this expected Bill; null unless closed out (W2.9). */
+  closedAs: CloseChoice | null;
+  /** The expected Bill a leftover's No bill came from. */
+  fromBillId: string | null;
   /** The state of the Claim it is on; a Bill is claimed from the moment it is added, draft included. Null until Claims exist (the loader fills it then). */
   claim: "draft" | "submitted" | "reimbursed" | null;
 };
-export type RefundState = { id: string; amount: Money; reason: RefundReason; received: boolean; writtenOff: boolean };
+export type RefundState = {
+  id: string;
+  /** The Bill it came from; absent in hand-built test slices. */
+  billId?: string | null;
+  amount: Money;
+  reason: RefundReason;
+  received: boolean;
+  writtenOff: boolean;
+};
 export type ExpenseState = {
   id: string;
   draft: boolean;
   closedReason: CloseReason | null;
+  kind: LogExpense["kind"] | null;
   amount: Money | null;
   payee: string | null;
   paidOn: string | null;
+  whatFor: string | null;
   bills: BillState[];
   refunds: RefundState[];
-  /** Σ written off: Refunds written off on closing, and later the remainder "Not claiming" closes (task 2.13d). */
+  /** Σ written off: Refunds written off on closing, and remainders "Not claiming" closed out (W2.9). */
   writtenOff: Money;
 };
 /** What a command touches, loaded by the shell under the Claimant's lock. newIds are fresh UUIDv7 keys from Postgres. */
@@ -375,6 +418,63 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
         ],
       );
     }
+    case "CloseOrder": {
+      const found = expectedBill(slice, command.billId);
+      if (!found.ok) return found;
+      const { expense, bill, remainder } = found;
+      if (!CLOSE_CHOICES.includes(command.choice)) return rejectField("choice");
+      const [newId] = slice.newIds as [string];
+      const at = { billId: bill.id, expenseId: expense.id };
+      const made: Event =
+        command.choice === "refund_coming"
+          ? { type: "RefundExpected", refundId: newId, ...at, amount: remainder, reason: "cancelled" }
+          : command.choice === "claim_without_bill"
+            ? {
+                type: "BillAdded",
+                billId: newId,
+                expenseId: expense.id,
+                kind: "no_bill",
+                amount: remainder,
+                // ponytail: the Payment's date; the spec names none for a leftover's No bill.
+                fulfilledOn: expense.paidOn,
+                description: expense.whatFor,
+                remarks: NO_INVOICE_REMARK,
+                fromBillId: bill.id,
+              }
+            : { type: "RemainderWrittenOff", ...at, amount: remainder };
+      return ok([{ type: "ExpectedBillClosedOut", ...at, choice: command.choice, amount: remainder }, made]);
+    }
+    case "UndoCloseOrder": {
+      const found = findBill(slice, command.billId);
+      if (!found.ok) return found;
+      const { expense, bill } = found;
+      if (!bill.closedAs || !bill.amount) return reject("invalid_transition");
+      const at = { billId: bill.id, expenseId: expense.id };
+      const reopened: Event = { type: "ExpectedBillReopened", ...at };
+      switch (bill.closedAs) {
+        case "not_claiming":
+          return ok([{ type: "RemainderWriteOffWithdrawn", ...at, amount: bill.amount }, reopened]);
+        case "refund_coming": {
+          // The close's Refund is the Bill's last: once closed out, the Bill takes no more commands that make one.
+          const refund = expense.refunds.findLast((r) => r.billId === bill.id);
+          if (!refund) return reject("invalid_transition");
+          const status = deriveRefund(refund);
+          if (status !== "expected") return reject(status === "received" ? "locked" : "invalid_transition");
+          return ok([{ type: "RefundWithdrawn", refundId: refund.id, expenseId: expense.id, amount: refund.amount }, reopened]);
+        }
+        case "claim_without_bill": {
+          // Gone (moved or detached) or returned: it is no longer this Order's leftover to take back.
+          const noBill = expense.bills.find((b) => b.fromBillId === bill.id);
+          if (!noBill || noBill.cancelled || !noBill.amount) return reject("invalid_transition");
+          if (locked(noBill)) return reject("locked");
+          return ok([
+            ...(noBill.claim === "draft" ? [{ type: "BillRemovedFromClaim", billId: noBill.id, expenseId: expense.id } as const] : []),
+            { type: "BillWithdrawn", billId: noBill.id, expenseId: expense.id, amount: noBill.amount },
+            reopened,
+          ]);
+        }
+      }
+    }
     case "MarkRefundReceived": {
       // Not refused on a closed Expense: closing may leave a Refund still expected (FUNCTIONAL §3.1).
       const expense = Object.values(slice.expenses).find((e) => e.refunds.some((r) => r.id === command.refundId));
@@ -453,9 +553,11 @@ export function apply(slice: Slice, event: Event): Slice {
             id: event.expenseId,
             draft: false,
             closedReason: null,
+            kind: event.kind,
             amount: event.amount,
             payee: event.payee,
             paidOn: event.paidOn,
+            whatFor: event.whatFor,
             bills: [],
             refunds: [],
             writtenOff: zero,
@@ -473,7 +575,10 @@ export function apply(slice: Slice, event: Event): Slice {
         fulfilledOn: event.fulfilledOn,
         paperlessId: null,
         differs: false,
+        remarks: event.remarks ?? null,
         cancelled: false,
+        closedAs: null,
+        fromBillId: event.fromBillId ?? null,
         claim: null,
       };
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, bills: [...expense.bills, bill] } } };
@@ -487,7 +592,14 @@ export function apply(slice: Slice, event: Event): Slice {
       return updateBill(slice, event.expenseId, event.billId, { cancelled: true });
     case "RefundExpected": {
       const expense = slice.expenses[event.expenseId]!;
-      const refund: RefundState = { id: event.refundId, amount: event.amount, reason: event.reason, received: false, writtenOff: false };
+      const refund: RefundState = {
+        id: event.refundId,
+        billId: event.billId,
+        amount: event.amount,
+        reason: event.reason,
+        received: false,
+        writtenOff: false,
+      };
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, refunds: [...expense.refunds, refund] } } };
     }
     case "RefundReceived": {
@@ -512,6 +624,26 @@ export function apply(slice: Slice, event: Event): Slice {
     case "ExpenseCorrected": {
       const expense = slice.expenses[event.expenseId]!;
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, ...after(event.changes) } } };
+    }
+    case "ExpectedBillClosedOut":
+      return updateBill(slice, event.expenseId, event.billId, { cancelled: true, closedAs: event.choice });
+    case "ExpectedBillReopened":
+      return updateBill(slice, event.expenseId, event.billId, { cancelled: false, closedAs: null });
+    case "RemainderWrittenOff":
+    case "RemainderWriteOffWithdrawn": {
+      const expense = slice.expenses[event.expenseId]!;
+      const writtenOff = event.type === "RemainderWrittenOff" ? sum([expense.writtenOff, event.amount]) : minus(expense.writtenOff, event.amount);
+      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, writtenOff } } };
+    }
+    case "RefundWithdrawn": {
+      const expense = slice.expenses[event.expenseId]!;
+      const refunds = expense.refunds.filter((r) => r.id !== event.refundId);
+      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, refunds } } };
+    }
+    case "BillWithdrawn": {
+      const expense = slice.expenses[event.expenseId]!;
+      const bills = expense.bills.filter((b) => b.id !== event.billId);
+      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, bills } } };
     }
   }
 }
