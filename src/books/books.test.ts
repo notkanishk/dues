@@ -263,7 +263,7 @@ describe("Derivation on read", () => {
   it("feeds Refunds from the refunds table: expected, then received", async () => {
     const mickey = claimant();
     const id = expenseIdOf(await books.execute(mickey, logExpense("shop", 100000)));
-    // No Refund command yet (task 2.15): the row goes in directly.
+    // A Refund beside a live Bill, which no command makes: the row goes in directly, to test the read alone.
     const [refund] = await db.insert(refunds).values({ expenseId: id, amountPaise: 30000, reason: "cancelled" }).returning();
 
     expect(await books.expense(mickey, id)).toMatchObject({
@@ -410,5 +410,48 @@ describe("Order flow", () => {
     expect(await books.execute(mickey, { type: "CancelBill", billId: billId! })).toEqual({ ok: false, reason: "invalid_transition" });
     expect(await billsOf(mickey, expenseId)).toEqual([[60000, "cancelled"]]);
     expect(await refundsOf(mickey, expenseId)).toHaveLength(1);
+  });
+
+  it("Refund received, then settling: a ₹3,000.00 Order with ₹1,200.00 returned and ₹1,800.00 cancelled settles once both Refunds are in", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId, deliveredBillId } = await delivered(mickey);
+    ok(await books.execute(mickey, { type: "ReturnBill", billId: deliveredBillId }));
+    ok(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId }));
+    const [returned, cancelled] = (await read(mickey, expenseId)).refunds;
+
+    // Expected Refund blocks settled.
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "open", openAmount: rupees(0), reason: { code: "refund_owed" } });
+
+    ok(await books.execute(mickey, { type: "MarkRefundReceived", refundId: returned!.id, refundedOn: "2026-11-24" }));
+    expect((await read(mickey, expenseId)).refunds).toMatchObject([
+      { amount: rupees(120000), reason: "returned", status: "received", refundedOn: "2026-11-24" },
+      { amount: rupees(180000), reason: "cancelled", status: "expected", refundedOn: null },
+    ]);
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "open", reason: { code: "refund_owed" } });
+
+    ok(await books.execute(mickey, { type: "MarkRefundReceived", refundId: cancelled!.id, refundedOn: "2026-11-26" }));
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "settled", openAmount: rupees(0), reason: null });
+
+    const last = (await auditRowsOf(mickey)).at(-1)!;
+    expect([last.command, last.event, last.entity, last.entityId, last.fromState, last.toState]).toEqual([
+      "MarkRefundReceived",
+      "RefundReceived",
+      "refund",
+      cancelled!.id,
+      "expected",
+      "received",
+    ]);
+  });
+
+  it("refuses receiving a Refund twice, or another Claimant's, and keeps the first date", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 80000);
+    ok(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId }));
+    const [refund] = (await read(mickey, expenseId)).refunds;
+    const mark = { type: "MarkRefundReceived", refundId: refund!.id, refundedOn: "2026-11-24" } as const;
+    expect(await books.execute(claimant(), mark)).toEqual({ ok: false, reason: "not_found" });
+    ok(await books.execute(mickey, mark));
+    expect(await books.execute(mickey, { ...mark, refundedOn: "2026-11-25" })).toEqual({ ok: false, reason: "invalid_transition" });
+    expect((await read(mickey, expenseId)).refunds).toMatchObject([{ refundedOn: "2026-11-24", status: "received" }]);
   });
 });

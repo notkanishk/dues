@@ -39,7 +39,9 @@ export type ExpectRefund = { readonly type: "ExpectRefund"; readonly billId: str
 export type CancelBill = { readonly type: "CancelBill"; readonly billId: string };
 /** A delivered Bill sent back before it is on a Claim (W2.5): cancelled for good, its amount an expected Refund. */
 export type ReturnBill = { readonly type: "ReturnBill"; readonly billId: string };
-export type Command = LogExpense | SplitExpectedBill | ExpectRefund | CancelBill | ReturnBill;
+/** The money is back (W2.4): the expected Refund is received on its refunded-on date. */
+export type MarkRefundReceived = { readonly type: "MarkRefundReceived"; readonly refundId: string; readonly refundedOn: string };
+export type Command = LogExpense | SplitExpectedBill | ExpectRefund | CancelBill | ReturnBill | MarkRefundReceived;
 export type RefundReason = "cancelled" | "returned" | "partial";
 
 export type Event =
@@ -75,7 +77,8 @@ export type Event =
       readonly expenseId: string;
       readonly amount: Money;
       readonly reason: RefundReason;
-    };
+    }
+  | { readonly type: "RefundReceived"; readonly refundId: string; readonly expenseId: string; readonly refundedOn: string };
 
 // No command enqueues a follow-up yet; the shell already writes whatever decide returns.
 export type Job = { readonly name: string; readonly data: unknown };
@@ -210,6 +213,15 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
         { type: "RefundExpected", refundId, expenseId: expense.id, amount: bill.amount, reason: "returned" },
       ]);
     }
+    case "MarkRefundReceived": {
+      // Not refused on a closed Expense: closing may leave a Refund still expected (FUNCTIONAL §3.1).
+      const expense = Object.values(slice.expenses).find((e) => e.refunds.some((r) => r.id === command.refundId));
+      const refund = expense?.refunds.find((r) => r.id === command.refundId);
+      if (!expense || !refund) return reject("not_found");
+      if (refund.received) return reject("invalid_transition");
+      if (!isDate(command.refundedOn)) return rejectField("refundedOn");
+      return ok([{ type: "RefundReceived", refundId: refund.id, expenseId: expense.id, refundedOn: command.refundedOn }]);
+    }
   }
 }
 
@@ -276,6 +288,11 @@ export function apply(slice: Slice, event: Event): Slice {
       const expense = slice.expenses[event.expenseId]!;
       const refund: RefundState = { id: event.refundId, amount: event.amount, reason: event.reason, received: false };
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, refunds: [...expense.refunds, refund] } } };
+    }
+    case "RefundReceived": {
+      const expense = slice.expenses[event.expenseId]!;
+      const refunds = expense.refunds.map((r) => (r.id === event.refundId ? { ...r, received: true } : r));
+      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, refunds } } };
     }
   }
 }

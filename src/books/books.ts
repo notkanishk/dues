@@ -95,7 +95,9 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
       case "ExpectRefund":
       case "CancelBill":
       case "ReturnBill":
-        return [1, await expenseOfBill(tx, command.billId)];
+        return [1, await expenseOf(tx, bills, command.billId)];
+      case "MarkRefundReceived":
+        return [0, await expenseOf(tx, refunds, command.refundId)];
     }
   })();
   // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
@@ -104,10 +106,10 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
   return { newIds: rows.map((r) => r.id), expenses: Object.fromEntries(loaded.map((e) => [e.state.id, e.state])) };
 }
 
-// Unscoped on purpose: loadExpenses applies the Actor's scope next, so another Claimant's Bill loads nothing.
-async function expenseOfBill(tx: Tx, billId: string) {
-  if (!UUID.test(billId)) return [];
-  return (await tx.select({ id: bills.expenseId }).from(bills).where(eq(bills.id, billId))).map((r) => r.id);
+// Unscoped on purpose: loadExpenses applies the Actor's scope next, so another Claimant's Bill or Refund loads nothing.
+async function expenseOf(tx: Tx, table: typeof bills | typeof refunds, id: string) {
+  if (!UUID.test(id)) return [];
+  return (await tx.select({ id: table.expenseId }).from(table).where(eq(table.id, id))).map((r) => r.id);
 }
 
 type Entity = "expense" | "bill" | "refund";
@@ -178,6 +180,9 @@ async function write(tx: Tx, event: Event, at: Date) {
         reason: event.reason,
         createdAt: at,
       });
+      return;
+    case "RefundReceived":
+      await tx.update(refunds).set({ refundedOn: event.refundedOn }).where(eq(refunds.id, event.refundId));
       return;
   }
 }

@@ -618,4 +618,54 @@ describe("Order commands", () => {
       expect(run(slice, { type: "ReturnBill", billId: "b-1" }, ["r-1"]).decision).toEqual({ ok: false, reason: "locked" });
     });
   });
+
+  describe("MarkRefundReceived and settling", () => {
+    const cancelled = () => run(order(80000), { type: "CancelBill", billId: "b-1" }, ["r-1"]).slice;
+    const received = (refundId = "r-1", refundedOn = "2026-11-25") => ({ type: "MarkRefundReceived", refundId, refundedOn }) as const;
+
+    it("Refund received: the expected Refund is received on its refunded-on date", () => {
+      const { decision, slice } = run(cancelled(), received());
+      expect(decision).toEqual({
+        ok: true,
+        jobs: [],
+        events: [{ type: "RefundReceived", refundId: "r-1", expenseId: "e-1", refundedOn: "2026-11-25" }],
+      });
+      expect(refunds(slice)).toEqual([{ id: "r-1", amount: rupees(80000), reason: "cancelled", received: true }]);
+    });
+
+    it("Expected Refund blocks settled; received, the fully cancelled Order settles", () => {
+      expect(derived(cancelled())).toMatchObject({ status: "open", openAmount: rupees(0), reason: { code: "refund_owed" } });
+      expect(derived(run(cancelled(), received()).slice)).toEqual({ status: "settled", openAmount: rupees(0), reason: null, bills: ["cancelled"] });
+    });
+
+    it("Several Refunds: a cancelled and a returned Refund both count; settled only once both are received", () => {
+      // ₹3,000.00: ₹1,200.00 delivered and returned, the ₹1,800.00 remainder cancelled.
+      let slice = run(delivered(), { type: "ReturnBill", billId: "b-2" }, ["r-1"]).slice;
+      slice = run(slice, { type: "CancelBill", billId: "b-1" }, ["r-2"]).slice;
+      expect(refunds(slice).map((r) => [r.amount.paise, r.reason])).toEqual([
+        [120000, "returned"],
+        [180000, "cancelled"],
+      ]);
+      expect(derived(slice).openAmount).toEqual(rupees(0));
+      slice = run(slice, received("r-1")).slice;
+      expect(derived(slice)).toMatchObject({ status: "open", reason: { code: "refund_owed" } });
+      slice = run(slice, received("r-2")).slice;
+      expect(derived(slice).status).toBe("settled");
+    });
+
+    it("Partly reimbursed Order: the first Invoice reimbursed while ₹1,800.00 is expected → stays open", () => {
+      const slice = delivered();
+      slice.expenses["e-1"]!.bills[1]!.claim = "reimbursed";
+      expect(derived(slice)).toMatchObject({ status: "open", reason: { code: "awaiting_goods" }, bills: ["expected", "reimbursed"] });
+    });
+
+    it.each([
+      ["receiving it twice", received(), { ok: false, reason: "invalid_transition" }],
+      ["a date that does not exist", received("r-1", "2026-11-31"), { ok: false, reason: "validation", field: "refundedOn" }],
+      ["a Refund outside the Actor's slice", received("r-9"), { ok: false, reason: "not_found" }],
+    ])("refuses %s", (name, command, rejection) => {
+      const slice = name === "receiving it twice" ? run(cancelled(), received()).slice : cancelled();
+      expect(run(slice, command).decision).toEqual(rejection);
+    });
+  });
 });
