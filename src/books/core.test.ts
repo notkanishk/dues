@@ -61,6 +61,7 @@ describe("decide LogExpense", () => {
     ["fractional paise", { amount: rupees(10.5) }, "amount"],
     ["an unknown kind", { kind: "barter" }, "kind"],
     ["a date that does not exist", { paidOn: "2026-02-30" }, "paidOn"],
+    ["a month that does not exist", { paidOn: "2026-13-01" }, "paidOn"],
     ["a date in another format", { paidOn: "19/11/2026" }, "paidOn"],
   ])("refuses %s as validation", (_, change, field) => {
     const command = { ...logExpense("online", 100), ...change } as never;

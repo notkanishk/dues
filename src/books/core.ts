@@ -89,8 +89,11 @@ export type ExpenseState = {
 export type Slice = { readonly newIds: readonly string[]; readonly expenses: Readonly<Record<string, ExpenseState>> };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const isDate = (s: unknown) =>
-  typeof s === "string" && ISO_DATE.test(s) && new Date(`${s}T00:00:00Z`).toISOString().startsWith(s);
+const isDate = (s: unknown) => {
+  if (typeof s !== "string" || !ISO_DATE.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(s);
+};
 const isPayment = (m: Money | undefined) =>
   m?.currency === "INR" && Number.isSafeInteger(m.paise) && m.paise > 0;
 
