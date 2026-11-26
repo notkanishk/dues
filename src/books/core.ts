@@ -503,6 +503,8 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       const out = moveExpected(expense, bill.amount.paise);
       if (!Array.isArray(out)) return out;
       if (command.type === "DetachBill") {
+        // Detach is on the Order page only (W2.9); a shop or service Bill moves instead (W4.3).
+        if (expense.kind !== "online") return reject("invalid_transition");
         const [expenseId] = slice.newIds as [string];
         return ok([
           ...out,
@@ -806,11 +808,11 @@ export function deriveExpense(expense: ExpenseState): {
  * What Books shows on the Order page (W2.9) and which of its commands `decide` accepts now: the delivered Bills with
  * Move and Detach, the Refunds with Refund received, "Still expected" with Item cancelled and No more invoices (a
  * leftover under LEFTOVER_QUESTION_FROM is asked "Close the order?", whose yes is Not claiming), and a closed-out
- * remainder with its Undo. Null when the Expense is not in the Actor's slice.
+ * remainder with its Undo. Null when the Expense is not in the Actor's slice, or is not an online Order.
  */
 export function orderPage(slice: Slice, expenseId: string, actor: Actor, now: Date) {
   const expense = slice.expenses[expenseId];
-  if (!expense) return null;
+  if (expense?.kind !== "online") return null;
   // One validator: a command is offered only when decide would take it (a probe id stands in for new keys).
   const accepts = (command: Command) => decide({ ...slice, newIds: ["probe"] }, command, actor, now).ok;
   const offered = <T extends Command["type"]>(commands: [T, Command][]) => commands.filter(([, c]) => accepts(c)).map(([type]) => type);

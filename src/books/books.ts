@@ -448,14 +448,15 @@ export function createBooks({ db, now, enqueue }: Deps) {
     },
 
     /**
-     * The Order page from Books (W2.9): the Payment first, each delivered Bill and each Refund with the commands open
+     * The Order page from Books (W2.9), for an online Expense (else not_found): the Payment first, each delivered Bill and each Refund with the commands open
      * now, "Still expected" with the leftover question, and a closed-out remainder with its Undo.
      */
     async order(actor: Actor, id: string) {
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
       const { row, bills: billStates, refunds: refundStates, state } = found;
-      const page = orderPage({ newIds: [], expenses: { [state.id]: state } }, state.id, actor, now())!;
+      const page = orderPage({ newIds: [], expenses: { [state.id]: state } }, state.id, actor, now());
+      if (!page) return notFound; // only an online Expense has an Order page
       const derived = deriveExpense(state);
       const billOf = (billId: string) => billStates.find((b) => b.id === billId)!;
       const refundOf = (refundId: string) => refundStates.find((r) => r.id === refundId)!;
