@@ -76,6 +76,42 @@ describe("apply and derivation", () => {
     return result.events.reduce(apply, fresh).expenses["e-1"]!;
   };
 
+  // Property-style (design §1): for every valid LogExpense, folding apply over its events gives the state the shell stores.
+  it("folding apply over the emitted events reproduces the stored state, for any valid LogExpense", () => {
+    const kinds = ["online", "shop", "service"] as const;
+    const dates = ["2024-02-29", "2026-01-01", "2026-11-19", "2026-12-31"];
+    const amounts = [1, 99, 25000, 129900, 9_999_999_99];
+    for (const kind of kinds)
+      for (const paidOn of dates)
+        for (const paise of amounts) {
+          const command = { type: "LogExpense", kind, amount: rupees(paise), paidOn } as const;
+          const result = decide(fresh, command, mickey, now);
+          if (!result.ok) throw new Error(`refused ${JSON.stringify(command)}`);
+          expect(result.events.reduce(apply, fresh)).toEqual({
+            newIds: ["e-1", "b-1"],
+            expenses: {
+              "e-1": {
+                id: "e-1",
+                draft: false,
+                closedReason: null,
+                amount: rupees(paise),
+                refunds: [],
+                bills: [
+                  {
+                    id: "b-1",
+                    kind: null,
+                    amount: rupees(paise),
+                    fulfilledOn: kind === "online" ? null : paidOn,
+                    paperlessId: null,
+                    cancelled: false,
+                  },
+                ],
+              },
+            },
+          });
+        }
+  });
+
   it("folds a logged online Expense into an open Expense with an expected Bill", () => {
     const expense = afterLog("online");
     expect(deriveExpense(expense)).toEqual({ status: "open", openAmount: rupees(0) });
