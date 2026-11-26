@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq, TransactionRollbackError } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "./index";
-import { auditLog, bills, expenseReferenceSeq, expenses, owedToUniversity, refunds } from "./schema";
+import { auditLog, bills, expenseReferenceSeq, expenses, owedToUniversity, refunds, writeOffs } from "./schema";
 
 // Needs a real Postgres: DATABASE_URL (CI service container, or a scratch postgres:19.0).
 // Keys and References, platform-foundations spec and ADR 0005.
@@ -172,6 +172,19 @@ describe("Amounts", () => {
     await refusedWith(NOT_NULL_VIOLATION, db.insert(refunds).values({ expenseId: expense.id, reason: "returned" }));
     // @ts-expect-error amountPaise is required here
     await refusedWith(NOT_NULL_VIOLATION, db.insert(owedToUniversity).values({ claimantId: dexter, billId: bill!.id }));
+  });
+});
+
+describe("Write-offs", () => {
+  const FOREIGN_KEY_VIOLATION = "23503";
+
+  it("refuses writing off another Expense's Refund; its own Refund is written off", async () => {
+    const own = await logExpense(mickey);
+    const other = await logExpense(mickey);
+    const [refund] = await db.insert(refunds).values({ expenseId: other.id, amountPaise: 50000, reason: "cancelled" }).returning();
+    await refusedWith(FOREIGN_KEY_VIOLATION, db.insert(writeOffs).values({ expenseId: own.id, refundId: refund!.id, amountPaise: 50000 }));
+    const [written] = await db.insert(writeOffs).values({ expenseId: other.id, refundId: refund!.id, amountPaise: 50000 }).returning();
+    expect(written!.refundId).toBe(refund!.id);
   });
 });
 
