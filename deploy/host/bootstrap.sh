@@ -161,7 +161,7 @@ table inet dues {
   }
   chain forward {
     type filter hook forward priority filter - 10; policy accept;
-    ct status dnat ct original proto-dst ${APP_PORT} ip saddr != @app_allow drop
+    ct status dnat ct original proto-dst ${APP_PORT} ct original ip saddr != @app_allow drop   # original source: replies come from the container
     meta nfproto ipv6 ct status dnat ct original proto-dst ${APP_PORT} drop
     ${block_rules}
   }
