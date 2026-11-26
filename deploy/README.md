@@ -1,11 +1,13 @@
 # Deploying Dues
 
-Two hosts, dev and prod, each a Debian Docker LXC. Each runs the same stack from [`compose.yaml`](compose.yaml): web and worker from one image, Postgres 19, Gotenberg. Only web's port 3000 is published, and the host firewall lets only the internal proxy reach it. The proxy serves it as `dues.example.org`. Real host names and addresses live in `private/DEPLOY.local.md`, never here.
+Two hosts, dev and prod, each a Debian Docker LXC. Each runs the same stack from [`compose.yaml`](compose.yaml): web and worker from one image, Postgres 19, Gotenberg. Only web's port 3000 is published; the internal proxy serves it as `dues.example.org`. Real host names and addresses live in `private/DEPLOY.local.md`, never here.
+
+Host hardening: see `deploy/host/bootstrap.sh`.
 
 ## Preparing a host (once)
 
 1. Write `/etc/dues/host.env` (see the header of [`host/bootstrap.sh`](host/bootstrap.sh) for every key), with `IMAGE_REPO=ghcr.io/<owner>/dues`.
-2. As root on the host: `bash bootstrap.sh`. It sets UTC, SSH keys only, unattended security updates, the `runner` user (not in the `docker` group), `/opt/dues`, the firewall, and `/usr/local/sbin/dues-deploy`, the one root command CI may run.
+2. As root on the host: `bash bootstrap.sh`. It prepares the host and installs `/usr/local/sbin/dues-deploy`, the one root command CI may run.
 3. Register the GitHub runner with [`host/runner.sh`](host/runner.sh). The registration token goes on stdin (usage is in the script). The runner gets the label `dues-dev` or `dues-prod`.
 4. Copy `deploy/compose.yaml` to `/opt/dues/compose.yaml`.
 5. Write `/opt/dues/.env` (mode 0600, root-owned) with a fresh password per host:
@@ -27,9 +29,10 @@ When `compose.yaml` changes in the repo, copy it to both hosts again before the 
 
 A push to `main` (or a manual run of the `deploy` workflow) does this:
 
-1. `image` (GitHub-hosted) builds the Dockerfile and pushes `ghcr.io/<owner>/dues:<commit sha>`, then passes the image digest on.
-2. `dev` (runner `dues-dev`, environment `dev`) runs `sudo -n /usr/local/sbin/dues-deploy ghcr.io/<owner>/dues@sha256:<digest>`.
-3. `prod` (runner `dues-prod`, environment `prod`) does the same after dev succeeds. If the `prod` environment has required reviewers, this step waits for their approval.
+1. `test` runs the `ci` workflow. Nothing is built unless it passes.
+2. `image` (GitHub-hosted, `main` only, manual runs included) builds the Dockerfile and pushes `ghcr.io/<owner>/dues:<commit sha>`, then passes the digest reference on.
+3. `dev` (runner `dues-dev`, environment `dev`) runs `sudo -n /usr/local/sbin/dues-deploy ghcr.io/<owner>/dues@sha256:<digest>`.
+4. `prod` (runner `dues-prod`, environment `prod`) does the same after dev succeeds. If the `prod` environment has required reviewers, this step waits for their approval.
 
 `dues-deploy` writes `DUES_IMAGE=<ref>` to `/opt/dues/.image.env`, pulls, and runs `docker compose up -d --remove-orphans --wait`. A service that is not healthy fails the job. On start, web applies the Drizzle migrations and then serves. The worker starts once web is healthy.
 
@@ -37,7 +40,7 @@ Postgres data lives in the named volume `dues_pgdata`. A redeploy never touches 
 
 ## Rolling back
 
-Deploy an older digest. The digest of each run is in the `image` job's output. The tag `ghcr.io/<owner>/dues:<commit sha>` also resolves to one, for example with `docker buildx imagetools inspect`.
+Deploy an older digest. Each run's full reference (`ghcr.io/<owner>/dues@sha256:<digest>`) is the `image` job's `ref` output. The tag `ghcr.io/<owner>/dues:<commit sha>` also resolves to one, for example with `docker buildx imagetools inspect`.
 
 - From GitHub: re-run the `dev` and `prod` jobs of the older workflow run. They reuse that run's digest.
 - On the host, as `runner`: `sudo -n /usr/local/sbin/dues-deploy ghcr.io/<owner>/dues@sha256:<older digest>`.
