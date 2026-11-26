@@ -65,7 +65,7 @@ The short label Dues gives each Expense, Bill, Refund and Owed to university rec
 _Avoid_: ID, tracker ID, invoice number
 
 **Bill**:
-The unit that is claimed: usually a document that proves part or all of an Expense to the university. Comes in four kinds: Invoice, Informal bill, Payment proof, No bill.
+The unit that is claimed: usually a document that proves part or all of an Expense to the university. Once its document is attached, or it is saved without one, it is one of four kinds: Invoice, Informal bill, Payment proof, No bill. An expected Bill has no kind yet.
 _Avoid_: Receipt, voucher
 
 **Fulfilled**:
