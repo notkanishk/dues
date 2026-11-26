@@ -1,0 +1,43 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # Self-hosted jobs: no checkout, no actions, no token. The host's only CI power is dues-deploy,
+  # which builds this exact commit of main on the host itself.
+  dev:
+    needs: test
+    # A manual run deploys only main, never another branch.
+    if: github.repository == 'notkanishk/dues' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, dues-dev]
+    environment: dev
+    timeout-minutes: 30
+    steps:
+      - run: sudo -n /usr/local/sbin/dues-deploy "$DEPLOY_SHA"
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+
+  prod:
+    needs: dev
+    if: github.repository == 'notkanishk/dues' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, dues-prod]
+    environment: prod
+    timeout-minutes: 30
+    steps:
+      - run: sudo -n /usr/local/sbin/dues-deploy "$DEPLOY_SHA"
+        env:
+          DEPLOY_SHA: ${{ github.sha }}

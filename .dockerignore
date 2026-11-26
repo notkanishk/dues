@@ -1,0 +1,12 @@
+**
+!package.json
+!bun.lock
+!tsconfig.json
+!next.config.ts
+!drizzle.config.ts
+!app/
+!src/
+!worker/
+!scripts/start-web.ts
+!drizzle/
+**/*.test.ts
