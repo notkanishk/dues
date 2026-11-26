@@ -14,10 +14,13 @@ import {
   decide,
   deriveBill,
   deriveExpense,
+  deriveRefund,
   type Event,
   type ExpenseState,
   type ExpenseStatus,
   type Job,
+  type RefundReason,
+  type RefundStatus,
   type Rejected,
   type Slice,
 } from "./core";
@@ -57,11 +60,12 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   const refundRows = await q.select().from(refunds).where(inArray(refunds.expenseId, found)).orderBy(refunds.id);
   return rows.map((row) => {
     // Each Bill carries its database-issued reference with its state, so reads never pair two arrays by position.
-    const ownBills: (BillState & { reference: string })[] = billRows
+    const ownBills: (BillState & { reference: string; cancelReason: string | null })[] = billRows
       .filter((b) => b.expenseId === row.id)
       .map((b) => ({
         id: b.id,
         reference: b.reference,
+        cancelReason: b.cancelReason,
         kind: b.kind as BillKind | null,
         amount: money(b.amountPaise, b.currency),
         fulfilledOn: b.fulfilledOn,
@@ -69,38 +73,81 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         cancelled: b.cancelledAt !== null,
         claim: null, // ponytail: no Claims table yet; filled from Claim membership when Claims land
       }));
+    const ownRefunds = refundRows
+      .filter((r) => r.expenseId === row.id)
+      .map((r) => ({
+        id: r.id,
+        reference: r.reference,
+        billId: r.billId,
+        refundedOn: r.refundedOn,
+        amount: money(r.amountPaise, r.currency)!,
+        reason: r.reason as RefundReason,
+        received: r.refundedOn !== null,
+      }));
     const state: ExpenseState = {
       id: row.id,
       draft: row.draft,
       closedReason: row.closedReason,
       amount: money(row.amountPaise, row.currency),
       bills: ownBills,
-      refunds: refundRows
-        .filter((r) => r.expenseId === row.id)
-        .map((r) => ({ amount: money(r.amountPaise, r.currency)!, received: r.refundedOn !== null })),
+      refunds: ownRefunds,
       writtenOff: zero, // ponytail: nothing is written off until task 2.13d stores it
     };
-    return { row, bills: ownBills, state };
+    return { row, bills: ownBills, refunds: ownRefunds, state };
   });
 }
 
-async function loadSlice(tx: Tx, _actor: Actor, command: Command): Promise<Slice> {
-  switch (command.type) {
-    case "LogExpense": {
-      // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
-      const { rows } = await tx.execute<{ id: string }>(sql`select uuidv7() as id from generate_series(1, 2)`);
-      return { newIds: rows.map((r) => r.id), expenses: {} };
+// How many new rows each command may create, and which Expense it touches.
+async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice> {
+  const [count, expenseIds] = await (async (): Promise<[number, string[]]> => {
+    switch (command.type) {
+      case "LogExpense":
+        return [2, []];
+      case "SplitExpectedBill":
+      case "ExpectRefund":
+      case "CancelBill":
+      case "ReturnBill":
+        return [1, await expenseOf(tx, bills, command.billId)];
+      case "MarkRefundReceived":
+        return [0, await expenseOf(tx, refunds, command.refundId)];
     }
+  })();
+  // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
+  const { rows } = await tx.execute<{ id: string }>(sql`select uuidv7() as id from generate_series(1, ${count})`);
+  const loaded = await loadExpenses(tx, actor, expenseIds);
+  return { newIds: rows.map((r) => r.id), expenses: Object.fromEntries(loaded.map((e) => [e.state.id, e.state])) };
+}
+
+// Unscoped on purpose: loadExpenses applies the Actor's scope next, so another Claimant's Bill or Refund loads nothing.
+async function expenseOf(tx: Tx, table: typeof bills | typeof refunds, id: string) {
+  if (!UUID.test(id)) return [];
+  return (await tx.select({ id: table.expenseId }).from(table).where(eq(table.id, id))).map((r) => r.id);
+}
+
+type Entity = "expense" | "bill" | "refund";
+function entityOf(event: Event): [Entity, string] {
+  switch (event.type) {
+    case "ExpenseLogged":
+      return ["expense", event.expenseId];
+    case "BillAdded":
+    case "ExpectedBillReduced":
+    case "BillRemovedFromClaim":
+    case "BillCancelled":
+      return ["bill", event.billId];
+    case "RefundExpected":
+    case "RefundReceived":
+      return ["refund", event.refundId];
   }
 }
 
-const entityOf = (event: Event): ["expense" | "bill", string] =>
-  event.type === "ExpenseLogged" ? ["expense", event.expenseId] : ["bill", event.billId];
-
-function stateOf(slice: Slice, entity: "expense" | "bill", id: string): ExpenseStatus | BillStatus | null {
+function stateOf(slice: Slice, entity: Entity, id: string): ExpenseStatus | BillStatus | RefundStatus | null {
   if (entity === "expense") {
     const expense = slice.expenses[id];
     return expense ? deriveExpense(expense).status : null;
+  }
+  if (entity === "refund") {
+    const refund = Object.values(slice.expenses).flatMap((e) => e.refunds).find((r) => r.id === id);
+    return refund ? deriveRefund(refund) : null;
   }
   for (const expense of Object.values(slice.expenses)) {
     const bill = expense.bills.find((b) => b.id === id);
@@ -141,6 +188,28 @@ async function write(tx: Tx, event: Event, at: Date) {
         fulfilledOn: event.fulfilledOn,
         createdAt: at,
       });
+      return;
+    case "ExpectedBillReduced":
+      await tx.update(bills).set({ amountPaise: event.amount.paise }).where(eq(bills.id, event.billId));
+      return;
+    case "BillRemovedFromClaim":
+      return; // ponytail: the loader never loads a Claim yet, so this cannot happen; deletes the Claim line once Claims land
+    case "BillCancelled":
+      await tx.update(bills).set({ cancelledAt: at, cancelReason: event.reason }).where(eq(bills.id, event.billId));
+      return;
+    case "RefundExpected":
+      await tx.insert(refunds).values({
+        id: event.refundId,
+        expenseId: event.expenseId,
+        billId: event.billId,
+        amountPaise: event.amount.paise,
+        currency: event.amount.currency,
+        reason: event.reason,
+        createdAt: at,
+      });
+      return;
+    case "RefundReceived":
+      await tx.update(refunds).set({ refundedOn: event.refundedOn }).where(eq(refunds.id, event.refundId));
       return;
   }
 }
@@ -216,7 +285,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
     async expense(actor: Actor, id: string) {
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
-      const { row, bills: billStates, state } = found;
+      const { row, bills: billStates, refunds: refundStates, state } = found;
       const derived = deriveExpense(state);
       return {
         ok: true as const,
@@ -243,7 +312,17 @@ export function createBooks({ db, now, enqueue }: Deps) {
             kind: b.kind,
             amount: b.amount,
             fulfilledOn: b.fulfilledOn,
+            cancelReason: b.cancelReason,
             status: deriveBill(b),
+          })),
+          refunds: refundStates.map((r) => ({
+            id: r.id,
+            reference: r.reference,
+            amount: r.amount,
+            reason: r.reason,
+            billId: r.billId,
+            refundedOn: r.refundedOn,
+            status: deriveRefund(r),
           })),
         },
       };

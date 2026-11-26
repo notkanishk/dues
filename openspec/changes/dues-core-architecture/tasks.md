@@ -54,14 +54,14 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [x] 2.9 Books shell: `execute(actor, command)` with per-Claimant lock, events, audit log. Done: `src/books/`; idempotency keys in `idempotency_keys` (migration 0002); a Bill's kind is null until its document arrives
 - [x] 2.10 test: Open amount and "why it's open" derived on read for awaiting goods, refund owed, bill missing, mismatch, in claim. Done: `src/books/core.test.ts` (scenarios, order, property), `books.test.ts` (Refunds from the table)
 - [x] 2.11 Derivation of status, Open amount and reason (no stored status). Done: `deriveExpense` in `src/books/core.ts`; Claim membership (`claim`) and `writtenOff` arrive as slice fields the loader fills with none until Claims and 2.13d
-- [ ] 2.12 test: Order flow — split expected Bill per invoice; cancel part → expected Refund; cancel rest; return before claim → Bill cancelled permanently
-- [ ] 2.13 Order commands
+- [x] 2.12 test: Order flow — split expected Bill per invoice; cancel part → expected Refund; cancel rest; return before claim → Bill cancelled permanently. Done: `src/books/core.test.ts` ("Order commands", property over command sequences), `books.test.ts` ("Order flow"); return after submission (Owed to university) waits for Claims
+- [x] 2.13 Order commands. Done: `SplitExpectedBill` (LogDocument issues it when documents arrive, Phase 2), `ExpectRefund` (Item cancelled), `CancelBill`, `ReturnBill` in `src/books/core.ts`; a Bill on any Claim is refused as `locked` until Claims
 - [ ] 2.13a test: Order page — Payment first, then each Bill with Move to another payment, Detach (own invoice-only Expense) and Edit (opens review); "Still expected ₹x" with Item cancelled (expected Refund, Refund received) and No more invoices; a small leftover gets "₹1 left. Close the order?" and is never closed silently
 - [ ] 2.13b Order page queries and commands (`DetachBill`, Item cancelled)
 - [ ] 2.13c test: closing what is left of an Order — "No more invoices" asks "₹270 of this order has no invoice. What happened?" with Refund coming (expected Refund, "Refund received" later), Claim without a bill (a `no_bill` Bill of ₹270 with the Order's What for and remark "No invoice from seller", `ready`) and Not claiming (remainder written off, counted in the Open amount, the Order can settle, Advance left unchanged); each undone from the Order page; a leftover under ₹10 skips the question and offers "₹1 left. Close the order?" (yes = Not claiming), ₹10 or more asks the question; never closed silently
 - [ ] 2.13d Three-way close commands, written-off remainder in the Open amount, undo
-- [ ] 2.14 test: Refund expected → received; Expense settles only when Open amount is zero, every Refund arrived, every Bill reimbursed or cancelled
-- [ ] 2.15 Refund commands and settling
+- [x] 2.14 test: Refund expected → received; Expense settles only when Open amount is zero, every Refund arrived, every Bill reimbursed or cancelled. Done: `core.test.ts` ("MarkRefundReceived and settling"), `books.test.ts`; settling with a reimbursed Bill is pinned on the pure core until Claims
+- [x] 2.15 Refund commands and settling. Done: `MarkRefundReceived`; settling stays derived by `deriveExpense`; `WriteOffRefund` comes with closing (2.17)
 - [ ] 2.16 test: corrections allowed until a Bill is on a submitted Claim; "differs from the document" flag; closing (personal / duplicate / written off) rules
 - [ ] 2.17 Correction and closing commands
 - [ ] 2.18 test: authorization — another Claimant's Expense is `not_found`; admin sees it and is audited as actor
