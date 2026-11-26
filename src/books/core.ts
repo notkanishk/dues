@@ -1,5 +1,5 @@
 // Books' functional core (design §1): decide and apply are pure; the shell (books.ts) does the I/O.
-import type { Money } from "@/src/money/money";
+import { type Money, sum } from "@/src/money/money";
 
 // ponytail: the Actor lives here until Claimants (task 2.7) produces it; then it moves there.
 export type Actor = {
@@ -181,8 +181,7 @@ export function deriveBill(bill: BillState): BillStatus {
 function openAmount(expense: ExpenseState): Money | null {
   const covering = [...expense.bills.filter((b) => !b.cancelled).map((b) => b.amount), ...expense.refunds.map((r) => r.amount)];
   if (!expense.amount || covering.some((m) => m === null)) return null;
-  const paise = covering.reduce((left, m) => left - m!.paise, expense.amount.paise);
-  return { paise, currency: "INR" };
+  return { paise: expense.amount.paise - sum(covering as Money[]).paise, currency: "INR" };
 }
 
 export function deriveExpense(expense: ExpenseState): { status: ExpenseStatus; openAmount: Money | null } {
