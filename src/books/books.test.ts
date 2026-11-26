@@ -1081,4 +1081,21 @@ describe("Authorization at the Actor Seam", () => {
       } else throw new Error(`refused: ${moved.reason}`);
     }
   });
+
+  it("what an admin's command creates belongs to the Claimant it acts for; what an admin logs is the admin's own", async () => {
+    const mickey = claimant();
+    const root = admin();
+    const t = await books3000(mickey);
+    const detached = ok(await books.execute(root, { type: "DetachBill", billId: t.deliveredBillId }));
+    const logged = detached.events.find((e) => e.type === "ExpenseLogged");
+    if (logged?.type !== "ExpenseLogged") throw new Error("expected a new Expense");
+    expect(logged.claimantId).toBe(mickey.claimantId);
+    expect(await read(mickey, logged.expenseId)).toMatchObject({ amount: rupees(120000) });
+    expect((await auditRowsOf(root)).every((r) => r.ownerId === mickey.claimantId)).toBe(true);
+
+    // LogExpense takes no Claimant from its input (D6), so an admin can only log into the Actor's own books.
+    const own = expenseIdOf(await books.execute(root, logExpense("shop", 25000)));
+    expect(await books.expense(mickey, own)).toEqual({ ok: false, reason: "not_found" });
+    expect(await expensesOf(root)).toBe(1);
+  });
 });
