@@ -86,6 +86,13 @@ export type CloseChoice = "refund_coming" | "claim_without_bill" | "not_claiming
 const CLOSE_CHOICES: readonly string[] = ["refund_coming", "claim_without_bill", "not_claiming"] satisfies CloseChoice[];
 /** Undoes CloseOrder from the Order page (W2.9): what it made is taken back and the remainder is expected again. */
 export type UndoCloseOrder = { readonly type: "UndoCloseOrder"; readonly billId: string };
+/**
+ * "Move to another payment" (W2.9): a delivered Bill belongs to another of the Claimant's Expenses. While either Expense
+ * still expects goods, its expected Bill takes the difference (moving it back undoes an auto-attach's split).
+ */
+export type MoveBill = { readonly type: "MoveBill"; readonly billId: string; readonly toExpenseId: string };
+/** "Detach" (W2.9): a delivered Bill becomes its own invoice-only Expense, as an unmatched Invoice would (W4). */
+export type DetachBill = { readonly type: "DetachBill"; readonly billId: string };
 /** A leftover under this is offered "₹1 left. Close the order?"; from it up, the three-way question (decision 55). */
 export const LEFTOVER_QUESTION_FROM: Money = { paise: 1000, currency: "INR" };
 /** The remark a leftover's No bill starts with (FUNCTIONAL §2 Bill, W2.9); the Claimant can edit it. */
@@ -103,7 +110,9 @@ export type Command =
   | ConfirmDiffers
   | CloseExpense
   | CloseOrder
-  | UndoCloseOrder;
+  | UndoCloseOrder
+  | MoveBill
+  | DetachBill;
 /** A corrected field's value before and after, for the audit log. */
 export type Change<T> = { readonly from: T; readonly to: T };
 export type RefundReason = "cancelled" | "returned" | "partial";
@@ -113,9 +122,9 @@ export type Event =
       readonly type: "ExpenseLogged";
       readonly expenseId: string;
       readonly claimantId: string;
-      readonly kind: LogExpense["kind"];
+      readonly kind: LogExpense["kind"] | null;
       readonly amount: Money;
-      readonly paidOn: string;
+      readonly paidOn: string | null;
       readonly payee: string | null;
       readonly vendor: string | null;
       readonly payback: boolean;
@@ -137,6 +146,7 @@ export type Event =
       readonly remarks?: string;
       readonly fromBillId?: string;
     }
+  | { readonly type: "BillMoved"; readonly billId: string; readonly fromExpenseId: string; readonly toExpenseId: string }
   | { readonly type: "ExpectedBillReduced"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
   /** A correction moved more onto an Order's expected Bill; amount is its new remainder (ExpectedBillReduced's twin). */
   | { readonly type: "ExpectedBillIncreased"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
@@ -475,6 +485,46 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
         }
       }
     }
+    case "MoveBill":
+    case "DetachBill": {
+      const found = findBill(slice, command.billId);
+      if (!found.ok) return found;
+      const { expense, bill } = found;
+      // Only a delivered Bill moves: the expected remainder is the Order's own, and cancelled is for good.
+      if (bill.cancelled || !bill.fulfilledOn || !bill.amount) return reject("invalid_transition");
+      const out = moveExpected(expense, bill.amount.paise);
+      if (!Array.isArray(out)) return out;
+      if (command.type === "DetachBill") {
+        const [expenseId] = slice.newIds as [string];
+        return ok([
+          ...out,
+          {
+            type: "ExpenseLogged",
+            expenseId,
+            claimantId: actor.claimantId,
+            kind: expense.kind,
+            amount: bill.amount,
+            // ponytail: W4's invoice-only Expense takes the bill date; until a Reading gives one, the Order's date.
+            paidOn: bill.billDate ?? expense.paidOn,
+            payee: null,
+            vendor: null,
+            payback: false,
+            orderRef: null,
+            whatFor: null,
+            upiRef: null,
+            notes: null,
+            source: "manual",
+          },
+          { type: "BillMoved", billId: bill.id, fromExpenseId: expense.id, toExpenseId: expenseId },
+        ]);
+      }
+      const target = slice.expenses[command.toExpenseId];
+      if (!target) return reject("not_found"); // the loader scoped it: another Claimant's Expense is absent
+      if (target.id === expense.id || target.draft || target.closedReason) return reject("invalid_transition");
+      const into = moveExpected(target, -bill.amount.paise);
+      if (!Array.isArray(into)) return into;
+      return ok([...out, { type: "BillMoved", billId: bill.id, fromExpenseId: expense.id, toExpenseId: target.id }, ...into]);
+    }
     case "MarkRefundReceived": {
       // Not refused on a closed Expense: closing may leave a Refund still expected (FUNCTIONAL §3.1).
       const expense = Object.values(slice.expenses).find((e) => e.refunds.some((r) => r.id === command.refundId));
@@ -624,6 +674,19 @@ export function apply(slice: Slice, event: Event): Slice {
     case "ExpenseCorrected": {
       const expense = slice.expenses[event.expenseId]!;
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, ...after(event.changes) } } };
+    }
+    case "BillMoved": {
+      const from = slice.expenses[event.fromExpenseId]!;
+      const to = slice.expenses[event.toExpenseId]!;
+      const bill = from.bills.find((b) => b.id === event.billId)!;
+      return {
+        ...slice,
+        expenses: {
+          ...slice.expenses,
+          [from.id]: { ...from, bills: from.bills.filter((b) => b.id !== bill.id) },
+          [to.id]: { ...to, bills: [...to.bills, bill] },
+        },
+      };
     }
     case "ExpectedBillClosedOut":
       return updateBill(slice, event.expenseId, event.billId, { cancelled: true, closedAs: event.choice });

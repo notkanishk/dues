@@ -118,6 +118,10 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
     switch (command.type) {
       case "LogExpense":
         return [2, []];
+      case "MoveBill":
+        // Both Expenses load under the one Claimant lock already held (design D5): the Actor owns both or it is not_found.
+        return [0, [...(await expenseOf(tx, bills, command.billId)), command.toExpenseId]];
+      case "DetachBill":
       case "SplitExpectedBill":
       case "CloseOrder":
       case "ExpectRefund":
@@ -155,6 +159,7 @@ function entityOf(event: Event): [Entity, string] {
     case "ExpenseClosed":
       return ["expense", event.expenseId];
     case "BillAdded":
+    case "BillMoved":
     case "ExpectedBillReduced":
     case "ExpectedBillIncreased":
     case "BillRemovedFromClaim":
@@ -226,6 +231,9 @@ async function write(tx: Tx, event: Event, at: Date) {
         fromBillId: event.fromBillId ?? null,
         createdAt: at,
       });
+      return;
+    case "BillMoved":
+      await tx.update(bills).set({ expenseId: event.toExpenseId }).where(eq(bills.id, event.billId));
       return;
     case "ExpectedBillReduced":
     case "ExpectedBillIncreased":
