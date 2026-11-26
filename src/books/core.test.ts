@@ -1319,6 +1319,21 @@ describe("CloseOrder (No more invoices) and UndoCloseOrder", () => {
     expect(derived(small).openAmount).toEqual(rupees(0));
   });
 
+  it.each([
+    ["₹9.99", 999, "refund_coming"],
+    ["₹9.99", 999, "claim_without_bill"],
+    ["₹1.00", 100, "refund_coming"],
+  ] as const)("Leftover under ₹10: %s (%i paise) takes only Not claiming; %s is refused on choice", (_, paise, choice) => {
+    const small = order(paise);
+    expect(run(small, close(choice), ["x-1"]).decision).toEqual({ ok: false, reason: "validation", field: "choice" });
+    expect(run(small, close("not_claiming")).decision).toMatchObject({ ok: true });
+  });
+
+  it("a leftover of exactly ₹10.00 takes all three choices", () => {
+    for (const choice of ["refund_coming", "claim_without_bill", "not_claiming"] as const)
+      expect(run(order(1000), close(choice), ["x-1"]).decision).toMatchObject({ ok: true });
+  });
+
   it.each(["refund_coming", "claim_without_bill", "not_claiming"] as const)("Undo %s: ₹270.00 is expected again", (choice) => {
     const before = leftover();
     const closed = run(before, close(choice), [choice === "refund_coming" ? "r-1" : "b-4"]).slice;
