@@ -2,6 +2,8 @@
 // ponytail: `number`, not `bigint`: safe integers reach ₹90 lakh crore, far past any Dues amount, and keep JSON and pg simple.
 export type Money = { readonly paise: number; readonly currency: "INR" };
 
+export const zero: Money = { paise: 0, currency: "INR" };
+
 // Indian grouping ("1,00,000"), Western ("100,000") or plain digits; mixed or short groups ("1,50") are not amounts.
 const RUPEES = /^₹?\s*(\d{1,2}(?:,\d{2})*,\d{3}|\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/;
 

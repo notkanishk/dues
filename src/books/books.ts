@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { auditLog, bills, expenses, idempotencyKeys, refunds } from "@/src/db/schema";
-import type { Money } from "@/src/money/money";
+import { type Money, zero } from "@/src/money/money";
 import {
   type Actor,
   apply,
@@ -78,7 +78,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       refunds: refundRows
         .filter((r) => r.expenseId === row.id)
         .map((r) => ({ amount: money(r.amountPaise, r.currency)!, received: r.refundedOn !== null })),
-      writtenOff: { paise: 0, currency: "INR" }, // ponytail: nothing is written off until task 2.13d stores it
+      writtenOff: zero, // ponytail: nothing is written off until task 2.13d stores it
     };
     return { row, bills: ownBills, state };
   });

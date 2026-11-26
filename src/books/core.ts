@@ -1,5 +1,5 @@
 // Books' functional core (design §1): decide and apply are pure; the shell (books.ts) does the I/O.
-import { type Money, sum } from "@/src/money/money";
+import { type Money, sum, zero } from "@/src/money/money";
 
 // ponytail: the Actor lives here until Claimants (task 2.7) produces it; then it moves there.
 export type Actor = {
@@ -159,7 +159,7 @@ export function apply(slice: Slice, event: Event): Slice {
             amount: event.amount,
             bills: [],
             refunds: [],
-            writtenOff: { paise: 0, currency: "INR" },
+            writtenOff: zero,
           },
         },
       };
