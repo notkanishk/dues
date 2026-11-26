@@ -66,7 +66,9 @@ export const bills = pgTable(
     id: key(),
     reference: reference(),
     expenseId: uuid("expense_id").notNull().references(() => expenses.id),
-    kind: text("kind").notNull(),
+    // Null until a document says what the Bill is: an online Order's expected Bill and a shop or
+    // service Bill wait for their document (W2, W3); the spec names no kind for them.
+    kind: text("kind"),
     billNo: text("bill_no"), // as the vendor printed it; never the Reference
     billDate: date("bill_date"),
     amountPaise: amountPaise(),
@@ -144,3 +146,13 @@ export const auditLog = pgTable(
   },
   (t) => [uniqueIndex("audit_log_idempotency_key").on(t.idempotencyKey).where(sql`${t.idempotencyKey} is not null`)],
 );
+
+// Idempotency keys (design D4): the first result of a keyed command, returned again on replay.
+// The command is kept so the same key with a different command is refused (idempotency_conflict).
+export const idempotencyKeys = pgTable("idempotency_keys", {
+  key: text("key").primaryKey(),
+  claimantId: uuid("claimant_id").notNull(),
+  command: jsonb("command").notNull(),
+  result: jsonb("result").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull(),
+});

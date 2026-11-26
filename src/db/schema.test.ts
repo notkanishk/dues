@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { eq, TransactionRollbackError } from "drizzle-orm";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "./index";
 import { auditLog, bills, expenseReferenceSeq, expenses, owedToUniversity, refunds } from "./schema";
@@ -31,20 +30,22 @@ const CHECK_VIOLATION = "23514";
 const GENERATED_ALWAYS = "428C9";
 const refusedAsImmutable = (query: Promise<unknown>) => refusedWith(CHECK_VIOLATION, query);
 
-beforeAll(async () => {
+beforeAll(() => {
+  // Migrated once by test/migrate-once.ts (vitest globalSetup).
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set; these tests need a real Postgres");
-  await migrate(db, { migrationsFolder: "./drizzle" });
 });
 
 afterAll(() => pool.end());
 
 describe("Keys and References", () => {
-  it("gives two Claimants' Expenses different, consecutive References", async () => {
+  // One global sequence: different and increasing. Not necessarily consecutive, since other test files
+  // (and, in production, other Claimants) take numbers from the same sequence at the same time.
+  it("gives two Claimants' Expenses different References from one global sequence", async () => {
     const first = await logExpense(mickey);
     const second = await logExpense(dexter);
-    const n = Number(first.reference.slice(2));
     expect(first.reference).toMatch(/^E-[1-9]\d*$/);
-    expect(second.reference).toBe(`E-${n + 1}`);
+    expect(second.reference).toMatch(/^E-[1-9]\d*$/);
+    expect(Number(second.reference.slice(2))).toBeGreaterThan(Number(first.reference.slice(2)));
   });
 
   it("keys every record with a UUIDv7", async () => {

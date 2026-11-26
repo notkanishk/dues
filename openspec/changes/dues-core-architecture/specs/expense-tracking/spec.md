@@ -150,7 +150,7 @@ The system SHALL give each Bill one status of expected, ready, claimed, reimburs
 - **AND** an expected Refund of ₹800.00 is created
 
 ### Requirement: Bill kinds and remarks
-The system SHALL classify every Bill as an Invoice, an Informal bill, a Payment proof or a No bill (no document), SHALL leave the Bill number empty for all but an Invoice, SHALL add the remark "Informal/raw bill attached" automatically to an Informal bill, and MUST require remarks on a No bill.
+The system SHALL classify every Bill, once its document is attached or it is saved as No bill, as an Invoice, an Informal bill, a Payment proof or a No bill (no document), SHALL leave the Bill number empty for all but an Invoice, SHALL add the remark "Informal/raw bill attached" automatically to an Informal bill, and MUST require remarks on a No bill.
 
 #### Scenario: Informal bill remark
 - **WHEN** a Bill of kind Informal bill is created
