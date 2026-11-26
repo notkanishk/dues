@@ -754,6 +754,12 @@ describe("The Order page", () => {
     });
   });
 
+  it("is not_found for an Expense that is not an online Order", async () => {
+    const mickey = claimant();
+    const shop = expenseIdOf(await books.execute(mickey, logExpense("shop", 25000)));
+    expect(await books.order(mickey, shop)).toEqual({ ok: false, reason: "not_found" });
+  });
+
   it("is not_found for another Claimant's Order", async () => {
     const { expenseId } = await orderWith(claimant());
     expect(await books.order(claimant(), expenseId)).toEqual({ ok: false, reason: "not_found" });

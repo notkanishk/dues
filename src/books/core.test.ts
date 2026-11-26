@@ -1505,6 +1505,12 @@ describe("MoveBill and DetachBill", () => {
     expect(decision.ok && decision.events[1]).toMatchObject({ type: "ExpenseLogged", paidOn: "2026-11-21" });
   });
 
+  it("Detach is an Order's only: a shop Expense's Bill is not detached, but still moves to another payment (W4.3)", () => {
+    const slice = twoExpenses({ kind: "shop", paise: 210000 });
+    expect(run(slice, detach("b-9"), ["e-3"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(run(slice, move("b-9", "e-1")).decision).toMatchObject({ ok: true });
+  });
+
   it("a locked Bill is locked: on a submitted Claim it neither moves nor detaches", () => {
     const slice = twoExpenses();
     slice.expenses["e-1"]!.bills[1]!.claim = "submitted";
@@ -1598,6 +1604,12 @@ describe("orderPage", () => {
       { id: "b-2", status: "claimed", commands: [] },
       { id: "b-3", status: "cancelled", commands: [] },
     ]);
+  });
+
+  it("is null for an Expense that is not an online Order", () => {
+    const logged = decide(fresh, logExpense("shop", 25000), mickey, now);
+    if (!logged.ok) throw new Error("expected Ok");
+    expect(orderPage(logged.events.reduce(apply, fresh), "e-1", mickey, now)).toBeNull();
   });
 
   it("is null for an Expense outside the Actor's slice", () => {
