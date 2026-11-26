@@ -138,9 +138,12 @@ async function write(tx: Tx, event: Event, at: Date) {
   }
 }
 
-const isKeyRace = (e: unknown) =>
-  (e as { cause?: { code?: string; constraint?: string } })?.cause?.code === "23505" &&
-  (e as { cause: { constraint?: string } }).cause.constraint === "idempotency_keys_pkey";
+// The audit insert meets a racing key first (audit_log_idempotency_key); idempotency_keys_pkey is kept as the backstop.
+const KEY_CONSTRAINTS = ["audit_log_idempotency_key", "idempotency_keys_pkey"];
+const isKeyRace = (e: unknown) => {
+  const cause = (e as { cause?: { code?: string; constraint?: string } })?.cause;
+  return cause?.code === "23505" && KEY_CONSTRAINTS.includes(cause.constraint ?? "");
+};
 
 export function createBooks({ db, now, enqueue }: Deps) {
   async function attempt(actor: Actor, command: Command, key: string | undefined): Promise<Result> {

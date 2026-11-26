@@ -157,6 +157,38 @@ describe("Idempotency", () => {
   });
 });
 
+describe("Idempotency races", () => {
+  it("one Claimant sending one key twice at once gets one Expense and the same result twice", async () => {
+    const mickey = claimant();
+    const key = `k-${randomUUID()}`;
+    const [a, b] = await Promise.all([0, 1].map(() => books.execute(mickey, logExpense("shop", 25000), { idempotencyKey: key })));
+    expect(a).toEqual(b);
+    expect(a).toMatchObject({ ok: true });
+    expect(await expensesOf(mickey)).toBe(1);
+  });
+
+  it("two Claimants sending one new key at once: one is served, the other is refused as idempotency_conflict", async () => {
+    const mickey = claimant();
+    const dexter = claimant();
+    const key = `k-${randomUUID()}`;
+    // Hold the winner's transaction open after its writes, so the loser has read no key and its insert must wait, then fail.
+    await pool.query(`create or replace function test_hold_key() returns trigger language plpgsql as $$
+      begin if new.key = '${key}' then perform pg_sleep(0.3); end if; return new; end $$`);
+    await pool.query("create or replace trigger test_hold_key after insert on idempotency_keys for each row execute function test_hold_key()");
+    try {
+      const results = await Promise.all([
+        books.execute(mickey, logExpense("shop", 25000), { idempotencyKey: key }),
+        books.execute(dexter, logExpense("shop", 25000), { idempotencyKey: key }),
+      ]);
+      const reasons = results.map((r) => (r.ok ? "ok" : r.reason)).sort();
+      expect(reasons).toEqual(["idempotency_conflict", "ok"]);
+    } finally {
+      await pool.query("drop trigger test_hold_key on idempotency_keys; drop function test_hold_key()");
+    }
+    expect((await expensesOf(mickey)) + (await expensesOf(dexter))).toBe(1);
+  });
+});
+
 describe("Authorization", () => {
   it("reads another Claimant's Expense as not_found, the same as one that does not exist", async () => {
     const mickey = claimant();
