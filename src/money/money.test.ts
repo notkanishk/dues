@@ -19,11 +19,13 @@ describe("parsing typed amounts never goes through a float", () => {
     ["4.35", 435],
     ["0.07", 7],
     ["0.29", 29],
+    ["1,00,000", 10000000],
+    ["100,000", 10000000],
   ])("%s is %i paise", (text, paise) => {
     expect(parseRupees(text)?.paise).toBe(paise);
   });
 
-  it.each(["", "₹", "abc", "2.505", "-5", "1e3", "1,,000", ",100", "12.", "Infinity", "99999999999999999"])(
+  it.each(["", "₹", "abc", "2.505", "-5", "1e3", "1,,000", ",100", "12.", "Infinity", "99999999999999999", "1,50", "1,000,00"])(
     "%j is not an amount",
     (text) => {
       expect(parseRupees(text)).toBeNull();
