@@ -1,0 +1,31 @@
+name: deploy-dev
+
+# Puts one branch on dev to check it live before it merges: gh workflow run deploy-dev.yml --ref <branch>
+# Never prod: only main deploys there (deploy.yml), and prod's dues-deploy refuses commits not on main.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+# The same queue as deploy.yml, so a branch never lands on dev in the middle of a main deploy.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # Self-hosted: no checkout, no actions, no token. dues-deploy builds this exact commit on the host.
+  dev:
+    needs: test
+    if: github.repository == 'notkanishk/dues'
+    runs-on: [self-hosted, dues-dev]
+    environment: dev
+    timeout-minutes: 30
+    steps:
+      - run: sudo -n /usr/local/sbin/dues-deploy "$DEPLOY_SHA"
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
