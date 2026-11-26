@@ -873,6 +873,16 @@ describe("The Order page", () => {
     ]);
   });
 
+  it("Move a ₹500.00 Bill into an Order expecting ₹500.00: its expected Bill is cancelled with no Refund; Open amount ₹0.00", async () => {
+    const mickey = claimant();
+    const from = await orderWith(mickey, 50000);
+    const to = await order(mickey, 50000);
+    ok(await books.execute(mickey, { type: "MoveBill", billId: from.billIds[0]!, toExpenseId: to.expenseId }));
+    expect(await page(mickey, to.expenseId)).toMatchObject({ openAmount: rupees(0), refunds: [], stillExpected: null, bills: [{ id: from.billIds[0] }] });
+    expect((await read(mickey, to.expenseId)).bills.find((b) => b.id === to.expectedBillId)).toMatchObject({ status: "cancelled", cancelReason: "cancelled" });
+    expect(await page(mickey, from.expenseId)).toMatchObject({ openAmount: rupees(0), stillExpected: { amount: rupees(487000) } });
+  });
+
   it("Move to another Claimant's Expense is not_found and nothing changes", async () => {
     const mickey = claimant();
     const from = await orderWith(mickey, 210000);

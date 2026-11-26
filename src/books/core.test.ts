@@ -506,10 +506,12 @@ describe("Open amount and settled invariants, for any generated slice", () => {
       "SplitExpectedBill",
       "UndoCloseOrder",
     ];
-    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0, locked: 0, closed: 0, writtenOff: 0, movedExpected: 0, moved: 0, undone: 0 };
+    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0, locked: 0, closed: 0, writtenOff: 0, movedExpected: 0, moved: 0, movedEqual: 0, undone: 0 };
     for (let n = 0; n < 2000; n++) {
-      const logged = decide(fresh, logExpense(pick(["online", "online", "shop"] as const), paise() + 1), mickey, now);
-      const other = decide({ ...fresh, newIds: ["e-2", "b-foreign"] }, logExpense("online", paise() + 1), mickey, now);
+      const first = paise() + 1;
+      const logged = decide(fresh, logExpense(pick(["online", "online", "shop"] as const), first), mickey, now);
+      // Now and then the other Order expects what the first paid, so a Bill can move in equal to its remainder (W4.3).
+      const other = decide({ ...fresh, newIds: ["e-2", "b-foreign"] }, logExpense("online", pick([paise() + 1, first])), mickey, now);
       if (!logged.ok || !other.ok) throw new Error("expected Ok");
       let slice = [...logged.events, ...other.events].reduce(apply, fresh);
       // Half the time the first Bill has its Invoice document, so it can be corrected (no command attaches one yet).
@@ -570,7 +572,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
           if (event.type === "ExpenseLogged") open[event.expenseId] = event.amount.paise; // a detached Bill's own Payment
           if (event.type === "ExpenseCorrected" && event.changes.amount) open[event.expenseId]! += event.changes.amount.to!.paise - event.changes.amount.from!.paise;
           if (event.type === "BillCorrected" && event.changes.amount) open[event.expenseId]! -= event.changes.amount.to!.paise - event.changes.amount.from!.paise;
-          if (event.type === "BillCancelled" && command.type === "CloseExpense") open[event.expenseId]! += billBefore(event.billId).amount!.paise;
+          if (event.type === "BillCancelled" && (command.type === "CloseExpense" || command.type === "MoveBill")) open[event.expenseId]! += billBefore(event.billId).amount!.paise;
           if ((event.type === "ExpectedBillReduced" || event.type === "ExpectedBillIncreased") && /^(Correct|MoveBill|DetachBill)/.test(command.type))
             open[event.expenseId]! -= event.amount.paise - billBefore(event.billId).amount!.paise;
           if (event.type === "BillMoved") {
@@ -632,6 +634,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
         if (command.type === "CloseOrder") expect(deriveExpense(slice.expenses["e-1"]!).openAmount).toEqual(deriveExpense(e1Before).openAmount);
         if (command.type === "CloseExpense") seen.closed++;
         if (command.type === "MoveBill" || command.type === "DetachBill") seen.moved++;
+        if (command.type === "MoveBill" && decision.events.some((e) => e.type === "BillCancelled")) seen.movedEqual++;
         if (command.type === "UndoCloseOrder") seen.undone++;
         if (decision.events.some((e) => e.type === "RefundWrittenOff" || e.type === "RemainderWrittenOff")) seen.writtenOff++;
       }
@@ -646,6 +649,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
     expect(seen.movedExpected).toBeGreaterThan(20);
     expect(seen.moved).toBeGreaterThan(20);
     expect(seen.undone).toBeGreaterThan(20);
+    expect(seen.movedEqual).toBeGreaterThan(10);
   });
 });
 
@@ -1394,12 +1398,14 @@ describe("CloseOrder (No more invoices) and UndoCloseOrder", () => {
 // The Order page's Bill commands (W2.9): Move to another payment, Detach. A ₹4,870.00 Order (e-1) with a ₹2,100.00
 // Invoice delivered (b-2) and ₹2,770.00 still expected (b-1), beside the Claimant's other Expense e-2.
 describe("MoveBill and DetachBill", () => {
-  const twoExpenses = (other: { kind: "online" | "shop"; paise: number } = { kind: "online", paise: 300000 }): Slice => {
-    const first = run(order(487000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(210000), fulfilledOn: "2026-11-21" }, ["b-2"]).slice;
+  type Other = { kind: "online" | "shop"; paise: number };
+  const twoExpensesFrom = (first: Slice, other: Other): Slice => {
     const logged = decide({ ...first, newIds: ["e-2", "b-9"] }, logExpense(other.kind, other.paise), mickey, now);
     if (!logged.ok) throw new Error("expected Ok");
     return logged.events.reduce(apply, first);
   };
+  const twoExpenses = (other: Other = { kind: "online", paise: 300000 }): Slice =>
+    twoExpensesFrom(run(order(487000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(210000), fulfilledOn: "2026-11-21" }, ["b-2"]).slice, other);
   const move = (billId = "b-2", toExpenseId = "e-2") => ({ type: "MoveBill", billId, toExpenseId }) as const;
   const detach = (billId = "b-2") => ({ type: "DetachBill", billId }) as const;
   const of = (slice: Slice, id: string) => deriveExpense(slice.expenses[id]!);
@@ -1427,6 +1433,23 @@ describe("MoveBill and DetachBill", () => {
     expect(of(slice, "e-1").openAmount).toEqual(rupees(0));
     // ₹2,100.00 − its own ₹2,100.00 Bill − the moved ₹2,100.00: mismatch −₹2,100.00 until one is sorted out.
     expect(of(slice, "e-2")).toMatchObject({ openAmount: rupees(-210000), bills: ["expected", "expected"] });
+  });
+
+  it("Move a Bill equal to what the target still expects: a ₹500.00 Order takes a ₹500.00 Bill; its expected Bill is cancelled, no Refund", () => {
+    const first = run(order(487000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(50000), fulfilledOn: "2026-11-21" }, ["b-2"]).slice;
+    const { decision, slice } = run(twoExpensesFrom(first, { kind: "online", paise: 50000 }), move());
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [
+        { type: "ExpectedBillIncreased", billId: "b-1", expenseId: "e-1", amount: rupees(487000) },
+        { type: "BillMoved", billId: "b-2", fromExpenseId: "e-1", toExpenseId: "e-2" },
+        { type: "BillCancelled", billId: "b-9", expenseId: "e-2", reason: "cancelled" },
+      ],
+    });
+    expect(slice.expenses["e-2"]!.refunds).toEqual([]);
+    expect(of(slice, "e-2")).toMatchObject({ openAmount: rupees(0), bills: ["cancelled", "expected"] });
+    expect(of(slice, "e-1").openAmount).toEqual(rupees(0));
   });
 
   it("Detach: the Bill becomes its own invoice-only Expense of ₹2,100.00, and the Order expects ₹4,870.00 again", () => {
@@ -1479,9 +1502,10 @@ describe("MoveBill and DetachBill", () => {
     ["a Bill outside the Actor's slice", move("b-8"), { ok: false, reason: "not_found" }],
     ["its own Expense", move("b-2", "e-1"), { ok: false, reason: "invalid_transition" }],
     ["the expected Bill itself", move("b-1"), { ok: false, reason: "invalid_transition" }],
-    ["more than the target still expects", move("b-2", "e-2"), { ok: false, reason: "validation", field: "amount" }],
+    // ponytail: open owner question (a Bill larger than the remainder); refused until it is decided.
+    ["more than the target still expects (₹2,100.00 into ₹2,000.00)", move("b-2", "e-2"), { ok: false, reason: "validation", field: "billId" }],
   ])("MoveBill refuses %s", (_, command, rejection) => {
-    const slice = twoExpenses({ kind: "online", paise: 210000 });
+    const slice = twoExpenses({ kind: "online", paise: 200000 });
     expect(run(slice, command).decision).toEqual(rejection);
   });
 
