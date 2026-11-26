@@ -48,10 +48,10 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [x] 2.5 Schema for Expense, Bill, Refund, Owed to university, audit log; sequences for References
 - [ ] 2.6 test: `authenticate` on recorded tokens — no `claimant` role refused; `admin` passes ownership; role removed refused
 - [ ] 2.7 Claimants: OIDC code + PKCE login, Actor, profile (name, employee code, designation, time zone, Payment methods with match hints)
-- [ ] 2.8 test: Books `LogExpense` → `open` Expense with one expected Bill (online) or fulfilled Bill (shop/service); audit entry written in the same transaction
+- [x] 2.8 test: Books `LogExpense` → `open` Expense with one expected Bill (online) or fulfilled Bill (shop/service); audit entry written in the same transaction. Done: `src/books/books.test.ts`, `core.test.ts`; the reasons `awaiting goods` and `bill missing` come with 2.10–2.11
 - [ ] 2.8a test: entry without a bill — one sheet with What for, Amount, Date (default today, any past date), Fund (Makerspace first), Purpose, Vendor/payee, Kind, Ordered by, Payment method (default Cash), Payback and Remarks (starts "No bill (cash)"); none of bill number, GSTIN, order reference, UPI reference, documents, matching or review; saves an open Expense with one `no_bill` Bill, Fulfilled and `ready`, in Ready to file; never in Waiting for invoice, no "bill missing", no Invoice waiting; editable until on a submitted Claim; counts against the Fund's Advance; several entries for one day allowed, no recents; "Add a bill" attaches a document, turns it into a normal Bill and puts it in review
 - [ ] 2.8b Books `LogNoBillEntry`, `AddBillToEntry`; the `no_bill` Bill kind (no `paperless_id`, remarks required, no review); Home "+ Add without a bill"
-- [ ] 2.9 Books shell: `execute(actor, command)` with per-Claimant lock, events, audit log
+- [x] 2.9 Books shell: `execute(actor, command)` with per-Claimant lock, events, audit log. Done: `src/books/`; idempotency keys in `idempotency_keys` (migration 0002); a Bill's kind is null until its document arrives
 - [ ] 2.10 test: Open amount and "why it's open" derived on read for awaiting goods, refund owed, bill missing, mismatch, in claim
 - [ ] 2.11 Derivation of status, Open amount and reason (no stored status)
 - [ ] 2.12 test: Order flow — split expected Bill per invoice; cancel part → expected Refund; cancel rest; return before claim → Bill cancelled permanently
