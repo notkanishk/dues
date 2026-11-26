@@ -21,7 +21,7 @@ const logExpense = (kind: LogExpense["kind"], paise: number, extra: Partial<LogE
   kind,
   amount: rupees(paise),
   paidOn: "2026-11-19",
-  payee: "Robu",
+  payee: "Gizmo Parts Bazaar",
   ...extra,
 });
 
@@ -58,7 +58,7 @@ describe("LogExpense", () => {
         amount: rupees(129900),
         openAmount: rupees(0),
         paidOn: "2026-11-19",
-        payee: "Robu",
+        payee: "Gizmo Parts Bazaar",
         orderRef: "402-0000000-0000001",
         source: "manual",
         bills: [{ kind: null, amount: rupees(129900), fulfilledOn: null, status: "expected" }],

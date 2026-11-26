@@ -8,7 +8,7 @@ const fresh: Slice = { newIds: ["e-1", "b-1"], expenses: {} };
 const rupees = (paise: number) => ({ paise, currency: "INR" as const });
 
 const logExpense = (kind: "online" | "shop" | "service", paise: number) =>
-  ({ type: "LogExpense", kind, amount: rupees(paise), paidOn: "2026-11-19", payee: "Robu" }) as const;
+  ({ type: "LogExpense", kind, amount: rupees(paise), paidOn: "2026-11-19", payee: "Gizmo Parts Bazaar" }) as const;
 
 describe("decide LogExpense", () => {
   it("opens an online Expense with one expected Bill for the full Payment", () => {
@@ -24,7 +24,7 @@ describe("decide LogExpense", () => {
           kind: "online",
           amount: rupees(129900),
           paidOn: "2026-11-19",
-          payee: "Robu",
+          payee: "Gizmo Parts Bazaar",
           vendor: null,
           payback: false,
           orderRef: null,
