@@ -34,7 +34,7 @@ A push to `main` (or a manual run of the `deploy` workflow) does this:
 
 `dues-deploy`, as root in `/opt/dues`:
 
-1. fetches `main` from `REPO_URL` and refuses any commit not on it;
+1. fetches every branch of `REPO_URL` and refuses a commit from anywhere else: prod (`DEPLOY_FROM=main`) takes only commits on `main`, dev (`DEPLOY_FROM=branches`) a commit on any branch;
 2. builds `dues:<first 12 characters of the commit>` from that commit's `Dockerfile` (skipped if that build is still on the host);
 3. installs that commit's `deploy/compose.yaml` as `/opt/dues/compose.yaml`, writes `DUES_IMAGE=dues:<short>` to `.image.env`, and pulls the stock images;
 4. takes the pre-deploy database copy (below);
@@ -45,6 +45,17 @@ The build and pulls happen while the old stack still serves, so a failure there 
 Postgres data lives in the named volume `dues_pgdata`. A redeploy never touches it; `docker compose down -v` would delete it.
 
 Admin commands on the host run as root in `/opt/dues` and need the image file, for example `docker compose --env-file .image.env ps` or `docker compose --env-file .image.env logs web`.
+
+## Trying a branch on dev
+
+Every change is checked live on dev before it merges. Dev holds fictional data only.
+
+1. Push the branch.
+2. `gh workflow run deploy-dev.yml --ref <branch>`. It runs the `ci` tests, then deploys the branch's head commit to dev only, with the same health check and rollback as a `main` deploy. It waits for any running deploy to finish first.
+3. `gh run watch` (pick the `deploy-dev` run).
+4. Test it on dev at `http://<dev host>:3000`: `/api/health` returns 200, and on the host, as root in `/opt/dues`, `docker compose --env-file .image.env logs web worker` shows no errors.
+5. After a new push to the branch, run step 2 again.
+6. Merge to `main` only when dev is clean. The push to `main` then deploys dev and prod by itself.
 
 ## Rolling back
 
