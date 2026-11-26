@@ -409,6 +409,60 @@ describe("Open amount and settled invariants, for any generated slice", () => {
     expect(seen.openAtZero).toBeGreaterThan(20);
     expect(seen.blank).toBeGreaterThan(20);
   });
+
+  // Every Order command moves money between the expected Bill, new Bills and Refunds and never creates or loses any, so
+  // from a logged Expense (Open amount zero) the Open amount stays exactly zero, and still equals Payment − Σ live Bills
+  // − Σ Refunds − written off. A cancelled Bill stays cancelled and a received Refund stays received.
+  it("hold for 500 random sequences of Order commands; refusals are typed, never thrown", () => {
+    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0 };
+    for (let n = 0; n < 500; n++) {
+      const logged = decide(fresh, logExpense(pick(["online", "online", "shop"] as const), paise() + 1), mickey, now);
+      if (!logged.ok) throw new Error("expected Ok");
+      let slice = logged.events.reduce(apply, fresh);
+      let fresher = 0;
+      for (let step = 0; step < 12; step++) {
+        const expense = slice.expenses["e-1"]!;
+        const billId = pick([...expense.bills.map((b) => b.id), "b-unknown"]);
+        const refundId = pick([...expense.refunds.map((r) => r.id), "r-unknown"]);
+        const remainder = expense.bills.find((b) => b.id === billId)?.amount?.paise ?? 100;
+        const amount = rupees(pick([0, 1, next() % (remainder + 2), remainder - 1, remainder, remainder + 1]));
+        const command: Command = pick([
+          { type: "SplitExpectedBill", billId, amount, fulfilledOn: pick(["2026-11-21", "2026-02-30"]) },
+          { type: "ExpectRefund", billId, amount },
+          { type: "CancelBill", billId },
+          { type: "ReturnBill", billId },
+          { type: "MarkRefundReceived", refundId, refundedOn: pick(["2026-11-25", "25/11/2026"]) },
+        ] as const);
+        const ids = { ...slice, newIds: [`new-${fresher++}`] };
+        const decision = decide(ids, command, mickey, now);
+        if (!decision.ok) {
+          expect(["not_found", "invalid_transition", "validation"]).toContain(decision.reason);
+          seen.refused.add(`${command.type}:${decision.reason}`);
+          continue;
+        }
+        seen.accepted.add(command.type);
+        const before = slice.expenses["e-1"]!;
+        slice = decision.events.reduce(apply, ids);
+        const after = slice.expenses["e-1"]!;
+
+        const live = after.bills.filter((b) => !b.cancelled);
+        const formula =
+          after.amount!.paise - live.reduce((t, b) => t + b.amount!.paise, 0) - after.refunds.reduce((t, r) => t + r.amount.paise, 0) - after.writtenOff.paise;
+        const { openAmount, status } = deriveExpense(after);
+        expect(openAmount).toEqual(rupees(formula));
+        expect(openAmount).toEqual(rupees(0));
+        for (const b of before.bills) if (b.cancelled) expect(after.bills.find((x) => x.id === b.id)?.cancelled).toBe(true);
+        for (const r of before.refunds) if (r.received) expect(after.refunds.find((x) => x.id === r.id)?.received).toBe(true);
+        for (const b of after.bills) expect(b.amount!.paise).toBeGreaterThan(0);
+        if (status === "settled") seen.settled++;
+      }
+    }
+    // Every command is accepted somewhere, refused somewhere, and some sequences settle.
+    expect([...seen.accepted].sort()).toEqual(["CancelBill", "ExpectRefund", "MarkRefundReceived", "ReturnBill", "SplitExpectedBill"]);
+    for (const type of ["CancelBill", "ExpectRefund", "MarkRefundReceived", "ReturnBill", "SplitExpectedBill"])
+      expect([...seen.refused].some((r) => r.startsWith(`${type}:`))).toBe(true);
+    expect(seen.settled).toBeGreaterThan(20);
+  });
 });
 
 // Order flow (expense-tracking: Order splitting, Order cancellation and Refunds, Return before submission). Figures from the spec.
