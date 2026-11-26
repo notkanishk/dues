@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { eq, TransactionRollbackError } from "drizzle-orm";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "./index";
 import { auditLog, bills, expenseReferenceSeq, expenses, owedToUniversity, refunds } from "./schema";
@@ -31,9 +30,9 @@ const CHECK_VIOLATION = "23514";
 const GENERATED_ALWAYS = "428C9";
 const refusedAsImmutable = (query: Promise<unknown>) => refusedWith(CHECK_VIOLATION, query);
 
-beforeAll(async () => {
+beforeAll(() => {
+  // Migrated once by test/migrate-once.ts (vitest globalSetup).
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set; these tests need a real Postgres");
-  await migrate(db, { migrationsFolder: "./drizzle" });
 });
 
 afterAll(() => pool.end());

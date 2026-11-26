@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { and, count, eq } from "drizzle-orm";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
 import { auditLog, expenses } from "@/src/db/schema";
@@ -34,9 +33,9 @@ const expensesOf = async (actor: Actor) =>
 const auditRowsOf = (actor: Actor) => db.select().from(auditLog).where(eq(auditLog.actorId, actor.claimantId)).orderBy(auditLog.id);
 const settle = <T>(p: Promise<T>, ms = 300) => Promise.race([p.then(() => "done"), new Promise((r) => setTimeout(() => r("waiting"), ms))]);
 
-beforeAll(async () => {
+beforeAll(() => {
+  // Migrated once by test/migrate-once.ts (vitest globalSetup).
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set; these tests need a real Postgres");
-  await migrate(db, { migrationsFolder: "./drizzle" });
 });
 
 afterAll(() => pool.end());
