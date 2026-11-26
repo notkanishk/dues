@@ -1,6 +1,6 @@
 # Dues stack. Lives on the host as /opt/dues/compose.yaml; run only by /usr/local/sbin/dues-deploy:
-#   docker compose --env-file .image.env pull && up -d --remove-orphans --wait
-# .image.env holds DUES_IMAGE=ghcr.io/<owner>/dues@sha256:<digest>; secrets come from /opt/dues/.env.
+#   docker compose --env-file .image.env up -d --remove-orphans --wait
+# .image.env holds DUES_IMAGE=dues:<12-char commit>, built on the host; secrets come from /opt/dues/.env.
 # Every service has a healthcheck so `--wait` means "healthy", not just "started".
 name: dues
 

@@ -6,11 +6,10 @@ Host hardening: see `deploy/host/bootstrap.sh`.
 
 ## Preparing a host (once)
 
-1. Write `/etc/dues/host.env` (see the header of [`host/bootstrap.sh`](host/bootstrap.sh) for every key), with `IMAGE_REPO=ghcr.io/<owner>/dues`.
+1. Write `/etc/dues/host.env` (see the header of [`host/bootstrap.sh`](host/bootstrap.sh) for every key), with `REPO_URL=https://github.com/<owner>/<repo>.git`, the only source `dues-deploy` builds.
 2. As root on the host: `bash bootstrap.sh`. It prepares the host and installs `/usr/local/sbin/dues-deploy`, the one root command CI may run.
 3. Register the GitHub runner with [`host/runner.sh`](host/runner.sh). The registration token goes on stdin (usage is in the script). The runner gets the label `dues-dev` or `dues-prod`.
-4. Copy `deploy/compose.yaml` to `/opt/dues/compose.yaml`.
-5. Write `/opt/dues/.env` (mode 0600, root-owned) with a fresh password per host:
+4. Write `/opt/dues/.env` (mode 0600, root-owned) with a fresh password per host:
 
    ```
    POSTGRES_USER=dues
@@ -21,33 +20,42 @@ Host hardening: see `deploy/host/bootstrap.sh`.
 
    The two passwords must match. Compose cannot share one value between them, because `dues-deploy` passes `--env-file .image.env`, so `.env` is never used for substitution.
 
-6. Check: `sudo -n /usr/local/sbin/dues-deploy --check` as `runner` prints `ok: <host> <env>`.
+5. Check: `sudo -n /usr/local/sbin/dues-deploy --check` as `runner` prints `ok: <host> <env>`.
 
-When `compose.yaml` changes in the repo, copy it to both hosts again before the next deploy. CI does not copy it.
+`compose.yaml` is not copied by hand: each deploy installs the one from the commit it deploys.
 
 ## How a deploy runs
 
 A push to `main` (or a manual run of the `deploy` workflow) does this:
 
-1. `test` runs the `ci` workflow. Nothing is built unless it passes.
-2. `image` (GitHub-hosted, `main` only, manual runs included) builds the Dockerfile and pushes `ghcr.io/<owner>/dues:<commit sha>`, then passes the digest reference on.
-3. `dev` (runner `dues-dev`, environment `dev`) runs `sudo -n /usr/local/sbin/dues-deploy ghcr.io/<owner>/dues@sha256:<digest>`.
-4. `prod` (runner `dues-prod`, environment `prod`) does the same after dev succeeds. If the `prod` environment has required reviewers, this step waits for their approval.
+1. `test` runs the `ci` workflow, which also builds the Dockerfile. Nothing deploys unless it passes.
+2. `dev` (runner `dues-dev`, environment `dev`, `main` only, manual runs included) runs `sudo -n /usr/local/sbin/dues-deploy <commit>`, with the run's full 40-character commit id.
+3. `prod` (runner `dues-prod`, environment `prod`) does the same with the same commit after dev succeeds. If the `prod` environment has required reviewers, this step waits for their approval.
 
-`dues-deploy` writes `DUES_IMAGE=<ref>` to `/opt/dues/.image.env`, pulls, and runs `docker compose up -d --remove-orphans --wait`. A service that is not healthy fails the job. On start, web applies the Drizzle migrations and then serves. The worker starts once web is healthy.
+`dues-deploy`, as root in `/opt/dues`:
+
+1. fetches `main` from `REPO_URL` and refuses any commit not on it;
+2. builds `dues:<first 12 characters of the commit>` from that commit's `Dockerfile` (skipped if that build is still on the host);
+3. installs that commit's `deploy/compose.yaml` as `/opt/dues/compose.yaml`, writes `DUES_IMAGE=dues:<short>` to `.image.env`, and pulls the stock images;
+4. takes the pre-deploy database copy (below);
+5. runs `docker compose up -d --remove-orphans --wait`. A service that is not healthy fails the job.
+
+The build and pulls happen while the old stack still serves, so a failure there stops nothing. On start, web applies the Drizzle migrations and then serves. The worker starts once web is healthy.
 
 Postgres data lives in the named volume `dues_pgdata`. A redeploy never touches it; `docker compose down -v` would delete it.
 
+Admin commands on the host run as root in `/opt/dues` and need the image file, for example `docker compose --env-file .image.env ps` or `docker compose --env-file .image.env logs web`.
+
 ## Rolling back
 
-Deploy an older digest. Each run's full reference (`ghcr.io/<owner>/dues@sha256:<digest>`) is the `image` job's `ref` output. The tag `ghcr.io/<owner>/dues:<commit sha>` also resolves to one, for example with `docker buildx imagetools inspect`.
+Deploy an older commit of `main`.
 
-- From GitHub: re-run the `dev` and `prod` jobs of the older workflow run. They reuse that run's digest.
-- On the host, as `runner`: `sudo -n /usr/local/sbin/dues-deploy ghcr.io/<owner>/dues@sha256:<older digest>`.
+- From GitHub: re-run the `dev` and `prod` jobs of the older workflow run. They deploy that run's commit.
+- On the host, as `runner`: `sudo -n /usr/local/sbin/dues-deploy <older main commit>`.
 
-Migrations only go forward. Rolling back past a migration needs a database restore, or a migration written to undo it.
+The five newest builds stay on the host, so rolling back to a recent commit skips the build. Migrations only go forward. Rolling back past a migration needs a database restore, or a migration written to undo it.
 
-Every deploy first takes a database copy, once Postgres is running: `/var/backups/dues/pre-deploy-<UTC time>-<digest prefix>.dump` (root only, last 14 kept). `dues-deploy` pulls the new image before it, so a registry outage fails with nothing stopped. To restore, as root in `/opt/dues`: `docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' < <dump>`, then deploy the digest that matches it.
+Every deploy first takes a database copy, once Postgres is running: `/var/backups/dues/pre-deploy-<UTC time>-<commit prefix>.dump` (root only, last 14 kept). `dues-deploy` builds and pulls before it, so a failed build or pull stops nothing. To restore, as root in `/opt/dues`: `docker compose --env-file .image.env exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' < <dump>`, then deploy the commit that matches it.
 
 ## Testing the compose file
 
