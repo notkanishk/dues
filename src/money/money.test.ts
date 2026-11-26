@@ -110,3 +110,10 @@ describe("Total rounded up", () => {
     ]);
   });
 });
+
+describe("a Claim total outside the possible range throws", () => {
+  it("throws a RangeError when rounding up leaves the safe-integer range", () => {
+    // 9007199254740991 is Number.MAX_SAFE_INTEGER; its sum is safe, its round-up is not.
+    expect(() => claimTotal([{ paise: 9007199254740991, currency: "INR" }])).toThrow(RangeError);
+  });
+});

@@ -45,5 +45,7 @@ export function formAmount(m: Money): string {
 export function claimTotal(lines: readonly Money[]): Money {
   const { paise } = sum(lines);
   const rest = paise % 100;
-  return { paise: rest > 0 ? paise - rest + 100 : paise, currency: "INR" };
+  const total = rest > 0 ? paise - rest + 100 : paise;
+  if (!Number.isSafeInteger(total)) throw new RangeError("Claim total out of range");
+  return { paise: total, currency: "INR" };
 }
