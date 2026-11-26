@@ -14,11 +14,13 @@ import {
   decide,
   deriveBill,
   deriveExpense,
+  deriveRefund,
   type Event,
   type ExpenseState,
   type ExpenseStatus,
   type Job,
   type RefundReason,
+  type RefundStatus,
   type Rejected,
   type Slice,
 } from "./core";
@@ -71,18 +73,27 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         cancelled: b.cancelledAt !== null,
         claim: null, // ponytail: no Claims table yet; filled from Claim membership when Claims land
       }));
+    const ownRefunds = refundRows
+      .filter((r) => r.expenseId === row.id)
+      .map((r) => ({
+        id: r.id,
+        reference: r.reference,
+        billId: r.billId,
+        refundedOn: r.refundedOn,
+        amount: money(r.amountPaise, r.currency)!,
+        reason: r.reason as RefundReason,
+        received: r.refundedOn !== null,
+      }));
     const state: ExpenseState = {
       id: row.id,
       draft: row.draft,
       closedReason: row.closedReason,
       amount: money(row.amountPaise, row.currency),
       bills: ownBills,
-      refunds: refundRows
-        .filter((r) => r.expenseId === row.id)
-        .map((r) => ({ id: r.id, amount: money(r.amountPaise, r.currency)!, reason: r.reason as RefundReason, received: r.refundedOn !== null })),
+      refunds: ownRefunds,
       writtenOff: zero, // ponytail: nothing is written off until task 2.13d stores it
     };
-    return { row, bills: ownBills, refunds: refundRows.filter((r) => r.expenseId === row.id), state };
+    return { row, bills: ownBills, refunds: ownRefunds, state };
   });
 }
 
@@ -117,14 +128,14 @@ type Entity = "expense" | "bill" | "refund";
 const entityOf = (event: Event): [Entity, string] =>
   event.type === "ExpenseLogged" ? ["expense", event.expenseId] : "refundId" in event ? ["refund", event.refundId] : ["bill", event.billId];
 
-function stateOf(slice: Slice, entity: Entity, id: string): ExpenseStatus | BillStatus | "expected" | "received" | null {
+function stateOf(slice: Slice, entity: Entity, id: string): ExpenseStatus | BillStatus | RefundStatus | null {
   if (entity === "expense") {
     const expense = slice.expenses[id];
     return expense ? deriveExpense(expense).status : null;
   }
   if (entity === "refund") {
     const refund = Object.values(slice.expenses).flatMap((e) => e.refunds).find((r) => r.id === id);
-    return refund ? (refund.received ? "received" : "expected") : null;
+    return refund ? deriveRefund(refund) : null;
   }
   for (const expense of Object.values(slice.expenses)) {
     const bill = expense.bills.find((b) => b.id === id);
@@ -262,7 +273,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
     async expense(actor: Actor, id: string) {
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
-      const { row, bills: billStates, refunds: refundRows, state } = found;
+      const { row, bills: billStates, refunds: refundStates, state } = found;
       const derived = deriveExpense(state);
       return {
         ok: true as const,
@@ -292,14 +303,14 @@ export function createBooks({ db, now, enqueue }: Deps) {
             cancelReason: b.cancelReason,
             status: deriveBill(b),
           })),
-          refunds: refundRows.map((r) => ({
+          refunds: refundStates.map((r) => ({
             id: r.id,
             reference: r.reference,
-            amount: money(r.amountPaise, r.currency)!,
-            reason: r.reason as RefundReason,
+            amount: r.amount,
+            reason: r.reason,
             billId: r.billId,
             refundedOn: r.refundedOn,
-            status: r.refundedOn === null ? ("expected" as const) : ("received" as const),
+            status: deriveRefund(r),
           })),
         },
       };

@@ -331,6 +331,9 @@ export function deriveBill(bill: BillState): BillStatus {
   return "expected";
 }
 
+export type RefundStatus = "expected" | "received";
+export const deriveRefund = (refund: RefundState): RefundStatus => (refund.received ? "received" : "expected");
+
 /** Open amount = Payment − Σ Bills (not cancelled) − Σ Refunds − written off; null while any of those amounts is blank. */
 function openAmount(expense: ExpenseState): Money | null {
   const covering = [

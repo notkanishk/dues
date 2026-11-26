@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatRupees } from "@/src/money/money";
-import { type Actor, apply, type BillState, type Command, decide, deriveBill, deriveExpense, type ExpenseState, type Slice } from "./core";
+import { type Actor, apply, type BillState, type Command, decide, deriveBill, deriveExpense, deriveRefund, type ExpenseState, type Slice } from "./core";
 
 // Pure core: no database. Expected values are written by hand from the spec scenarios.
 const mickey: Actor = { claimantId: "00000000-0000-7000-8000-00000000000a", roles: ["claimant"], via: "session" };
@@ -339,6 +339,14 @@ describe("Bill lifecycle", () => {
     const onDraft = bill({ fulfilledOn: "2026-11-19", paperlessId: 7, claim: "draft" });
     expect(deriveBill(onDraft)).toBe("claimed");
     expect(deriveBill({ ...onDraft, claim: null })).toBe("ready");
+  });
+});
+
+describe("Refund lifecycle", () => {
+  it("expected until its money is back, then received", () => {
+    const refund = { id: "r-1", amount: rupees(30000), reason: "cancelled", received: false } as const;
+    expect(deriveRefund(refund)).toBe("expected");
+    expect(deriveRefund({ ...refund, received: true })).toBe("received");
   });
 });
 
