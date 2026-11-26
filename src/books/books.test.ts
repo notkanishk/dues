@@ -107,7 +107,7 @@ describe("Transactions", () => {
     const mickey = claimant();
     const key = `taken-${randomUUID()}`;
     // Another entry already holds this key, so the audit insert fails.
-    await db.insert(auditLog).values({ actorId: randomUUID(), command: "x", event: "x", entity: "x", entityId: randomUUID(), idempotencyKey: key });
+    await db.insert(auditLog).values({ actorId: randomUUID(), ownerId: randomUUID(), command: "x", event: "x", entity: "x", entityId: randomUUID(), idempotencyKey: key });
     await expect(books.execute(mickey, logExpense("online", 100), { idempotencyKey: key })).rejects.toThrow();
     expect(await expensesOf(mickey)).toBe(0);
     expect(await auditRowsOf(mickey)).toEqual([]);

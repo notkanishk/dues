@@ -108,6 +108,7 @@ describe("apply and derivation", () => {
             expenses: {
               "e-1": {
                 id: "e-1",
+                claimantId: mickey.claimantId,
                 draft: false,
                 closedReason: null,
                 kind,
@@ -152,6 +153,7 @@ describe("apply and derivation", () => {
 
   const expense = (paise: number, bills: number[], refunds: { paise: number; received: boolean }[] = []): ExpenseState => ({
     id: "e-1",
+    claimantId: mickey.claimantId,
     draft: false,
     closedReason: null,
     kind: "online",
@@ -231,6 +233,7 @@ describe("why an Expense is open", () => {
   });
   const facts = (paise: number, bills: BillFacts[], more: Partial<ExpenseState> = {}): ExpenseState => ({
     id: "e-1",
+    claimantId: mickey.claimantId,
     draft: false,
     closedReason: null,
     kind: "online",
@@ -446,6 +449,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
       const left = (amount?.paise ?? 0) - live.reduce((t, b) => t + (b.amount?.paise ?? 0), 0) - owed.reduce((t, r) => t + r.amount.paise, 0);
       const expense: ExpenseState = {
         id: "e-1",
+        claimantId: mickey.claimantId,
         draft: pick([false, false, false, true]),
         closedReason: pick([null, null, null, "personal"]),
         kind: "online",

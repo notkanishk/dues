@@ -247,6 +247,8 @@ export type RefundState = {
 };
 export type ExpenseState = {
   id: string;
+  /** The Claimant whose books it is in: who logged it, whoever acts on it later (an admin included). */
+  claimantId: string;
   draft: boolean;
   closedReason: CloseReason | null;
   kind: LogExpense["kind"] | null;
@@ -630,6 +632,7 @@ export function apply(slice: Slice, event: Event): Slice {
           ...slice.expenses,
           [event.expenseId]: {
             id: event.expenseId,
+            claimantId: event.claimantId,
             draft: false,
             closedReason: null,
             kind: event.kind,

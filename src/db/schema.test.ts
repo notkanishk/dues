@@ -16,6 +16,7 @@ const logExpense = async (claimantId: string) =>
 
 const auditEntry = (entityId: string, idempotencyKey?: string) => ({
   actorId: mickey,
+  ownerId: mickey,
   command: "LogExpense",
   event: "ExpenseLogged",
   entity: "expense",
