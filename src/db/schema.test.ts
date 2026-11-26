@@ -3,7 +3,7 @@ import { eq, TransactionRollbackError } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "./index";
-import { expenses } from "./schema";
+import { bills, expenses, owedToUniversity, refunds } from "./schema";
 
 // Needs a real Postgres: DATABASE_URL (CI service container, or a scratch postgres:19.0).
 // Keys and References, platform-foundations spec and ADR 0005.
@@ -13,6 +13,10 @@ const dexter = randomUUID();
 
 const logExpense = async (claimantId: string) =>
   (await db.insert(expenses).values({ claimantId, amountPaise: 25050 }).returning())[0]!;
+
+// Drizzle wraps the Postgres error; the trigger's message is on its cause.
+const refusedAsImmutable = (query: Promise<unknown>) =>
+  expect(query).rejects.toMatchObject({ cause: { message: expect.stringMatching(/cannot change/) } });
 
 beforeAll(async () => {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set; these tests need a real Postgres");
@@ -63,10 +67,40 @@ describe("Keys and References", () => {
 
   it("refuses to change a Reference once issued", async () => {
     const expense = await logExpense(mickey);
-    await expect(
-      db.update(expenses).set({ reference: "E-999999999" }).where(eq(expenses.id, expense.id)),
-    ).rejects.toThrow();
+    await refusedAsImmutable(db.update(expenses).set({ reference: "E-999999999" }).where(eq(expenses.id, expense.id)));
     const [found] = await db.select().from(expenses).where(eq(expenses.id, expense.id));
     expect(found?.reference).toBe(expense.reference);
+  });
+
+  it("keeps the vendor's Bill number apart from the Reference through a correction", async () => {
+    const expense = await logExpense(mickey);
+    const [bill] = await db
+      .insert(bills)
+      .values({ expenseId: expense.id, kind: "invoice", billNo: "128", amountPaise: 25050 })
+      .returning();
+    expect(bill!.reference).toMatch(/^B-[1-9]\d*$/);
+
+    await db.update(bills).set({ billNo: "1280" }).where(eq(bills.id, bill!.id));
+    const [found] = await db.select().from(bills).where(eq(bills.id, bill!.id));
+    expect(found).toMatchObject({ reference: bill!.reference, billNo: "1280" });
+  });
+
+  it("gives Refunds and Owed to university their own letters, unchangeable too", async () => {
+    const expense = await logExpense(dexter);
+    const [bill] = await db.insert(bills).values({ expenseId: expense.id, kind: "invoice", amountPaise: 600 }).returning();
+    const [refund] = await db
+      .insert(refunds)
+      .values({ expenseId: expense.id, amountPaise: 600, reason: "returned" })
+      .returning();
+    const [owed] = await db
+      .insert(owedToUniversity)
+      .values({ claimantId: dexter, billId: bill!.id, amountPaise: 600 })
+      .returning();
+    expect(refund!.reference).toMatch(/^R-[1-9]\d*$/);
+    expect(owed!.reference).toMatch(/^O-[1-9]\d*$/);
+
+    await refusedAsImmutable(db.update(bills).set({ reference: "B-999999999" }).where(eq(bills.id, bill!.id)));
+    await refusedAsImmutable(db.update(refunds).set({ reference: "R-999999999" }).where(eq(refunds.id, refund!.id)));
+    await refusedAsImmutable(db.update(owedToUniversity).set({ reference: "O-999999999" }).where(eq(owedToUniversity.id, owed!.id)));
   });
 });
