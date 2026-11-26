@@ -3,7 +3,7 @@ name: ci
 on:
   push:
   pull_request:
-  workflow_call: # deploy.yml runs these tests before it builds an image
+  workflow_call: # deploy.yml runs these tests before any host deploys
 
 permissions:
   contents: read
@@ -38,3 +38,5 @@ jobs:
       - run: bun run build
       - run: bun run typecheck
       - run: bun run test
+      # The hosts build this Dockerfile on deploy; a broken one fails here first. Nothing is pushed.
+      - run: docker build .
