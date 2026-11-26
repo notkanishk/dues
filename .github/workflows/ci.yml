@@ -3,6 +3,7 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_call: # deploy.yml runs these tests before it builds an image
 
 permissions:
   contents: read
