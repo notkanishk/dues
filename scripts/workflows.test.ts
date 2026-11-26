@@ -55,3 +55,42 @@ describe("deploy workflow", () => {
     expect(deploy.text).not.toMatch(/packages:/);
   });
 });
+
+// Branch deploys: `gh workflow run deploy-dev.yml --ref <branch>` puts any branch on dev, never prod.
+const dev = load("deploy-dev.yml");
+const devJobs = dev.yaml.jobs as Record<string, any>;
+
+describe("deploy-dev workflow", () => {
+  it("runs only when started by hand", () => {
+    expect(Object.keys(dev.yaml.on)).toEqual(["workflow_dispatch"]);
+    expect(dev.yaml.on.workflow_dispatch).toBeNull();
+  });
+
+  it("never runs on the prod runner", () => {
+    for (const job of Object.values(devJobs)) expect([job["runs-on"]].flat()).not.toContain("dues-prod");
+    expect(dev.text).not.toMatch(/dues-prod/);
+  });
+
+  it("deploys to dev only after the test workflow passes", () => {
+    expect(devJobs.test.uses).toBe("./.github/workflows/ci.yml");
+    expect(devJobs.test.permissions).toEqual({ contents: "read" });
+    expect([devJobs.dev.needs].flat()).toEqual(["test"]);
+    expect([devJobs.dev["runs-on"]].flat()).toEqual(["self-hosted", "dues-dev"]);
+    expect(devJobs.dev.if).toBe("github.repository == 'notkanishk/dues'");
+  });
+
+  it("runs no actions on the self-hosted runner and passes only the commit id, through env", () => {
+    expect(devJobs.dev.uses).toBeUndefined();
+    expect(devJobs.dev.steps).toHaveLength(1);
+    const [step] = devJobs.dev.steps;
+    expect(step.uses).toBeUndefined();
+    expect(step.run).toBe('sudo -n /usr/local/sbin/dues-deploy "$DEPLOY_SHA"');
+    expect(step.env).toEqual({ DEPLOY_SHA: "${{ github.sha }}" });
+  });
+
+  it("shares the deploy queue with main and holds no token", () => {
+    expect(dev.yaml.concurrency).toEqual(deploy.yaml.concurrency);
+    expect(dev.yaml.concurrency).toEqual({ group: "deploy", "cancel-in-progress": false });
+    expect(dev.yaml.permissions).toEqual({});
+  });
+});
