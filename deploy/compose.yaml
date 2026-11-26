@@ -54,6 +54,7 @@ services:
       start_period: 60s # migrations run before the server starts
 
   worker:
+    # ponytail: depends_on is not applied on a host reboot (restart: unless-stopped); fine until the worker reads app tables.
     image: ${DUES_IMAGE:?DUES_IMAGE is set by dues-deploy in .image.env}
     command: ["worker.js"]
     restart: unless-stopped
