@@ -22,7 +22,18 @@ export type LogExpense = {
   readonly upiRef?: string;
   readonly notes?: string;
 };
-export type Command = LogExpense;
+/**
+ * Records a delivery's Invoice amount against an Order's expected Bill (W2.2): split off as its own Fulfilled Bill,
+ * the expected remainder shrinks. LogDocument will issue it when a matched document arrives (Phase 2); until then
+ * the new Bill has no document link.
+ */
+export type SplitExpectedBill = {
+  readonly type: "SplitExpectedBill";
+  readonly billId: string;
+  readonly amount: Money;
+  readonly fulfilledOn: string;
+};
+export type Command = LogExpense | SplitExpectedBill;
 
 export type Event =
   | {
@@ -48,7 +59,8 @@ export type Event =
       readonly kind: BillKind | null; // null until a document says what it is
       readonly amount: Money;
       readonly fulfilledOn: string | null;
-    };
+    }
+  | { readonly type: "ExpectedBillReduced"; readonly billId: string; readonly expenseId: string; readonly amount: Money };
 
 // No command enqueues a follow-up yet; the shell already writes whatever decide returns.
 export type Job = { readonly name: string; readonly data: unknown };
@@ -140,7 +152,42 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
         ],
       };
     }
+    case "SplitExpectedBill": {
+      const found = expectedBill(slice, command.billId);
+      if (!found.ok) return found;
+      const { expense, bill, remainder } = found;
+      if (!isDate(command.fulfilledOn)) return rejectField("fulfilledOn");
+      // ponytail: an Invoice for the whole remainder fulfils the expected Bill itself; that is not a split.
+      if (!isPayment(command.amount) || command.amount.paise >= remainder) return rejectField("amount");
+      const [newBillId] = slice.newIds as [string];
+      return ok([
+        { type: "ExpectedBillReduced", billId: bill.id, expenseId: expense.id, amount: inr(remainder - command.amount.paise) },
+        { type: "BillAdded", billId: newBillId, expenseId: expense.id, kind: null, amount: command.amount, fulfilledOn: command.fulfilledOn },
+      ]);
+    }
   }
+}
+
+const ok = (events: Event[]): Decision => ({ ok: true, events, jobs: [] });
+const inr = (paise: number): Money => ({ paise, currency: "INR" });
+const reject = (reason: Rejected["reason"]): Rejected => ({ ok: false, reason });
+
+/** The Bill and its open Expense, or not_found when it is not in the Actor's slice (the loader scoped it). */
+function findBill(slice: Slice, billId: string) {
+  for (const expense of Object.values(slice.expenses)) {
+    const bill = expense.bills.find((b) => b.id === billId);
+    if (bill) return expense.closedReason ? reject("invalid_transition") : { ok: true as const, expense, bill };
+  }
+  return reject("not_found");
+}
+
+/** An Order's expected Bill: not cancelled, goods not yet arrived, not on a Claim, with an amount. */
+function expectedBill(slice: Slice, billId: string) {
+  const found = findBill(slice, billId);
+  if (!found.ok) return found;
+  const { bill } = found;
+  if (bill.cancelled || bill.fulfilledOn || bill.claim || !bill.amount) return reject("invalid_transition");
+  return { ...found, remainder: bill.amount.paise };
 }
 
 const rejectField = (field: string): Rejected => ({ ok: false, reason: "validation", field });
@@ -176,7 +223,15 @@ export function apply(slice: Slice, event: Event): Slice {
       };
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, bills: [...expense.bills, bill] } } };
     }
+    case "ExpectedBillReduced":
+      return updateBill(slice, event.expenseId, event.billId, { amount: event.amount });
   }
+}
+
+function updateBill(slice: Slice, expenseId: string, billId: string, change: Partial<BillState>): Slice {
+  const expense = slice.expenses[expenseId]!;
+  const bills = expense.bills.map((b) => (b.id === billId ? { ...b, ...change } : b));
+  return { ...slice, expenses: { ...slice.expenses, [expenseId]: { ...expense, bills } } };
 }
 
 // Status, Open amount, "why it's open" and Bill status are derived on read and never stored (design D3).

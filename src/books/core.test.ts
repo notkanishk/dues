@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatRupees } from "@/src/money/money";
-import { type Actor, apply, type BillState, decide, deriveBill, deriveExpense, type ExpenseState, type Slice } from "./core";
+import { type Actor, apply, type BillState, type Command, decide, deriveBill, deriveExpense, type ExpenseState, type Slice } from "./core";
 
 // Pure core: no database. Expected values are written by hand from the spec scenarios.
 const mickey: Actor = { claimantId: "00000000-0000-7000-8000-00000000000a", roles: ["claimant"], via: "session" };
@@ -408,5 +408,70 @@ describe("Open amount and settled invariants, for any generated slice", () => {
     expect(seen.settled).toBeGreaterThan(20);
     expect(seen.openAtZero).toBeGreaterThan(20);
     expect(seen.blank).toBeGreaterThan(20);
+  });
+});
+
+// Order flow (expense-tracking: Order splitting, Order cancellation and Refunds, Return before submission). Figures from the spec.
+describe("Order commands", () => {
+  // An online Order of the given Payment: Expense e-1 with its expected Bill b-1.
+  const order = (paise: number): Slice => {
+    const logged = decide(fresh, logExpense("online", paise), mickey, now);
+    if (!logged.ok) throw new Error("expected Ok");
+    return logged.events.reduce(apply, fresh);
+  };
+  // Runs one command with the given fresh ids; returns the decision and the folded slice.
+  const run = (slice: Slice, command: Command, newIds: string[] = []) => {
+    const withIds = { ...slice, newIds };
+    const decision = decide(withIds, command, mickey, now);
+    return { decision, slice: decision.ok ? decision.events.reduce(apply, withIds) : slice };
+  };
+  const derived = (slice: Slice) => deriveExpense(slice.expenses["e-1"]!);
+  const amounts = (slice: Slice) => slice.expenses["e-1"]!.bills.map((b) => b.amount?.paise);
+
+  describe("SplitExpectedBill", () => {
+    it("First delivery: an Invoice of ₹1,200.00 on a ₹3,000.00 Order → a Fulfilled Bill of ₹1,200.00, expected Bill ₹1,800.00", () => {
+      const { decision, slice } = run(order(300000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(120000), fulfilledOn: "2026-11-21" }, ["b-2"]);
+      expect(decision).toEqual({
+        ok: true,
+        jobs: [],
+        events: [
+          { type: "ExpectedBillReduced", billId: "b-1", expenseId: "e-1", amount: rupees(180000) },
+          { type: "BillAdded", billId: "b-2", expenseId: "e-1", kind: null, amount: rupees(120000), fulfilledOn: "2026-11-21" },
+        ],
+      });
+      expect(amounts(slice)).toEqual([180000, 120000]);
+      expect(derived(slice)).toMatchObject({ openAmount: rupees(0), reason: { code: "awaiting_goods" }, bills: ["expected", "expected"] });
+    });
+
+    it("Smaller invoice: a second Invoice of ₹500.00 splits the ₹1,800.00 remainder the same way → ₹1,300.00", () => {
+      const first = run(order(300000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(120000), fulfilledOn: "2026-11-21" }, ["b-2"]);
+      const { slice } = run(first.slice, { type: "SplitExpectedBill", billId: "b-1", amount: rupees(50000), fulfilledOn: "2026-11-22" }, ["b-3"]);
+      expect(amounts(slice)).toEqual([130000, 120000, 50000]);
+      expect(derived(slice).openAmount).toEqual(rupees(0));
+    });
+
+    const split = (amount: number, billId = "b-1", fulfilledOn = "2026-11-21") =>
+      ({ type: "SplitExpectedBill", billId, amount: rupees(amount), fulfilledOn }) as const;
+    it.each([
+      ["more than the remainder", split(300001), { ok: false, reason: "validation", field: "amount" }],
+      ["the whole remainder (that fulfils the Bill, it is not a split)", split(300000), { ok: false, reason: "validation", field: "amount" }],
+      ["a zero amount", split(0), { ok: false, reason: "validation", field: "amount" }],
+      ["a date that does not exist", split(100, "b-1", "2026-02-30"), { ok: false, reason: "validation", field: "fulfilledOn" }],
+      ["a Bill outside the Actor's slice", split(100, "b-9"), { ok: false, reason: "not_found" }],
+    ])("refuses %s, and throws nothing", (_, command, rejection) => {
+      expect(run(order(300000), command, ["b-2"]).decision).toEqual(rejection);
+    });
+
+    it("refuses a Bill whose goods have arrived: a shop Bill is not expected", () => {
+      const shop = decide(fresh, logExpense("shop", 25000), mickey, now);
+      if (!shop.ok) throw new Error("expected Ok");
+      expect(run(shop.events.reduce(apply, fresh), split(100), ["b-2"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    });
+
+    it("refuses an Expense that is closed", () => {
+      const slice = order(300000);
+      slice.expenses["e-1"]!.closedReason = "personal";
+      expect(run(slice, split(100), ["b-2"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    });
   });
 });

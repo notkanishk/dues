@@ -3,7 +3,7 @@ import { and, count, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
 import { auditLog, expenses, refunds } from "@/src/db/schema";
-import { createBooks, lockClaimant } from "./books";
+import { createBooks, lockClaimant, type Result } from "./books";
 import type { Actor, LogExpense } from "./core";
 
 // Scenario tests through Books' Interface against a real Postgres (DATABASE_URL), design §1.
@@ -273,5 +273,55 @@ describe("Derivation on read", () => {
 
     await db.update(refunds).set({ refundedOn: "2026-11-21" }).where(eq(refunds.id, refund!.id));
     expect(await books.expense(mickey, id)).toMatchObject({ ok: true, expense: { reason: { code: "bill_missing" } } });
+  });
+});
+
+// Order flow through execute (expense-tracking: Order splitting, cancellation and Refunds, Return before submission).
+describe("Order flow", () => {
+  const ok = (result: Result): Extract<Result, { ok: true }> => {
+    if (!result.ok) throw new Error(`expected Ok, got ${JSON.stringify(result)}`);
+    return result;
+  };
+  // An online Order of the given Payment: its Expense id and expected Bill id.
+  const order = async (actor: Actor, paise: number) => {
+    const result = ok(await books.execute(actor, logExpense("online", paise)));
+    const [logged, added] = result.events;
+    if (logged?.type !== "ExpenseLogged" || added?.type !== "BillAdded") throw new Error("expected an Order");
+    return { expenseId: logged.expenseId, expectedBillId: added.billId };
+  };
+  const read = async (actor: Actor, id: string) => {
+    const result = await books.expense(actor, id);
+    if (!result.ok) throw new Error("expected the Expense");
+    return result.expense;
+  };
+  const billsOf = async (actor: Actor, id: string) => (await read(actor, id)).bills.map((b) => [b.amount?.paise, b.status]);
+
+  it("First delivery: an Invoice of ₹1,200.00 on a ₹3,000.00 Order → a Fulfilled Bill of ₹1,200.00, expected Bill ₹1,800.00", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 300000);
+    expect(await billsOf(mickey, expenseId)).toEqual([[300000, "expected"]]);
+
+    ok(await books.execute(mickey, { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }));
+
+    const expense = await read(mickey, expenseId);
+    expect(expense.bills).toMatchObject([
+      { id: expectedBillId, amount: rupees(180000), fulfilledOn: null, status: "expected" },
+      { amount: rupees(120000), fulfilledOn: "2026-11-21", status: "expected", kind: null },
+    ]);
+    expect(expense).toMatchObject({ status: "open", openAmount: rupees(0), reason: { code: "awaiting_goods" } });
+    expect((await auditRowsOf(mickey)).slice(2)).toMatchObject([
+      { command: "SplitExpectedBill", event: "ExpectedBillReduced", entity: "bill", entityId: expectedBillId, fromState: "expected", toState: "expected" },
+      { command: "SplitExpectedBill", event: "BillAdded", entity: "bill", fromState: null, toState: "expected" },
+    ]);
+  });
+
+  it("another Claimant's Bill is not_found and nothing changes", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 300000);
+    const split = { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(100), fulfilledOn: "2026-11-21" } as const;
+    expect(await books.execute(claimant(), split)).toEqual({ ok: false, reason: "not_found" });
+    expect(await books.execute(mickey, { ...split, billId: randomUUID() })).toEqual({ ok: false, reason: "not_found" });
+    expect(await billsOf(mickey, expenseId)).toEqual([[300000, "expected"]]);
+    expect(await auditRowsOf(mickey)).toHaveLength(2);
   });
 });

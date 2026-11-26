@@ -84,14 +84,26 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   });
 }
 
-async function loadSlice(tx: Tx, _actor: Actor, command: Command): Promise<Slice> {
-  switch (command.type) {
-    case "LogExpense": {
-      // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
-      const { rows } = await tx.execute<{ id: string }>(sql`select uuidv7() as id from generate_series(1, 2)`);
-      return { newIds: rows.map((r) => r.id), expenses: {} };
+// How many new rows each command may create, and which Expense it touches.
+async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice> {
+  const [count, expenseIds] = await (async (): Promise<[number, string[]]> => {
+    switch (command.type) {
+      case "LogExpense":
+        return [2, []];
+      case "SplitExpectedBill":
+        return [1, await expenseOfBill(tx, command.billId)];
     }
-  }
+  })();
+  // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
+  const { rows } = await tx.execute<{ id: string }>(sql`select uuidv7() as id from generate_series(1, ${count})`);
+  const loaded = await loadExpenses(tx, actor, expenseIds);
+  return { newIds: rows.map((r) => r.id), expenses: Object.fromEntries(loaded.map((e) => [e.state.id, e.state])) };
+}
+
+// Unscoped on purpose: loadExpenses applies the Actor's scope next, so another Claimant's Bill loads nothing.
+async function expenseOfBill(tx: Tx, billId: string) {
+  if (!UUID.test(billId)) return [];
+  return (await tx.select({ id: bills.expenseId }).from(bills).where(eq(bills.id, billId))).map((r) => r.id);
 }
 
 const entityOf = (event: Event): ["expense" | "bill", string] =>
@@ -141,6 +153,9 @@ async function write(tx: Tx, event: Event, at: Date) {
         fulfilledOn: event.fulfilledOn,
         createdAt: at,
       });
+      return;
+    case "ExpectedBillReduced":
+      await tx.update(bills).set({ amountPaise: event.amount.paise }).where(eq(bills.id, event.billId));
       return;
   }
 }
