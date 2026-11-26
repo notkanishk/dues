@@ -30,7 +30,7 @@ A push to `main` (or a manual run of the `deploy` workflow) does this:
 
 1. `test` runs the `ci` workflow, which also builds the Dockerfile. Nothing deploys unless it passes.
 2. `dev` (runner `dues-dev`, environment `dev`, `main` only, manual runs included) runs `sudo -n /usr/local/sbin/dues-deploy <commit>`, with the run's full 40-character commit id.
-3. `prod` (runner `dues-prod`, environment `prod`) does the same with the same commit after dev succeeds. If the `prod` environment has required reviewers, this step waits for their approval.
+3. `prod` (runner `dues-prod`, environment `prod`) does the same with the same commit as soon as dev succeeds. No one approves it: the gates are CI, a healthy dev, and prod's own health check below. `main` is protected so that only commits whose `test` check passed land on it.
 
 `dues-deploy`, as root in `/opt/dues`:
 
@@ -38,7 +38,7 @@ A push to `main` (or a manual run of the `deploy` workflow) does this:
 2. builds `dues:<first 12 characters of the commit>` from that commit's `Dockerfile` (skipped if that build is still on the host);
 3. installs that commit's `deploy/compose.yaml` as `/opt/dues/compose.yaml`, writes `DUES_IMAGE=dues:<short>` to `.image.env`, and pulls the stock images;
 4. takes the pre-deploy database copy (below);
-5. runs `docker compose up -d --remove-orphans --wait`. A service that is not healthy fails the job.
+5. runs `docker compose up -d --remove-orphans --wait`, then asks `/api/health` on the host for a 200 (up to 30 seconds). If either fails, it switches straight back to the build that was running before (schema changes are additive, so that build runs on the new schema), checks its health, and fails the job. The logs of web and worker are in the job output.
 
 The build and pulls happen while the old stack still serves, so a failure there stops nothing. On start, web applies the Drizzle migrations and then serves. The worker starts once web is healthy.
 

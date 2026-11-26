@@ -95,10 +95,35 @@ if [[ -f compose.yaml ]] && docker compose --env-file .image.env ps --status run
   ls -1t /var/backups/dues/pre-deploy-*.dump | tail -n +15 | xargs -r rm -f
 fi
 
-# 4. Switch.
+# 4. Switch, then prove it: every service healthy and /api/health 200 from this host.
+#    If not, go straight back to the build that was running (schema changes are additive,
+#    so the previous build runs on the new schema) and fail the deploy.
+smoke() {
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -fsS -o /dev/null --max-time 5 "http://127.0.0.1:${APP_PORT}/api/health" && return 0
+    sleep 3
+  done
+  return 1
+}
+up() { docker compose --env-file .image.env up -d --remove-orphans --wait && smoke; }
+[[ -f compose.yaml ]] && cp -p compose.yaml compose.yaml.prev
+[[ -f .image.env ]] && cp -p .image.env .image.env.prev
 mv compose.yaml.next compose.yaml
 mv .image.env.next .image.env
-docker compose --env-file .image.env up -d --remove-orphans --wait
+if ! up; then
+  logger -t dues-deploy "FAILED health after switching to ${sha}"
+  docker compose --env-file .image.env ps >&2 || true
+  docker compose --env-file .image.env logs --tail=60 web worker >&2 || true
+  if [[ -f .image.env.prev ]] && ! cmp -s .image.env .image.env.prev; then
+    mv compose.yaml.prev compose.yaml
+    mv .image.env.prev .image.env
+    if up; then logger -t dues-deploy "rolled back to $(cut -d= -f2 .image.env)"; echo "rolled back to $(cut -d= -f2 .image.env)" >&2
+    else logger -t dues-deploy "ROLLBACK ALSO FAILED"; echo "rollback also failed" >&2; fi
+  else
+    echo "nothing older to roll back to" >&2
+  fi
+  exit 6
+fi
 
 # 5. Keep the five newest builds for quick rollback; cap the build cache.
 docker image ls --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' dues | sort -r | tail -n +6 | cut -f2 | xargs -r docker image rm >/dev/null 2>&1 || true
