@@ -229,11 +229,11 @@ const ok = (events: Event[]): Decision => ({ ok: true, events, jobs: [] });
 const inr = (paise: number): Money => ({ paise, currency: "INR" });
 const reject = (reason: Rejected["reason"]): Rejected => ({ ok: false, reason });
 
-/** The Bill and its open Expense, or not_found when it is not in the Actor's slice (the loader scoped it). */
+/** The Bill and its open Expense (not draft, not closed), or not_found when it is not in the Actor's slice (the loader scoped it). */
 function findBill(slice: Slice, billId: string) {
   for (const expense of Object.values(slice.expenses)) {
     const bill = expense.bills.find((b) => b.id === billId);
-    if (bill) return expense.closedReason ? reject("invalid_transition") : { ok: true as const, expense, bill };
+    if (bill) return expense.draft || expense.closedReason ? reject("invalid_transition") : { ok: true as const, expense, bill };
   }
   return reject("not_found");
 }

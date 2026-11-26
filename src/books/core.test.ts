@@ -529,6 +529,16 @@ describe("Order commands", () => {
     });
   });
 
+  it.each([
+    ["split", { type: "SplitExpectedBill", billId: "b-1", amount: rupees(100), fulfilledOn: "2026-11-21" }],
+    ["cancel", { type: "CancelBill", billId: "b-1" }],
+    ["return", { type: "ReturnBill", billId: "b-2" }],
+  ] as const)("refuses to %s a Bill on a draft Expense", (_, command) => {
+    const slice = delivered();
+    slice.expenses["e-1"]!.draft = true;
+    expect(run(slice, command, ["x"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+  });
+
   // ₹3,000.00 Order after the first delivery: expected remainder ₹1,800.00 (b-1), Fulfilled ₹1,200.00 (b-2).
   const delivered = () =>
     run(order(300000), { type: "SplitExpectedBill", billId: "b-1", amount: rupees(120000), fulfilledOn: "2026-11-21" }, ["b-2"]).slice;
