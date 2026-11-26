@@ -217,4 +217,25 @@ describe("why an Expense is open", () => {
     });
     expect(reasonOf(e)).toEqual({ code: "awaiting_goods" });
   });
+
+  it("Bill missing: a Bill is Fulfilled and has no document", () => {
+    expect(reasonOf(facts(25000, [{ paise: 25000, kind: null, paperlessId: null }]))).toEqual({ code: "bill_missing" });
+  });
+
+  it("refund owed comes before bill missing", () => {
+    const e = facts(100000, [{ paise: 70000, paperlessId: null }], { refunds: [{ amount: rupees(30000), received: false }] });
+    expect(reasonOf(e)).toEqual({ code: "refund_owed" });
+  });
+
+  it("No bill is never bill missing: a Fulfilled no-bill Bill without a document", () => {
+    const reason = reasonOf(facts(6000, [{ paise: 6000, kind: "no_bill", paperlessId: null }]));
+    expect(reason).not.toEqual({ code: "bill_missing" });
+  });
+
+  it("a cancelled Bill without a document is not bill missing", () => {
+    const e = facts(100000, [{ paise: 100000, paperlessId: null, cancelled: true }], {
+      refunds: [{ amount: rupees(100000), received: true }],
+    });
+    expect(deriveExpense(e)).toMatchObject({ status: "settled", reason: null });
+  });
 });

@@ -204,6 +204,7 @@ function whyOpen(expense: ExpenseState): OpenReason | null {
   const live = expense.bills.filter((b) => !b.cancelled);
   if (live.some((b) => !b.fulfilledOn)) return { code: "awaiting_goods" };
   if (expense.refunds.some((r) => !r.received)) return { code: "refund_owed" };
+  if (live.some((b) => b.paperlessId === null && b.kind !== "no_bill")) return { code: "bill_missing" };
   return null;
 }
 
