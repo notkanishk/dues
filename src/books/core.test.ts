@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { formatRupees } from "@/src/money/money";
-import { type Actor, apply, type BillState, type Command, decide, deriveBill, deriveExpense, deriveRefund, type ExpenseState, type Slice } from "./core";
+import {
+  type Actor,
+  apply,
+  type BillState,
+  type Command,
+  decide,
+  deriveBill,
+  deriveExpense,
+  deriveRefund,
+  type ExpenseState,
+  orderPage,
+  type Slice,
+} from "./core";
 
 // Pure core: no database. Expected values are written by hand from the spec scenarios.
 const mickey: Actor = { claimantId: "00000000-0000-7000-8000-00000000000a", roles: ["claimant"], via: "session" };
@@ -1427,5 +1439,76 @@ describe("MoveBill and DetachBill", () => {
     const closedTarget = run(twoExpenses(), { type: "CloseExpense", expenseId: "e-2", reason: "duplicate", refunds: {} }).slice;
     expect(run(closedTarget, move()).decision).toEqual({ ok: false, reason: "invalid_transition" });
     expect(run(twoExpenses(), detach("b-1"), ["e-3"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+  });
+});
+
+// The Order page (W2.9): what it shows and which commands are open now, from the one decide.
+describe("orderPage", () => {
+  const page = (slice: Slice) => orderPage(slice, "e-1", mickey, now)!;
+  const split = (slice: Slice, paise: number, id: string) =>
+    run(slice, { type: "SplitExpectedBill", billId: "b-1", amount: rupees(paise), fulfilledOn: "2026-11-21" }, [id]).slice;
+  const all3 = ["refund_coming", "claim_without_bill", "not_claiming"];
+
+  it("Page contents: a ₹4,870.00 Order with a ₹2,100.00 Bill → the Bill with Move and Detach, then \"Still expected ₹2,770\"", () => {
+    expect(page(split(order(487000), 210000, "b-2"))).toEqual({
+      bills: [{ id: "b-2", status: "expected", commands: ["MoveBill", "DetachBill"] }],
+      refunds: [],
+      stillExpected: { billId: "b-1", amount: rupees(277000), ask: "three_way", choices: all3, commands: ["ExpectRefund", "CloseOrder"] },
+      closedOut: null,
+    });
+  });
+
+  it("Item cancelled: ₹500.00 of ₹2,770.00 → an expected Refund with Refund received, and ₹2,270.00 still expected", () => {
+    const slice = run(split(order(487000), 210000, "b-2"), { type: "ExpectRefund", billId: "b-1", amount: rupees(50000) }, ["r-1"]).slice;
+    expect(page(slice)).toMatchObject({
+      refunds: [{ id: "r-1", status: "expected", commands: ["MarkRefundReceived"] }],
+      stillExpected: { amount: rupees(227000) },
+    });
+  });
+
+  it.each([
+    ["₹1.00", 100, "close_order", ["not_claiming"]],
+    ["₹9.99", 999, "close_order", ["not_claiming"]],
+    ["₹10.00", 1000, "three_way", all3],
+    ["₹270.00", 27000, "three_way", all3],
+  ])("a leftover of %s asks %s", (_, paise, ask, choices) => {
+    expect(page(split(order(487000), 487000 - paise, "b-2")).stillExpected).toMatchObject({ amount: rupees(paise), ask, choices });
+  });
+
+  it("Never silent: ₹1.00 left and no answer → still asked, and the Order stays open", () => {
+    const slice = split(order(487000), 486900, "b-2");
+    expect(page(slice).stillExpected).toMatchObject({ ask: "close_order" });
+    expect(derived(slice)).toMatchObject({ status: "open", reason: { code: "awaiting_goods" } });
+  });
+
+  it("after a close: nothing still expected, the choice shown with Undo; a received Refund locks the undo", () => {
+    const left = split(order(487000), 460000, "b-2");
+    const written = run(left, { type: "CloseOrder", billId: "b-1", choice: "not_claiming" }).slice;
+    expect(page(written)).toMatchObject({ stillExpected: null, closedOut: { billId: "b-1", choice: "not_claiming", amount: rupees(27000), commands: ["UndoCloseOrder"] } });
+    const refunded = run(left, { type: "CloseOrder", billId: "b-1", choice: "refund_coming" }, ["r-1"]).slice;
+    const received = run(refunded, { type: "MarkRefundReceived", refundId: "r-1", refundedOn: "2026-11-28" }).slice;
+    expect(page(received)).toMatchObject({ refunds: [{ status: "received", commands: [] }], closedOut: { choice: "refund_coming", commands: [] } });
+  });
+
+  it("Claim without a bill: the leftover's No bill is listed as ready, with Move and Detach", () => {
+    const slice = run(split(order(487000), 460000, "b-2"), { type: "CloseOrder", billId: "b-1", choice: "claim_without_bill" }, ["b-3"]).slice;
+    expect(page(slice).bills).toEqual([
+      { id: "b-2", status: "expected", commands: ["MoveBill", "DetachBill"] },
+      { id: "b-3", status: "ready", commands: ["MoveBill", "DetachBill"] },
+    ]);
+  });
+
+  it("a locked Bill offers nothing; a returned one is listed as cancelled", () => {
+    const slice = split(split(order(487000), 210000, "b-2"), 100000, "b-3");
+    slice.expenses["e-1"]!.bills[1]!.claim = "submitted";
+    const returned = run(slice, { type: "ReturnBill", billId: "b-3" }, ["r-1"]).slice;
+    expect(page(returned).bills).toEqual([
+      { id: "b-2", status: "claimed", commands: [] },
+      { id: "b-3", status: "cancelled", commands: [] },
+    ]);
+  });
+
+  it("is null for an Expense outside the Actor's slice", () => {
+    expect(orderPage(order(100), "e-9", mickey, now)).toBeNull();
   });
 });
