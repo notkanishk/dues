@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
 import { auditLog, bills, expenses, refunds, writeOffs } from "@/src/db/schema";
 import { createBooks, lockClaimant, type Result } from "./books";
-import type { Actor, LogExpense } from "./core";
+import type { Actor, Command, LogExpense } from "./core";
 
 // Scenario tests through Books' Interface against a real Postgres (DATABASE_URL), design §1.
 // Every test uses fresh Claimants, so counts are exact while other test files share the database.
@@ -926,5 +926,68 @@ describe("The Order page", () => {
       { command: "DetachBill", event: "ExpenseLogged", entity: "expense", entityId: logged.expenseId, fromState: null, toState: "open" },
       { command: "DetachBill", event: "BillMoved", entity: "bill", entityId: billIds[0] },
     ]);
+  });
+});
+
+// identity-access "Role gate" and "Admin sees everything", design D5 and D6: the Actor is the only input that decides
+// identity, and every command and query goes through the one Seam.
+describe("Authorization at the Actor Seam", () => {
+  const admin = (): Actor => ({ claimantId: randomUUID(), roles: ["admin"], via: "session" });
+
+  // One Claimant's Order with a delivered Bill, its expected remainder and an expected Refund, so every command has a target.
+  const books3000 = async (actor: Actor) => {
+    const placed = await order(actor, 300000);
+    const split = ok(
+      await books.execute(actor, { type: "SplitExpectedBill", billId: placed.expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }),
+    );
+    const added = split.events[1];
+    if (added?.type !== "BillAdded") throw new Error("expected BillAdded");
+    const expected = ok(await books.execute(actor, { type: "ExpectRefund", billId: placed.expectedBillId, amount: rupees(50000) }));
+    const refund = expected.events.find((e) => e.type === "RefundExpected");
+    if (refund?.type !== "RefundExpected") throw new Error("expected RefundExpected");
+    return { ...placed, deliveredBillId: added.billId, refundId: refund.refundId };
+  };
+  type Target = Awaited<ReturnType<typeof books3000>>;
+
+  // Every command, one each: a Command type missing here fails the typecheck, so a new operation cannot skip these tests.
+  const everyCommand = (t: Target, otherExpenseId = t.expenseId): { [T in Command["type"]]: Extract<Command, { type: T }> } => ({
+    LogExpense: logExpense("shop", 100),
+    SplitExpectedBill: { type: "SplitExpectedBill", billId: t.expectedBillId, amount: rupees(100), fulfilledOn: "2026-11-22" },
+    ExpectRefund: { type: "ExpectRefund", billId: t.expectedBillId, amount: rupees(100) },
+    CancelBill: { type: "CancelBill", billId: t.expectedBillId },
+    ReturnBill: { type: "ReturnBill", billId: t.deliveredBillId },
+    MarkRefundReceived: { type: "MarkRefundReceived", refundId: t.refundId, refundedOn: "2026-11-25" },
+    CorrectExpense: { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) },
+    CorrectBill: { type: "CorrectBill", billId: t.deliveredBillId, remarks: "Edited" },
+    ConfirmDiffers: { type: "ConfirmDiffers", billId: t.deliveredBillId },
+    CloseExpense: { type: "CloseExpense", expenseId: t.expenseId, reason: "personal", refunds: { [t.refundId]: "expected" } },
+    CloseOrder: { type: "CloseOrder", billId: t.expectedBillId, choice: "not_claiming" },
+    UndoCloseOrder: { type: "UndoCloseOrder", billId: t.expectedBillId },
+    MoveBill: { type: "MoveBill", billId: t.deliveredBillId, toExpenseId: otherExpenseId },
+    DetachBill: { type: "DetachBill", billId: t.deliveredBillId },
+  });
+  // A snapshot of a Claimant's books, read as that Claimant, to prove a refusal changed nothing.
+  const snapshot = async (owner: Actor, t: Target) => ({
+    expense: await books.expense(owner, t.expenseId),
+    audit: (await db.select({ n: count() }).from(auditLog).where(eq(auditLog.entityId, t.expenseId)))[0]!.n,
+    expenses: await expensesOf(owner),
+  });
+
+  it("Missing role and Role removed: an Actor without claimant or admin is forbidden from every command and query, its own data included", async () => {
+    const mickey = claimant();
+    const t = await books3000(mickey);
+    const before = await snapshot(mickey, t);
+    for (const roles of [[], ["approver"]]) {
+      const removed: Actor = { ...mickey, roles };
+      for (const command of Object.values(everyCommand(t))) {
+        expect(await books.execute(removed, command), command.type).toEqual({ ok: false, reason: "forbidden" });
+        expect(await books.execute(removed, command, { idempotencyKey: `k-${randomUUID()}` })).toEqual({ ok: false, reason: "forbidden" });
+      }
+      expect(await books.expense(removed, t.expenseId)).toEqual({ ok: false, reason: "forbidden" });
+      expect(await books.order(removed, t.expenseId)).toEqual({ ok: false, reason: "forbidden" });
+      // No partial access: not even whether an id exists.
+      expect(await books.expense(removed, randomUUID())).toEqual({ ok: false, reason: "forbidden" });
+    }
+    expect(await snapshot(mickey, t)).toEqual(before);
   });
 });
