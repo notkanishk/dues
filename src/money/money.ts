@@ -36,7 +36,7 @@ export function formatRupees(m: Money): string {
   return `${sign}₹${indian.format(rupees)}.${rest}`;
 }
 
-/** A form row's amount: "1180.25/-", no ₹ and no grouping, paise exactly as stored. */
+/** A Claim line's amount as the form prints it: "1180.25/-", no ₹ and no grouping, paise exactly as stored. */
 export function formAmount(m: Money): string {
   const { sign, rupees, rest } = split(m.paise);
   return `${sign}${rupees}.${rest}/-`;

@@ -65,7 +65,7 @@ describe("display: ₹, Indian grouping, two decimals, paise as printed", () => 
 
 // platform-foundations: "Paise kept as printed; only the Claim total is rounded".
 describe("Paise kept as printed; only the Claim total is rounded", () => {
-  it("keeps an Invoice for ₹1,180.25 as 118025 paise, shown 1180.25/- on its form row", () => {
+  it("keeps an Invoice for ₹1,180.25 as 118025 paise, shown 1180.25/- on its Claim line", () => {
     const bill = parseRupees("₹1,180.25")!;
     expect(bill.paise).toBe(118025);
     expect(formAmount(bill)).toBe("1180.25/-");
