@@ -420,13 +420,24 @@ describe("Open amount and settled invariants, for any generated slice", () => {
 
   // Every Order command moves money between the expected Bill, new Bills and Refunds and never creates or loses any, so
   // from a logged Expense (Open amount zero) the Open amount stays exactly zero, and still equals Payment − Σ live Bills
-  // − Σ Refunds − written off. A cancelled Bill stays cancelled and a received Refund stays received.
+  // − Σ Refunds − written off. A cancelled Bill stays cancelled and a received Refund stays received. A Bill on a
+  // submitted Claim is refused as locked, and a second Expense in the slice, never named by a command, never changes.
   it("hold for 500 random sequences of Order commands; refusals are typed, never thrown", () => {
-    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0 };
+    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0, locked: 0 };
     for (let n = 0; n < 500; n++) {
       const logged = decide(fresh, logExpense(pick(["online", "online", "shop"] as const), paise() + 1), mickey, now);
-      if (!logged.ok) throw new Error("expected Ok");
-      let slice = logged.events.reduce(apply, fresh);
+      const other = decide({ ...fresh, newIds: ["e-2", "b-foreign"] }, logExpense("online", paise() + 1), mickey, now);
+      if (!logged.ok || !other.ok) throw new Error("expected Ok");
+      let slice = [...logged.events, ...other.events].reduce(apply, fresh);
+      // Up to two Bills already on a submitted Claim, paid for by the same Payment so the Open amount stays zero.
+      for (let k = next() % 3; k > 0; k--) {
+        const amount = rupees(paise() + 1);
+        slice = apply(slice, { type: "BillAdded", billId: `b-claimed-${k}`, expenseId: "e-1", kind: "invoice", amount, fulfilledOn: "2026-11-19" });
+        const e1 = slice.expenses["e-1"]!;
+        e1.amount = rupees(e1.amount!.paise + amount.paise);
+        e1.bills.at(-1)!.claim = "submitted";
+      }
+      const foreign = structuredClone(slice.expenses["e-2"]!);
       let fresher = 0;
       for (let step = 0; step < 12; step++) {
         const expense = slice.expenses["e-1"]!;
@@ -443,9 +454,12 @@ describe("Open amount and settled invariants, for any generated slice", () => {
         ] as const);
         const ids = { ...slice, newIds: [`new-${fresher++}`] };
         const decision = decide(ids, command, mickey, now);
+        const onSubmittedClaim = command.type !== "MarkRefundReceived" && billId.startsWith("b-claimed-");
+        if (onSubmittedClaim) expect(decision).toEqual({ ok: false, reason: "locked" });
         if (!decision.ok) {
-          expect(["not_found", "invalid_transition", "validation"]).toContain(decision.reason);
+          expect(["not_found", "invalid_transition", "validation", "locked"]).toContain(decision.reason);
           seen.refused.add(`${command.type}:${decision.reason}`);
+          if (onSubmittedClaim) seen.locked++;
           continue;
         }
         seen.accepted.add(command.type);
@@ -462,6 +476,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
         for (const b of before.bills) if (b.cancelled) expect(after.bills.find((x) => x.id === b.id)?.cancelled).toBe(true);
         for (const r of before.refunds) if (r.received) expect(after.refunds.find((x) => x.id === r.id)?.received).toBe(true);
         for (const b of after.bills) expect(b.amount!.paise).toBeGreaterThan(0);
+        expect(slice.expenses["e-2"]).toEqual(foreign);
         if (status === "settled") seen.settled++;
       }
     }
@@ -470,6 +485,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
     for (const type of ["CancelBill", "ExpectRefund", "MarkRefundReceived", "ReturnBill", "SplitExpectedBill"])
       expect([...seen.refused].some((r) => r.startsWith(`${type}:`))).toBe(true);
     expect(seen.settled).toBeGreaterThan(20);
+    expect(seen.locked).toBeGreaterThan(20);
   });
 });
 
