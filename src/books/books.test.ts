@@ -1130,4 +1130,54 @@ describe("Authorization at the Actor Seam", () => {
       (await db.select({ n: count() }).from(auditLog).where(and(eq(auditLog.entityId, t.expenseId), eq(auditLog.command, "CorrectExpense"))))[0]!.n,
     ).toBe(1);
   });
+
+  // Property (D6), through the Interface against Postgres: for every order of every command, an admin acting on
+  // Dexter's books gets exactly what Mickey gets on his own (same results, same reads, ids aside), while another Claimant
+  // and a role-less Actor, trying the same command and reads on Mickey's books before each step, get not_found or
+  // forbidden and change nothing: no entry is written with Mickey as owner, and the two worlds never drift apart.
+  it("property: an admin acts as the owner would; another Claimant and a role-less Actor never see or change the owner's data", async () => {
+    const names = Object.keys(everyCommand({ expenseId: "x", expectedBillId: "x", deliveredBillId: "x", refundId: "x" })) as Command["type"][];
+    const ids = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\b[EBRO]-\d+\b/gi;
+    const same = (x: unknown) => JSON.stringify(x).replace(ids, "#");
+    const ownerRows = async (owner: Actor) => (await db.select({ n: count() }).from(auditLog).where(eq(auditLog.ownerId, owner.claimantId)))[0]!.n;
+    const outcomes = new Set<string>();
+    await Promise.all(
+      names.map(async (_, start) => {
+        const [mickey, dexter, root, intruder] = [claimant(), claimant(), admin(), claimant()];
+        const roleless: Actor = { ...mickey, roles: [] };
+        const world = async (actor: Actor, owner: Actor) => ({ actor, owner, t: await books3000(owner), other: (await order(owner, 500000)).expenseId });
+        const worlds = await Promise.all([world(mickey, mickey), world(root, dexter)]);
+        const [own, admins] = worlds as [(typeof worlds)[number], (typeof worlds)[number]];
+        const view = (reader: Actor, w: typeof own) =>
+          Promise.all([books.expense(reader, w.t.expenseId), books.order(reader, w.t.expenseId), books.expense(reader, w.other)]);
+        for (let k = 0; k < names.length; k++) {
+          const name = names[(start + k) % names.length]!;
+          // An intruder first: the same command and reads on Mickey's books.
+          const [who, refused] = (start + k) % 2 ? [intruder, "not_found"] : [roleless, "forbidden"];
+          const rows = await ownerRows(mickey);
+          const [tried, read, page] = await Promise.all([
+            books.execute(who, everyCommand(own.t, own.other)[name]),
+            books.expense(who, own.t.expenseId),
+            books.order(who, own.other),
+          ]);
+          if (name !== "LogExpense" || who === roleless) expect(tried, `${name} by ${refused === "forbidden" ? "a role-less Actor" : "another Claimant"}`).toEqual({ ok: false, reason: refused });
+          expect([read, page]).toEqual([{ ok: false, reason: refused }, { ok: false, reason: refused }]);
+          expect(await ownerRows(mickey)).toBe(rows);
+
+          const [byOwner, byAdmin] = await Promise.all(worlds.map((w) => books.execute(w.actor, everyCommand(w.t, w.other)[name])));
+          expect(same(byAdmin), `${name}, step ${k} from ${names[start]}`).toBe(same(byOwner));
+          outcomes.add(`${name}:${byOwner!.ok ? "ok" : byOwner!.reason}`);
+          const [mine, theirs] = await Promise.all([view(mickey, own), view(root, admins)]);
+          expect(same(theirs)).toBe(same(mine));
+        }
+        expect(await view(dexter, admins)).toEqual(await view(root, admins));
+        // Every entry the admin wrote names the admin as actor and Dexter as owner, but the admin's own LogExpense.
+        for (const row of await auditRowsOf(root)) expect(row.ownerId).toBe(row.command === "LogExpense" ? root.claimantId : dexter.claimantId);
+      }),
+    );
+    // Every command is accepted somewhere, so the comparison is never only of refusals; but CorrectBill and
+    // ConfirmDiffers, which need a Bill's document, and no command attaches one yet (Phase 2).
+    const accepted = names.filter((n) => outcomes.has(`${n}:ok`));
+    expect(accepted).toEqual(names.filter((n) => n !== "CorrectBill" && n !== "ConfirmDiffers"));
+  }, 60_000);
 });
