@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { formatRupees } from "@/src/money/money";
 import { type Actor, apply, type BillState, decide, deriveBill, deriveExpense, type ExpenseState, type Slice } from "./core";
 
 // Pure core: no database. Expected values are written by hand from the spec scenarios.
@@ -237,5 +238,23 @@ describe("why an Expense is open", () => {
       refunds: [{ amount: rupees(100000), received: true }],
     });
     expect(deriveExpense(e)).toMatchObject({ status: "settled", reason: null });
+  });
+
+  it("Mismatch: nothing expected and Bills plus Refunds ₹50.00 short of the Payment → \"mismatch ₹50.00\", at once", () => {
+    // Derivation takes no clock, so nothing can make it wait.
+    const e = facts(100000, [{ paise: 70000 }], { refunds: [{ amount: rupees(25000), received: true }] });
+    const reason = reasonOf(e);
+    expect(reason).toEqual({ code: "mismatch", amount: rupees(5000) });
+    expect(reason?.code === "mismatch" && formatRupees(reason.amount)).toBe("₹50.00");
+  });
+
+  it("bill missing comes before mismatch", () => {
+    expect(reasonOf(facts(100000, [{ paise: 95000, paperlessId: null }]))).toEqual({ code: "bill_missing" });
+  });
+
+  it("Written off: Payment ₹1,000.00, a Bill of ₹730.00 and ₹270.00 written off → Open amount ₹0.00, no mismatch", () => {
+    const e = facts(100000, [{ paise: 73000 }], { writtenOff: rupees(27000) });
+    expect(deriveExpense(e).openAmount).toEqual(rupees(0));
+    expect(reasonOf(e)).not.toMatchObject({ code: "mismatch" });
   });
 });

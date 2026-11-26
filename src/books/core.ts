@@ -193,18 +193,24 @@ export function deriveBill(bill: BillState): BillStatus {
   return "expected";
 }
 
-/** Open amount = Payment − Σ Bills (not cancelled) − Σ Refunds; null while any of those amounts is blank. */
+/** Open amount = Payment − Σ Bills (not cancelled) − Σ Refunds − written off; null while any of those amounts is blank. */
 function openAmount(expense: ExpenseState): Money | null {
-  const covering = [...expense.bills.filter((b) => !b.cancelled).map((b) => b.amount), ...expense.refunds.map((r) => r.amount)];
+  const covering = [
+    ...expense.bills.filter((b) => !b.cancelled).map((b) => b.amount),
+    ...expense.refunds.map((r) => r.amount),
+    expense.writtenOff,
+  ];
   if (!expense.amount || covering.some((m) => m === null)) return null;
   return { paise: expense.amount.paise - sum(covering as Money[]).paise, currency: "INR" };
 }
 
-function whyOpen(expense: ExpenseState): OpenReason | null {
+function whyOpen(expense: ExpenseState, open: Money | null): OpenReason | null {
   const live = expense.bills.filter((b) => !b.cancelled);
   if (live.some((b) => !b.fulfilledOn)) return { code: "awaiting_goods" };
   if (expense.refunds.some((r) => !r.received)) return { code: "refund_owed" };
   if (live.some((b) => b.paperlessId === null && b.kind !== "no_bill")) return { code: "bill_missing" };
+  // The signed Open amount: positive when Bills, Refunds and written off fall short of the Payment.
+  if (open && open.paise !== 0) return { code: "mismatch", amount: open };
   return null;
 }
 
@@ -220,5 +226,5 @@ export function deriveExpense(expense: ExpenseState): {
     open?.paise === 0 &&
     expense.bills.every((b) => ["reimbursed", "cancelled"].includes(deriveBill(b))) &&
     expense.refunds.every((r) => r.received);
-  return settled ? { status: "settled", openAmount: open, reason: null } : { status: "open", openAmount: open, reason: whyOpen(expense) };
+  return settled ? { status: "settled", openAmount: open, reason: null } : { status: "open", openAmount: open, reason: whyOpen(expense, open) };
 }
