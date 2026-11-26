@@ -1098,4 +1098,36 @@ describe("Authorization at the Actor Seam", () => {
     expect(await books.expense(mickey, own)).toEqual({ ok: false, reason: "not_found" });
     expect(await expensesOf(root)).toBe(1);
   });
+
+  it("an idempotency key is its sender's: an admin's replay returns the first result; the owner sending it is refused, and the other way round", async () => {
+    const mickey = claimant();
+    const root = admin();
+    const t = await books3000(mickey);
+    const correct = { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) } as const;
+    const key = `k-${randomUUID()}`;
+    const first = ok(await books.execute(root, correct, { idempotencyKey: key }));
+    expect(await books.execute(root, correct, { idempotencyKey: key })).toEqual(first);
+    expect(await books.execute(mickey, correct, { idempotencyKey: key })).toEqual({ ok: false, reason: "idempotency_conflict" });
+    expect(await auditRowsOf(root)).toHaveLength(first.events.length);
+
+    const owners = `k-${randomUUID()}`;
+    const undo = { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(300000) } as const;
+    const mine = ok(await books.execute(mickey, undo, { idempotencyKey: owners }));
+    expect(await books.execute(root, undo, { idempotencyKey: owners })).toEqual({ ok: false, reason: "idempotency_conflict" });
+    expect(await books.execute(mickey, undo, { idempotencyKey: owners })).toEqual(mine);
+    expect(await read(mickey, t.expenseId)).toMatchObject({ amount: rupees(300000) });
+  });
+
+  it("an admin and the owner sending one new key at once: one is served, the other refused as idempotency_conflict, one change made", async () => {
+    const mickey = claimant();
+    const root = admin();
+    const t = await books3000(mickey);
+    const key = `k-${randomUUID()}`;
+    const correct = { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) } as const;
+    const results = await Promise.all([root, mickey].map((actor) => books.execute(actor, correct, { idempotencyKey: key })));
+    expect(results.map((r) => (r.ok ? "ok" : r.reason)).sort()).toEqual(["idempotency_conflict", "ok"]);
+    expect(
+      (await db.select({ n: count() }).from(auditLog).where(and(eq(auditLog.entityId, t.expenseId), eq(auditLog.command, "CorrectExpense"))))[0]!.n,
+    ).toBe(1);
+  });
 });
