@@ -342,8 +342,9 @@ describe("Bill lifecycle", () => {
   });
 });
 
-// Property (design §1): for any slice, Open amount = Payment − Σ Bills − Σ Refunds − written off.
-describe("Open amount invariant, for any generated slice", () => {
+// Property (design §1): for any slice, Open amount = Payment − Σ Bills − Σ Refunds − written off (null while any is blank),
+// and an Expense that is neither draft nor closed is settled ⇔ Open amount zero ∧ every Refund received ∧ every Bill reimbursed or cancelled.
+describe("Open amount and settled invariants, for any generated slice", () => {
   // ponytail: a seeded generator instead of a property-testing dependency; same seed, same 2,000 slices.
   let seed = 0x5eed;
   const next = () => {
@@ -355,34 +356,57 @@ describe("Open amount invariant, for any generated slice", () => {
   const paise = () => next() % 10_000_000; // up to ₹1,00,000.00
   const pick = <T>(xs: readonly T[]) => xs[next() % xs.length]!;
   const many = <T>(make: () => T) => Array.from({ length: next() % 5 }, make);
+  const maybeBlank = (p: number) => (next() % 10 === 0 ? null : rupees(p)); // one amount in ten left blank
 
-  it("holds in integer paise for 2,000 slices", () => {
+  it("hold in integer paise for 2,000 slices, blank amounts included", () => {
+    const seen = { settled: 0, openAtZero: 0, blank: 0 };
     for (let n = 0; n < 2000; n++) {
-      const expense: ExpenseState = {
-        id: "e-1",
-        draft: pick([false, false, true]),
-        closedReason: pick([null, null, null, "personal"]),
-        amount: rupees(paise() + 1),
-        bills: many(() => ({
+      const bills = many(
+        (): BillState => ({
           id: "b",
           kind: pick(["invoice", "no_bill", null] as const),
-          amount: rupees(paise()),
+          amount: maybeBlank(paise()),
           fulfilledOn: pick(["2026-11-19", null]),
           paperlessId: pick([7, null]),
           cancelled: pick([false, false, true]),
-          claim: pick([null, "submitted", "reimbursed"] as const),
-        })),
-        refunds: many(() => ({ amount: rupees(paise()), received: pick([true, false]) })),
-        writtenOff: rupees(pick([0, paise()])),
+          claim: pick([null, "draft", "submitted", "reimbursed", "reimbursed"] as const),
+        }),
+      );
+      const refunds = many(() => ({ amount: rupees(paise()), received: pick([true, true, false]) }));
+      const amount = maybeBlank(paise() + 1);
+      // Half the time written off takes up whatever is left, so Open amount zero is common, not a fluke.
+      const live = bills.filter((b) => !b.cancelled);
+      const left = (amount?.paise ?? 0) - live.reduce((t, b) => t + (b.amount?.paise ?? 0), 0) - refunds.reduce((t, r) => t + r.amount.paise, 0);
+      const expense: ExpenseState = {
+        id: "e-1",
+        draft: pick([false, false, false, true]),
+        closedReason: pick([null, null, null, "personal"]),
+        amount,
+        bills,
+        refunds,
+        writtenOff: rupees(pick([0, paise(), Math.max(left, 0), Math.max(left, 0)])),
       };
-      let expected = expense.amount!.paise;
-      for (const b of expense.bills) if (!b.cancelled) expected -= b.amount!.paise;
-      for (const r of expense.refunds) expected -= r.amount.paise;
+
+      const blank = !amount || live.some((b) => !b.amount);
+      let expected = amount?.paise ?? 0;
+      for (const b of live) expected -= b.amount?.paise ?? 0;
+      for (const r of refunds) expected -= r.amount.paise;
       expected -= expense.writtenOff.paise;
 
-      const { openAmount } = deriveExpense(expense);
-      expect(openAmount).toEqual(rupees(expected));
-      expect(Number.isSafeInteger(openAmount!.paise)).toBe(true);
+      const { openAmount, status } = deriveExpense(expense);
+      expect(openAmount).toEqual(blank ? null : rupees(expected));
+
+      if (expense.draft || expense.closedReason) continue;
+      const settles =
+        openAmount?.paise === 0 && refunds.every((r) => r.received) && bills.every((b) => b.cancelled || b.claim === "reimbursed");
+      expect(status === "settled").toBe(settles);
+      if (settles) seen.settled++;
+      else if (openAmount?.paise === 0) seen.openAtZero++;
+      if (blank) seen.blank++;
     }
+    // Both sides of the equivalence, and blank amounts, are actually exercised.
+    expect(seen.settled).toBeGreaterThan(20);
+    expect(seen.openAtZero).toBeGreaterThan(20);
+    expect(seen.blank).toBeGreaterThan(20);
   });
 });
