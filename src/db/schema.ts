@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, char, check, date, integer, jsonb, pgSequence, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, char, check, date, integer, jsonb, pgSequence, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // Keys and References (ADR 0005). The key is a UUIDv7 from Postgres's own uuidv7(), so every
 // writer (app, psql, imports) gets the same time-ordered key without app code.
@@ -125,17 +125,22 @@ export const owedToUniversity = pgTable(
 
 // Append-only (design D2): one row per event Books decides, written before the state rows in the
 // same transaction. who = actor, what = command and event, when = at, plus from-state and to-state.
-// Refusing UPDATE and DELETE is task 2.9's (the Books shell and its database role).
-export const auditLog = pgTable("audit_log", {
-  id: key(),
-  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
-  actorId: uuid("actor_id").notNull(),
-  command: text("command").notNull(),
-  event: text("event").notNull(),
-  entity: text("entity").notNull(),
-  entityId: uuid("entity_id").notNull(),
-  fromState: text("from_state"),
-  toState: text("to_state"),
-  payload: jsonb("payload"),
-  idempotencyKey: text("idempotency_key"),
-});
+// Triggers in the migration refuse UPDATE and DELETE (platform-foundations: never edited or deleted).
+// An idempotency key, when given, is used once (design D4).
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: key(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    actorId: uuid("actor_id").notNull(),
+    command: text("command").notNull(),
+    event: text("event").notNull(),
+    entity: text("entity").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    fromState: text("from_state"),
+    toState: text("to_state"),
+    payload: jsonb("payload"),
+    idempotencyKey: text("idempotency_key"),
+  },
+  (t) => [uniqueIndex("audit_log_idempotency_key").on(t.idempotencyKey).where(sql`${t.idempotencyKey} is not null`)],
+);

@@ -92,6 +92,7 @@ CREATE TABLE "refunds" (
 ALTER TABLE "bills" ADD CONSTRAINT "bills_expense_id_expenses_id_fk" FOREIGN KEY ("expense_id") REFERENCES "public"."expenses"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "owed_to_university" ADD CONSTRAINT "owed_to_university_bill_id_bills_id_fk" FOREIGN KEY ("bill_id") REFERENCES "public"."bills"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "refunds" ADD CONSTRAINT "refunds_expense_id_expenses_id_fk" FOREIGN KEY ("expense_id") REFERENCES "public"."expenses"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "audit_log_idempotency_key" ON "audit_log" USING btree ("idempotency_key") WHERE "audit_log"."idempotency_key" is not null;--> statement-breakpoint
 -- Hand-written (drizzle-kit does not model triggers). Only the database issues a Reference, from
 -- the type's sequence; a supplied one is refused, as for a GENERATED ALWAYS column (ADR 0005).
 CREATE FUNCTION "public"."issue_reference"() RETURNS trigger LANGUAGE plpgsql AS $$

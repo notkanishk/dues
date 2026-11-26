@@ -1,5 +1,5 @@
 {
-  "id": "eed1b676-e7e1-4f88-be36-4e06d8e4f736",
+  "id": "2adfe75f-840c-439f-942e-3d5b6af0512c",
   "prevId": "0ae1f6bf-135d-435f-8f07-6b838a995d3e",
   "version": "7",
   "dialect": "postgresql",
@@ -77,7 +77,24 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "audit_log_idempotency_key": {
+          "name": "audit_log_idempotency_key",
+          "columns": [
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"audit_log\".\"idempotency_key\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

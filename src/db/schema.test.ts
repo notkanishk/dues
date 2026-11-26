@@ -3,16 +3,27 @@ import { eq, TransactionRollbackError } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "./index";
-import { bills, expenseReferenceSeq, expenses, owedToUniversity, refunds } from "./schema";
+import { auditLog, bills, expenseReferenceSeq, expenses, owedToUniversity, refunds } from "./schema";
 
 // Needs a real Postgres: DATABASE_URL (CI service container, or a scratch postgres:19.0).
 // Keys and References, platform-foundations spec and ADR 0005.
 
+const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const mickey = randomUUID();
 const dexter = randomUUID();
 
 const logExpense = async (claimantId: string) =>
   (await db.insert(expenses).values({ claimantId, amountPaise: 25050 }).returning())[0]!;
+
+const auditEntry = (entityId: string, idempotencyKey?: string) => ({
+  actorId: mickey,
+  command: "LogExpense",
+  event: "ExpenseLogged",
+  entity: "expense",
+  entityId,
+  toState: "open",
+  idempotencyKey,
+});
 
 // Drizzle wraps the Postgres error; its SQLSTATE is on the cause.
 const refusedWith = (code: string, query: Promise<unknown>) => expect(query).rejects.toMatchObject({ cause: { code } });
@@ -38,7 +49,11 @@ describe("Keys and References", () => {
 
   it("keys every record with a UUIDv7", async () => {
     const expense = await logExpense(mickey);
-    expect(expense.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    const [bill] = await db.insert(bills).values({ expenseId: expense.id, kind: "invoice", amountPaise: 600 }).returning();
+    const [refund] = await db.insert(refunds).values({ expenseId: expense.id, amountPaise: 600, reason: "returned" }).returning();
+    const [owed] = await db.insert(owedToUniversity).values({ claimantId: mickey, billId: bill!.id, amountPaise: 600 }).returning();
+    const [entry] = await db.insert(auditLog).values(auditEntry(expense.id)).returning();
+    for (const record of [expense, bill!, refund!, owed!, entry!]) expect(record.id).toMatch(UUID_V7);
     const [found] = await db.select().from(expenses).where(eq(expenses.id, expense.id));
     expect(found?.reference).toBe(expense.reference);
   });
@@ -156,5 +171,37 @@ describe("Amounts", () => {
     await refusedWith(NOT_NULL_VIOLATION, db.insert(refunds).values({ expenseId: expense.id, reason: "returned" }));
     // @ts-expect-error amountPaise is required here
     await refusedWith(NOT_NULL_VIOLATION, db.insert(owedToUniversity).values({ claimantId: dexter, billId: bill!.id }));
+  });
+});
+
+describe("Audit log", () => {
+  const UNIQUE_VIOLATION = "23505";
+
+  it("records who, what, when and the states", async () => {
+    const expense = await logExpense(mickey);
+    const before = Date.now();
+    const [entry] = await db
+      .insert(auditLog)
+      .values({ ...auditEntry(expense.id), payload: { amountPaise: 25050 } })
+      .returning();
+    expect(entry).toMatchObject({
+      actorId: mickey,
+      command: "LogExpense",
+      event: "ExpenseLogged",
+      entity: "expense",
+      entityId: expense.id,
+      fromState: null,
+      toState: "open",
+      payload: { amountPaise: 25050 },
+      idempotencyKey: null,
+    });
+    expect(entry!.at.getTime()).toBeGreaterThanOrEqual(before - 5000);
+  });
+
+  it("refuses a repeated idempotency key, but any number of entries without one", async () => {
+    const expense = await logExpense(mickey);
+    const key = randomUUID();
+    await db.insert(auditLog).values([auditEntry(expense.id), auditEntry(expense.id), auditEntry(expense.id, key)]);
+    await refusedWith(UNIQUE_VIOLATION, db.insert(auditLog).values(auditEntry(expense.id, key)));
   });
 });
