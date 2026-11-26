@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, count, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
-import { auditLog, expenses, refunds } from "@/src/db/schema";
+import { auditLog, bills, expenses, refunds } from "@/src/db/schema";
 import { createBooks, lockClaimant, type Result } from "./books";
 import type { Actor, LogExpense } from "./core";
 
@@ -390,5 +390,25 @@ describe("Order flow", () => {
     expect(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId })).toEqual({ ok: false, reason: "invalid_transition" });
     expect(await refundsOf(mickey, expenseId)).toEqual([[180000, "cancelled", "expected"]]);
     expect(await auditRowsOf(mickey)).toEqual(before);
+  });
+
+  it("Return of a ready Bill: ₹600.00 → cancelled for good, and an expected Refund of ₹600.00", async () => {
+    const mickey = claimant();
+    const expenseId = expenseIdOf(await books.execute(mickey, logExpense("shop", 60000)));
+    // No command attaches a document yet (LogDocument, Phase 2): the link goes in directly.
+    await db.update(bills).set({ paperlessId: 7 }).where(eq(bills.expenseId, expenseId));
+    const [billId] = (await read(mickey, expenseId)).bills.map((b) => b.id);
+    expect(await billsOf(mickey, expenseId)).toEqual([[60000, "ready"]]);
+
+    ok(await books.execute(mickey, { type: "ReturnBill", billId: billId! }));
+    expect(await billsOf(mickey, expenseId)).toEqual([[60000, "cancelled"]]);
+    expect(await refundsOf(mickey, expenseId)).toEqual([[60000, "returned", "expected"]]);
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "open", openAmount: rupees(0), reason: { code: "refund_owed" } });
+
+    // Cancelled Bill stays cancelled: it can be neither returned nor cancelled again.
+    expect(await books.execute(mickey, { type: "ReturnBill", billId: billId! })).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(await books.execute(mickey, { type: "CancelBill", billId: billId! })).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(await billsOf(mickey, expenseId)).toEqual([[60000, "cancelled"]]);
+    expect(await refundsOf(mickey, expenseId)).toHaveLength(1);
   });
 });

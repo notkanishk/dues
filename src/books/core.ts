@@ -37,7 +37,9 @@ export type SplitExpectedBill = {
 export type ExpectRefund = { readonly type: "ExpectRefund"; readonly billId: string; readonly amount: Money };
 /** Cancels an expected Bill before fulfilment, all of what is left of it (W2.3, Bill lifecycle). */
 export type CancelBill = { readonly type: "CancelBill"; readonly billId: string };
-export type Command = LogExpense | SplitExpectedBill | ExpectRefund | CancelBill;
+/** A delivered Bill sent back before it is on a Claim (W2.5): cancelled for good, its amount an expected Refund. */
+export type ReturnBill = { readonly type: "ReturnBill"; readonly billId: string };
+export type Command = LogExpense | SplitExpectedBill | ExpectRefund | CancelBill | ReturnBill;
 export type RefundReason = "cancelled" | "returned" | "partial";
 
 export type Event =
@@ -191,6 +193,21 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           ? { type: "BillCancelled", billId: bill.id, expenseId: expense.id, reason: "cancelled" }
           : { type: "ExpectedBillReduced", billId: bill.id, expenseId: expense.id, amount: inr(remainder - paise) },
         { type: "RefundExpected", refundId, expenseId: expense.id, amount: inr(paise), reason: "cancelled" },
+      ]);
+    }
+    case "ReturnBill": {
+      const found = findBill(slice, command.billId);
+      if (!found.ok) return found;
+      const { expense, bill } = found;
+      if (bill.cancelled) return reject("invalid_transition"); // cancelled is for good, even after a recall
+      // ponytail: a Bill on any Claim is refused for now. After submission it becomes Owed to university, and a draft
+      // Claim must let go of it first; both arrive with the Claims tasks.
+      if (bill.claim) return reject("locked");
+      if (!bill.fulfilledOn || !bill.amount) return reject("invalid_transition"); // goods never came: cancel instead
+      const [refundId] = slice.newIds as [string];
+      return ok([
+        { type: "BillCancelled", billId: bill.id, expenseId: expense.id, reason: "returned" },
+        { type: "RefundExpected", refundId, expenseId: expense.id, amount: bill.amount, reason: "returned" },
       ]);
     }
   }

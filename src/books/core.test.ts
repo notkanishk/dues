@@ -564,4 +564,58 @@ describe("Order commands", () => {
       expect(run(delivered(), { type: "CancelBill", billId: "b-2" }, ["r-1"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
     });
   });
+
+  describe("ReturnBill (after delivery, before submission)", () => {
+    // A ₹600.00 shop Expense whose Bill is Fulfilled and has its document: ready.
+    const ready = (): Slice => {
+      const logged = decide(fresh, logExpense("shop", 60000), mickey, now);
+      if (!logged.ok) throw new Error("expected Ok");
+      const slice = logged.events.reduce(apply, fresh);
+      slice.expenses["e-1"]!.bills[0]!.paperlessId = 7;
+      return slice;
+    };
+
+    it("Return of a ready Bill: ₹600.00 → cancelled, and an expected Refund of ₹600.00, reason returned", () => {
+      expect(derived(ready()).bills).toEqual(["ready"]);
+      const { decision, slice } = run(ready(), { type: "ReturnBill", billId: "b-1" }, ["r-1"]);
+      expect(decision).toEqual({
+        ok: true,
+        jobs: [],
+        events: [
+          { type: "BillCancelled", billId: "b-1", expenseId: "e-1", reason: "returned" },
+          { type: "RefundExpected", refundId: "r-1", expenseId: "e-1", amount: rupees(60000), reason: "returned" },
+        ],
+      });
+      expect(derived(slice)).toEqual({ status: "open", openAmount: rupees(0), reason: { code: "refund_owed" }, bills: ["cancelled"] });
+    });
+
+    it("a delivered Invoice without its document can be returned too", () => {
+      const { slice } = run(delivered(), { type: "ReturnBill", billId: "b-2" }, ["r-1"]);
+      expect(derived(slice).bills).toEqual(["expected", "cancelled"]);
+      expect(refunds(slice)).toEqual([{ id: "r-1", amount: rupees(120000), reason: "returned", received: false }]);
+    });
+
+    it("Cancelled Bill stays cancelled: a returned Bill is never ready again and takes no more commands", () => {
+      const { slice } = run(ready(), { type: "ReturnBill", billId: "b-1" }, ["r-1"]);
+      const bill = slice.expenses["e-1"]!.bills[0]!;
+      expect(bill).toMatchObject({ fulfilledOn: "2026-11-19", paperlessId: 7, cancelled: true });
+      expect(deriveBill(bill)).toBe("cancelled");
+      expect(deriveBill({ ...bill, claim: null })).toBe("cancelled"); // as after a recall: still cancelled
+      for (const command of [
+        { type: "ReturnBill", billId: "b-1" },
+        { type: "CancelBill", billId: "b-1" },
+      ] as const)
+        expect(run(slice, command, ["r-2"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    });
+
+    it("refuses an expected Bill whose goods never came: that is a cancellation", () => {
+      expect(run(order(80000), { type: "ReturnBill", billId: "b-1" }, ["r-1"]).decision).toEqual({ ok: false, reason: "invalid_transition" });
+    });
+
+    it.each(["draft", "submitted", "reimbursed"] as const)("refuses a Bill on a %s Claim as locked (Owed to university waits for Claims)", (claim) => {
+      const slice = ready();
+      slice.expenses["e-1"]!.bills[0]!.claim = claim;
+      expect(run(slice, { type: "ReturnBill", billId: "b-1" }, ["r-1"]).decision).toEqual({ ok: false, reason: "locked" });
+    });
+  });
 });

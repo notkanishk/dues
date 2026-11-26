@@ -94,6 +94,7 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
       case "SplitExpectedBill":
       case "ExpectRefund":
       case "CancelBill":
+      case "ReturnBill":
         return [1, await expenseOfBill(tx, command.billId)];
     }
   })();
