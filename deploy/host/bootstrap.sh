@@ -7,12 +7,14 @@
 #   APP_PORT=3000
 #   APP_ALLOW="<ip or cidr>, ..."            who may reach the app port (the internal proxy, or whole LAN ranges)
 #   BLOCK_HOSTS="<ip>"                       optional: nothing on this host may reach these (dev: real paperless)
-#   REPO_URL=https://github.com/<owner>/<repo>.git   the only source dues-deploy builds (commits on main only)
+#   REPO_URL=https://github.com/<owner>/<repo>.git   the only source dues-deploy builds
+#   DEPLOY_FROM=main|branches               prod: commits on main only; dev: any branch pushed to REPO_URL
 set -euo pipefail
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 # shellcheck disable=SC1091
 source /etc/dues/host.env
-: "${DUES_ENV:?}" "${DNS_SERVER:?}" "${APP_PORT:?}" "${APP_ALLOW:?}" "${REPO_URL:?}"
+: "${DUES_ENV:?}" "${DNS_SERVER:?}" "${APP_PORT:?}" "${APP_ALLOW:?}" "${REPO_URL:?}" "${DEPLOY_FROM:?}"
+[[ "$DEPLOY_FROM" == main || "$DEPLOY_FROM" == branches ]] || { echo "DEPLOY_FROM must be main or branches" >&2; exit 1; }
 BLOCK_HOSTS="${BLOCK_HOSTS:-}"
 log() { printf '\n== %s\n' "$*"; }
 
@@ -55,7 +57,7 @@ install -d -o root -g root -m 0750 /opt/dues
 log "dues-deploy: the one root action CI may take"
 cat > /usr/local/sbin/dues-deploy <<'EOF'
 #!/usr/bin/env bash
-# Usage: dues-deploy <40-hex commit on main> | --check
+# Usage: dues-deploy <40-hex commit> | --check   (which commits: DEPLOY_FROM in host.env)
 # Builds that exact commit on this host and (re)starts the stack in /opt/dues. Called by CI via sudo.
 # Runs as root; the CI runner only ever passes a commit id.
 set -euo pipefail
@@ -68,11 +70,18 @@ exec 9>/run/dues-deploy.lock; flock -n 9 || { echo "another deploy is running" >
 short="${sha:0:12}"; image="dues:${short}"
 logger -t dues-deploy "deploying ${sha}"
 
-# 1. Exactly that commit, and only if it is on main.
+# 1. Exactly that commit, and only from where this host may deploy:
+#    prod (DEPLOY_FROM=main) a commit on main; dev (DEPLOY_FROM=branches) a commit on any branch of
+#    REPO_URL. Only people with write access can push branches there; forks cannot.
 [[ -d src/.git ]] || git clone --quiet --no-checkout "$REPO_URL" src
 git -C src remote set-url origin "$REPO_URL"
-git -C src fetch --quiet --prune origin '+refs/heads/main:refs/remotes/origin/main'
-git -C src merge-base --is-ancestor "$sha" origin/main 2>/dev/null || { echo "refused: ${sha} is not on main" >&2; exit 2; }
+git -C src fetch --quiet --prune origin '+refs/heads/*:refs/remotes/origin/*'
+if [[ "$DEPLOY_FROM" == main ]]; then
+  git -C src merge-base --is-ancestor "$sha" origin/main 2>/dev/null || { echo "refused: ${sha} is not on main" >&2; exit 2; }
+else
+  [[ -n "$(git -C src branch -r --contains "$sha" 2>/dev/null)" ]] || { echo "refused: ${sha} is on no branch of ${REPO_URL}" >&2; exit 2; }
+fi
+logger -t dues-deploy "source: $(git -C src branch -r --contains "$sha" | tr -d ' ' | paste -sd, -)"
 git -C src checkout --quiet --force --detach "$sha"
 [[ "$(git -C src rev-parse HEAD)" == "$sha" ]] || { echo "checkout mismatch" >&2; exit 3; }
 
