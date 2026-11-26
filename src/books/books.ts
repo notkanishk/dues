@@ -147,6 +147,7 @@ function entityOf(event: Event): [Entity, string] {
       return ["expense", event.expenseId];
     case "BillAdded":
     case "ExpectedBillReduced":
+    case "ExpectedBillIncreased":
     case "BillRemovedFromClaim":
     case "BillCancelled":
     case "BillCorrected":
@@ -209,6 +210,7 @@ async function write(tx: Tx, event: Event, at: Date) {
       });
       return;
     case "ExpectedBillReduced":
+    case "ExpectedBillIncreased":
       await tx.update(bills).set({ amountPaise: event.amount.paise }).where(eq(bills.id, event.billId));
       return;
     case "BillRemovedFromClaim":

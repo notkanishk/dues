@@ -119,6 +119,8 @@ export type Event =
       readonly fulfilledOn: string | null;
     }
   | { readonly type: "ExpectedBillReduced"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
+  /** A correction moved more onto an Order's expected Bill; amount is its new remainder (ExpectedBillReduced's twin). */
+  | { readonly type: "ExpectedBillIncreased"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
   | { readonly type: "BillRemovedFromClaim"; readonly billId: string; readonly expenseId: string }
   | { readonly type: "BillCancelled"; readonly billId: string; readonly expenseId: string; readonly reason: "cancelled" | "returned" }
   | {
@@ -302,7 +304,11 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
         ...changed("paidOn", expense.paidOn, command.paidOn),
       };
       // Keeping a value changes nothing and writes nothing.
-      return ok(Object.keys(changes).length ? [{ type: "ExpenseCorrected", expenseId: expense.id, changes }] : []);
+      if (!Object.keys(changes).length) return ok([]);
+      const { from, to } = changes.amount ?? {};
+      const moved = from && to ? moveExpected(expense, to.paise - from.paise) : [];
+      if (!Array.isArray(moved)) return moved;
+      return ok([{ type: "ExpenseCorrected", expenseId: expense.id, changes }, ...moved]);
     }
     case "CorrectBill": {
       const found = findBill(slice, command.billId);
@@ -322,7 +328,10 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       };
       if (!Object.keys(changes).length) return ok([]);
       const differs = bill.differs || bill.paperlessId !== null;
-      return ok([{ type: "BillCorrected", billId: bill.id, expenseId: expense.id, changes, differs }]);
+      const { from, to } = changes.amount ?? {};
+      const moved = bill.fulfilledOn && from && to ? moveExpected(expense, from.paise - to.paise) : [];
+      if (!Array.isArray(moved)) return moved;
+      return ok([{ type: "BillCorrected", billId: bill.id, expenseId: expense.id, changes, differs }, ...moved]);
     }
     case "ConfirmDiffers": {
       const found = findBill(slice, command.billId);
@@ -408,12 +417,26 @@ function findBill(slice: Slice, billId: string) {
 }
 
 /** An Order's expected Bill: not cancelled, goods not yet arrived, not on a draft Claim, with an amount. */
+const isExpected = (bill: BillState) => !bill.cancelled && !bill.fulfilledOn && !bill.claim && !!bill.amount;
+
 function expectedBill(slice: Slice, billId: string) {
   const found = findBill(slice, billId);
   if (!found.ok) return found;
-  const { bill } = found;
-  if (bill.cancelled || bill.fulfilledOn || bill.claim || !bill.amount) return reject("invalid_transition");
-  return { ...found, remainder: bill.amount };
+  if (!isExpected(found.bill)) return reject("invalid_transition");
+  return { ...found, remainder: found.bill.amount! };
+}
+
+/**
+ * While an Order still expects goods, a corrected Payment or delivered Bill moves its difference onto the expected Bill:
+ * an Order expects one Bill for the full Payment (W2.1), and mismatch waits until nothing is expected (FUNCTIONAL §3.1).
+ * `by` is how many paise more are expected. Refused when the expected Bill would reach zero or less.
+ */
+function moveExpected(expense: ExpenseState, by: number): Event[] | Rejected {
+  const bill = expense.bills.find(isExpected);
+  if (!bill || by === 0) return [];
+  const amount = sum([bill.amount!, { paise: by, currency: bill.amount!.currency }]);
+  if (amount.paise <= 0) return rejectField("amount");
+  return [{ type: by < 0 ? "ExpectedBillReduced" : "ExpectedBillIncreased", billId: bill.id, expenseId: expense.id, amount }];
 }
 
 const rejectField = (field: string): Rejected => ({ ok: false, reason: "validation", field });
@@ -455,6 +478,7 @@ export function apply(slice: Slice, event: Event): Slice {
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, bills: [...expense.bills, bill] } } };
     }
     case "ExpectedBillReduced":
+    case "ExpectedBillIncreased":
       return updateBill(slice, event.expenseId, event.billId, { amount: event.amount });
     case "BillRemovedFromClaim":
       return updateBill(slice, event.expenseId, event.billId, { claim: null });
