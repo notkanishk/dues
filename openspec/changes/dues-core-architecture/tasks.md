@@ -44,8 +44,8 @@ Commands (ADR 0007: Next.js 16 on Bun):
 - [ ] 2.1 Scaffold the repo (app, worker, Postgres 19, Gotenberg 9.9 in Docker; versions as pinned in ADR 0007 Compose); CI runs tests against a real Postgres; `<APP_HOST>` deploy notes stay in `private/`
 - [x] 2.2 test: money — paise in, paise out; sums exact; no float path (platform-foundations)
 - [x] 2.3 Money type and formatting (₹ Indian grouping, two decimals, paise kept as printed)
-- [ ] 2.4 test: Keys and References — UUIDv7 keys; `E-`/`B-`/`R-`/`O-` References global, unpadded, immutable (ADR 0005)
-- [ ] 2.5 Schema for Expense, Bill, Refund, Owed to university, audit log; sequences for References
+- [x] 2.4 test: Keys and References — UUIDv7 keys; `E-`/`B-`/`R-`/`O-` References global, unpadded, immutable (ADR 0005)
+- [x] 2.5 Schema for Expense, Bill, Refund, Owed to university, audit log; sequences for References
 - [ ] 2.6 test: `authenticate` on recorded tokens — no `claimant` role refused; `admin` passes ownership; role removed refused
 - [ ] 2.7 Claimants: OIDC code + PKCE login, Actor, profile (name, employee code, designation, time zone, Payment methods with match hints)
 - [ ] 2.8 test: Books `LogExpense` → `open` Expense with one expected Bill (online) or fulfilled Bill (shop/service); audit entry written in the same transaction
