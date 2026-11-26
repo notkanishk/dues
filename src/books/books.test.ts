@@ -990,4 +990,21 @@ describe("Authorization at the Actor Seam", () => {
     }
     expect(await snapshot(mickey, t)).toEqual(before);
   });
+
+  it("another Claimant's entity is not_found from every command and query, the same as one that does not exist", async () => {
+    const mickey = claimant();
+    const dexter = claimant();
+    const t = await books3000(mickey);
+    const own = await books3000(dexter);
+    const before = await snapshot(mickey, t);
+    const { LogExpense: _ownOnly, ...touching } = everyCommand(t);
+    for (const command of Object.values(touching)) {
+      expect(await books.execute(dexter, command), command.type).toEqual({ ok: false, reason: "not_found" });
+    }
+    // Dexter's own Bill into Mickey's Expense, and Mickey's Order read as Dexter.
+    expect(await books.execute(dexter, everyCommand(own, t.expenseId).MoveBill)).toEqual({ ok: false, reason: "not_found" });
+    expect(await books.expense(dexter, t.expenseId)).toEqual({ ok: false, reason: "not_found" });
+    expect(await books.order(dexter, t.expenseId)).toEqual({ ok: false, reason: "not_found" });
+    expect(await snapshot(mickey, t)).toEqual(before);
+  });
 });
