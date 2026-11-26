@@ -2,8 +2,8 @@
 import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { auditLog, bills, expenses, idempotencyKeys, refunds } from "@/src/db/schema";
-import { type Money, zero } from "@/src/money/money";
+import { auditLog, bills, expenses, idempotencyKeys, refunds, writeOffs } from "@/src/db/schema";
+import { type Money, sum } from "@/src/money/money";
 import {
   type Actor,
   apply,
@@ -58,6 +58,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   const found = rows.map((r) => r.id);
   const billRows = await q.select().from(bills).where(inArray(bills.expenseId, found)).orderBy(bills.id);
   const refundRows = await q.select().from(refunds).where(inArray(refunds.expenseId, found)).orderBy(refunds.id);
+  const writeOffRows = await q.select().from(writeOffs).where(inArray(writeOffs.expenseId, found));
   return rows.map((row) => {
     // Each Bill carries its database-issued reference with its state, so reads never pair two arrays by position.
     const ownBills: (BillState & { reference: string; cancelReason: string | null })[] = billRows
@@ -86,7 +87,9 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
         amount: money(r.amountPaise, r.currency)!,
         reason: r.reason as RefundReason,
         received: r.refundedOn !== null,
+        writtenOff: writeOffRows.some((w) => w.refundId === r.id),
       }));
+    const ownWriteOffs = writeOffRows.filter((w) => w.expenseId === row.id).map((w) => money(w.amountPaise, w.currency)!);
     const state: ExpenseState = {
       id: row.id,
       draft: row.draft,
@@ -96,7 +99,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       paidOn: row.paidOn,
       bills: ownBills,
       refunds: ownRefunds,
-      writtenOff: zero, // ponytail: nothing is written off until task 2.13d stores it
+      writtenOff: sum(ownWriteOffs), // Σ written off (FUNCTIONAL §1), every row summed
     };
     return { row, bills: ownBills, refunds: ownRefunds, state };
   });
@@ -119,6 +122,7 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
       case "MarkRefundReceived":
         return [0, await expenseOf(tx, refunds, command.refundId)];
       case "CorrectExpense":
+      case "CloseExpense":
         return [0, [command.expenseId]];
     }
   })();
@@ -139,6 +143,7 @@ function entityOf(event: Event): [Entity, string] {
   switch (event.type) {
     case "ExpenseLogged":
     case "ExpenseCorrected":
+    case "ExpenseClosed":
       return ["expense", event.expenseId];
     case "BillAdded":
     case "ExpectedBillReduced":
@@ -149,6 +154,7 @@ function entityOf(event: Event): [Entity, string] {
       return ["bill", event.billId];
     case "RefundExpected":
     case "RefundReceived":
+    case "RefundWrittenOff":
       return ["refund", event.refundId];
   }
 }
@@ -239,6 +245,18 @@ async function write(tx: Tx, event: Event, at: Date) {
     }
     case "DiffersConfirmed":
       await tx.update(bills).set({ differsFromDocument: false }).where(eq(bills.id, event.billId));
+      return;
+    case "RefundWrittenOff":
+      await tx.insert(writeOffs).values({
+        expenseId: event.expenseId,
+        refundId: event.refundId,
+        amountPaise: event.amount.paise,
+        currency: event.amount.currency,
+        createdAt: at,
+      });
+      return;
+    case "ExpenseClosed":
+      await tx.update(expenses).set({ closedReason: event.reason }).where(eq(expenses.id, event.expenseId));
       return;
     case "ExpenseCorrected": {
       const { amount, payee, paidOn } = event.changes;
@@ -334,6 +352,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
           id: row.id,
           reference: row.reference,
           status: derived.status,
+          closedReason: row.closedReason,
           openAmount: derived.openAmount,
           reason: derived.reason,
           amount: state.amount,

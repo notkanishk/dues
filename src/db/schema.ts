@@ -113,6 +113,22 @@ export const refunds = pgTable(
   ],
 );
 
+// Every written-off amount, one row each; Σ amount_paise per Expense is the "Σ written off" of the Open amount (FUNCTIONAL §1).
+// Today a row comes only from a Refund written off on closing (refund_id). The remainder "Not claiming" closes (task
+// 2.13d) joins the same way: a row with a bill_id column it adds, and undo removes the row.
+export const writeOffs = pgTable(
+  "write_offs",
+  {
+    id: key(),
+    expenseId: uuid("expense_id").notNull().references(() => expenses.id),
+    refundId: uuid("refund_id").unique().references(() => refunds.id), // a Refund is written off once
+    amountPaise: amountPaise().notNull(),
+    currency: currency(),
+    createdAt: createdAt(),
+  },
+  (t) => [check("write_offs_amount", sql`${t.amountPaise} > 0`)],
+);
+
 export const owedToUniversityReferenceSeq = pgSequence("owed_to_university_reference_seq");
 
 // open until repaid_on is set, then repaid. The Claim link arrives with the Claims table.

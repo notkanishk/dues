@@ -1,5 +1,5 @@
 {
-  "id": "771beec0-6644-40ae-9e04-b9c7c5f30dd4",
+  "id": "dd2667c8-0232-4e2e-8123-2f03ec7d33e5",
   "prevId": "384c16d3-77bf-42c8-b980-ff12dff77fbe",
   "version": "7",
   "dialect": "postgresql",
@@ -645,6 +645,98 @@
         "refunds_reason": {
           "name": "refunds_reason",
           "value": "\"refunds\".\"reason\" in ('cancelled', 'returned', 'partial')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.write_offs": {
+      "name": "write_offs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "expense_id": {
+          "name": "expense_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refund_id": {
+          "name": "refund_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount_paise": {
+          "name": "amount_paise",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'INR'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "write_offs_expense_id_expenses_id_fk": {
+          "name": "write_offs_expense_id_expenses_id_fk",
+          "tableFrom": "write_offs",
+          "tableTo": "expenses",
+          "columnsFrom": [
+            "expense_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "write_offs_refund_id_refunds_id_fk": {
+          "name": "write_offs_refund_id_refunds_id_fk",
+          "tableFrom": "write_offs",
+          "tableTo": "refunds",
+          "columnsFrom": [
+            "refund_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "write_offs_refund_id_unique": {
+          "name": "write_offs_refund_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "refund_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "write_offs_amount": {
+          "name": "write_offs_amount",
+          "value": "\"write_offs\".\"amount_paise\" > 0"
         }
       },
       "isRLSEnabled": false

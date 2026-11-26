@@ -66,6 +66,18 @@ export type CorrectBill = {
 };
 /** The Claimant confirms the document shows the edited values: the "differs from the document" mark is cleared. */
 export type ConfirmDiffers = { readonly type: "ConfirmDiffers"; readonly billId: string };
+/**
+ * Closes a draft or open Expense as personal, duplicate or written off (expense-tracking, Closing an Expense). The
+ * Claimant answers for each expected Refund: it stays expected, or it is written off.
+ */
+export type CloseExpense = {
+  readonly type: "CloseExpense";
+  readonly expenseId: string;
+  readonly reason: CloseReason;
+  readonly refunds: Readonly<Record<string, "expected" | "written_off">>;
+};
+export type CloseReason = "personal" | "duplicate" | "written_off";
+const CLOSE_REASONS: readonly string[] = ["personal", "duplicate", "written_off"] satisfies CloseReason[];
 export type Command =
   | LogExpense
   | SplitExpectedBill
@@ -75,7 +87,8 @@ export type Command =
   | MarkRefundReceived
   | CorrectExpense
   | CorrectBill
-  | ConfirmDiffers;
+  | ConfirmDiffers
+  | CloseExpense;
 /** A corrected field's value before and after, for the audit log. */
 export type Change<T> = { readonly from: T; readonly to: T };
 export type RefundReason = "cancelled" | "returned" | "partial";
@@ -138,9 +151,12 @@ export type Event =
       /** "differs from the document" after this edit: set by an edit to a Bill with a document, kept until confirmed. */
       readonly differs: boolean;
     }
-  | { readonly type: "DiffersConfirmed"; readonly billId: string; readonly expenseId: string };
+  | { readonly type: "DiffersConfirmed"; readonly billId: string; readonly expenseId: string }
+  /** An expected Refund the Claimant will not get back: it leaves Σ Refunds and its amount joins Σ written off. */
+  | { readonly type: "RefundWrittenOff"; readonly refundId: string; readonly expenseId: string; readonly amount: Money }
+  | { readonly type: "ExpenseClosed"; readonly expenseId: string; readonly reason: CloseReason };
 
-// No command enqueues a follow-up yet; the shell already writes whatever decide returns.
+// Follow-ups the shell enqueues in the command's transaction (design D8); a Reaction carries them out.
 export type Job = { readonly name: string; readonly data: unknown };
 
 export type RejectionReason =
@@ -172,7 +188,7 @@ export type BillState = {
   /** The state of the Claim it is on; a Bill is claimed from the moment it is added, draft included. Null until Claims exist (the loader fills it then). */
   claim: "draft" | "submitted" | "reimbursed" | null;
 };
-export type RefundState = { id: string; amount: Money; reason: RefundReason; received: boolean };
+export type RefundState = { id: string; amount: Money; reason: RefundReason; received: boolean; writtenOff: boolean };
 export type ExpenseState = {
   id: string;
   draft: boolean;
@@ -182,7 +198,7 @@ export type ExpenseState = {
   paidOn: string | null;
   bills: BillState[];
   refunds: RefundState[];
-  /** What "Not claiming" closed as written off (task 2.13d). Zero until that fact is stored. */
+  /** Σ written off: Refunds written off on closing, and later the remainder "Not claiming" closes (task 2.13d). */
   writtenOff: Money;
 };
 /** What a command touches, loaded by the shell under the Claimant's lock. newIds are fresh UUIDv7 keys from Postgres. */
@@ -314,19 +330,55 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (!found.bill.differs) return reject("invalid_transition");
       return ok([{ type: "DiffersConfirmed", billId: found.bill.id, expenseId: found.expense.id }]);
     }
+    case "CloseExpense": {
+      const expense = slice.expenses[command.expenseId];
+      if (!expense) return reject("not_found");
+      const { status } = deriveExpense(expense);
+      if (status !== "draft" && status !== "open") return reject("invalid_transition");
+      if (onSubmittedClaim(expense)) return reject("locked");
+      if (!CLOSE_REASONS.includes(command.reason)) return rejectField("reason");
+      // One answer for each expected Refund, and nothing else.
+      const expected = expense.refunds.filter((r) => deriveRefund(r) === "expected");
+      const answers = command.refunds ?? {};
+      const answered = expected.every((r) => answers[r.id] === "expected" || answers[r.id] === "written_off");
+      if (!answered || Object.keys(answers).length !== expected.length) return rejectField("refunds");
+      return ok(
+        [
+          // Unclaimed: a Bill on a draft Claim is claimed and stays as it is.
+          ...expense.bills
+            .filter((b) => !b.cancelled && b.claim === null)
+            .map((b): Event => ({ type: "BillCancelled", billId: b.id, expenseId: expense.id, reason: "cancelled" })),
+          ...expected
+            .filter((r) => answers[r.id] === "written_off")
+            .map((r): Event => ({ type: "RefundWrittenOff", refundId: r.id, expenseId: expense.id, amount: r.amount })),
+          { type: "ExpenseClosed", expenseId: expense.id, reason: command.reason },
+        ],
+        // Documents lose their reimb:* tag; only personal adds one (FUNCTIONAL §3.1). The Reaction finds them by Expense ID.
+        [
+          {
+            name: "paperless.setTags",
+            data: {
+              expenseId: expense.id,
+              remove: ["reimb:ready", "reimb:claimed", "reimb:reimbursed"],
+              add: command.reason === "personal" ? ["personal"] : [],
+            },
+          },
+        ],
+      );
+    }
     case "MarkRefundReceived": {
       // Not refused on a closed Expense: closing may leave a Refund still expected (FUNCTIONAL §3.1).
       const expense = Object.values(slice.expenses).find((e) => e.refunds.some((r) => r.id === command.refundId));
       const refund = expense?.refunds.find((r) => r.id === command.refundId);
       if (!expense || !refund) return reject("not_found");
-      if (refund.received) return reject("invalid_transition");
+      if (deriveRefund(refund) !== "expected") return reject("invalid_transition");
       if (!isDate(command.refundedOn)) return rejectField("refundedOn");
       return ok([{ type: "RefundReceived", refundId: refund.id, expenseId: expense.id, refundedOn: command.refundedOn }]);
     }
   }
 }
 
-const ok = (events: Event[]): Decision => ({ ok: true, events, jobs: [] });
+const ok = (events: Event[], jobs: Job[] = []): Decision => ({ ok: true, events, jobs });
 
 /** A Bill on a submitted Claim locks it and its Expense's fields (design §1). Recalled to draft, it no longer does. */
 // ponytail: reimbursed counts as submitted; the spec names only submitted.
@@ -410,7 +462,7 @@ export function apply(slice: Slice, event: Event): Slice {
       return updateBill(slice, event.expenseId, event.billId, { cancelled: true });
     case "RefundExpected": {
       const expense = slice.expenses[event.expenseId]!;
-      const refund: RefundState = { id: event.refundId, amount: event.amount, reason: event.reason, received: false };
+      const refund: RefundState = { id: event.refundId, amount: event.amount, reason: event.reason, received: false, writtenOff: false };
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, refunds: [...expense.refunds, refund] } } };
     }
     case "RefundReceived": {
@@ -422,6 +474,16 @@ export function apply(slice: Slice, event: Event): Slice {
       return updateBill(slice, event.expenseId, event.billId, { ...after(event.changes), differs: event.differs });
     case "DiffersConfirmed":
       return updateBill(slice, event.expenseId, event.billId, { differs: false });
+    case "RefundWrittenOff": {
+      const expense = slice.expenses[event.expenseId]!;
+      const refunds = expense.refunds.map((r) => (r.id === event.refundId ? { ...r, writtenOff: true } : r));
+      const writtenOff = sum([expense.writtenOff, event.amount]);
+      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, refunds, writtenOff } } };
+    }
+    case "ExpenseClosed": {
+      const expense = slice.expenses[event.expenseId]!;
+      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, closedReason: event.reason } } };
+    }
     case "ExpenseCorrected": {
       const expense = slice.expenses[event.expenseId]!;
       return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, ...after(event.changes) } } };
@@ -458,14 +520,18 @@ export function deriveBill(bill: BillState): BillStatus {
   return "expected";
 }
 
-export type RefundStatus = "expected" | "received";
-export const deriveRefund = (refund: RefundState): RefundStatus => (refund.received ? "received" : "expected");
+export type RefundStatus = "expected" | "received" | "written_off";
+export const deriveRefund = (refund: RefundState): RefundStatus =>
+  refund.received ? "received" : refund.writtenOff ? "written_off" : "expected";
 
-/** Open amount = Payment − Σ Bills (not cancelled) − Σ Refunds − written off; null while any of those amounts is blank. */
+/**
+ * Open amount = Payment − Σ Bills (not cancelled) − Σ Refunds (not written off) − Σ written off; null while any of those
+ * amounts is blank. A written-off Refund counts once, in written off.
+ */
 function openAmount(expense: ExpenseState): Money | null {
   const covering = [
     ...expense.bills.filter((b) => !b.cancelled).map((b) => b.amount),
-    ...expense.refunds.map((r) => r.amount),
+    ...expense.refunds.filter((r) => !r.writtenOff).map((r) => r.amount),
     expense.writtenOff,
   ];
   if (!expense.amount || covering.some((m) => m === null)) return null;
@@ -475,7 +541,7 @@ function openAmount(expense: ExpenseState): Money | null {
 function whyOpen(expense: ExpenseState, open: Money | null): OpenReason | null {
   const live = expense.bills.filter((b) => !b.cancelled);
   if (live.some((b) => !b.fulfilledOn)) return { code: "awaiting_goods" };
-  if (expense.refunds.some((r) => !r.received)) return { code: "refund_owed" };
+  if (expense.refunds.some((r) => deriveRefund(r) === "expected")) return { code: "refund_owed" };
   if (live.some((b) => b.paperlessId === null && b.kind !== "no_bill")) return { code: "bill_missing" };
   // The signed Open amount: positive when Bills, Refunds and written off fall short of the Payment.
   if (open && open.paise !== 0) return { code: "mismatch", amount: open };
@@ -498,6 +564,6 @@ export function deriveExpense(expense: ExpenseState): {
   if (expense.closedReason) return at("closed");
   if (expense.draft) return at("draft");
   const settled =
-    open?.paise === 0 && bills.every((b) => b === "reimbursed" || b === "cancelled") && expense.refunds.every((r) => r.received);
+    open?.paise === 0 && bills.every((b) => b === "reimbursed" || b === "cancelled") && expense.refunds.every((r) => deriveRefund(r) !== "expected");
   return settled ? at("settled") : at("open", whyOpen(expense, open));
 }

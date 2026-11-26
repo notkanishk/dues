@@ -546,3 +546,83 @@ describe("Bill corrections", () => {
     expect(await auditRowsOf(mickey)).toHaveLength(2);
   });
 });
+
+// Closing an Expense (expense-tracking; FUNCTIONAL §3.1), through execute. A submitted Claim is pinned on the pure core.
+describe("Closing an Expense", () => {
+  // ₹3,000.00 Order: ₹1,200.00 delivered, then ₹500.00 of the ₹1,800.00 remainder cancelled (an expected Refund).
+  const withRefund = async (actor: Actor) => {
+    const { expenseId, expectedBillId } = await order(actor, 300000);
+    ok(await books.execute(actor, { type: "SplitExpectedBill", billId: expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }));
+    ok(await books.execute(actor, { type: "ExpectRefund", billId: expectedBillId, amount: rupees(50000) }));
+    const expense = await read(actor, expenseId);
+    return { expenseId, refundId: expense.refunds[0]!.id };
+  };
+  const retag = (expenseId: string, add: string[]) => ({
+    name: "paperless.setTags",
+    data: { expenseId, remove: ["reimb:ready", "reimb:claimed", "reimb:reimbursed"], add },
+  });
+
+  it("Close as personal: unclaimed Bills cancelled, the ₹500.00 Refund written off, closed, and the retag job enqueued", async () => {
+    const mickey = claimant();
+    const { expenseId, refundId } = await withRefund(mickey);
+    jobs.length = 0;
+
+    ok(await books.execute(mickey, { type: "CloseExpense", expenseId, reason: "personal", refunds: { [refundId]: "written_off" } }));
+
+    const expense = await read(mickey, expenseId);
+    expect(expense).toMatchObject({ status: "closed", closedReason: "personal", reason: null });
+    expect(expense.bills.map((b) => [b.amount?.paise, b.status, b.cancelReason])).toEqual([
+      [130000, "cancelled", "cancelled"],
+      [120000, "cancelled", "cancelled"],
+    ]);
+    expect(expense.refunds).toMatchObject([{ amount: rupees(50000), status: "written_off", refundedOn: null }]);
+    // ₹3,000.00 − no live Bills − no Refunds left in Σ Refunds − ₹500.00 written off.
+    expect(expense.openAmount).toEqual(rupees(250000));
+    expect(jobs).toEqual([retag(expenseId, ["personal"])]);
+    expect((await auditRowsOf(mickey)).slice(-4).map((r) => [r.event, r.entity, r.fromState, r.toState])).toEqual([
+      ["BillCancelled", "bill", "expected", "cancelled"],
+      ["BillCancelled", "bill", "expected", "cancelled"],
+      ["RefundWrittenOff", "refund", "expected", "written_off"],
+      ["ExpenseClosed", "expense", "open", "closed"],
+    ]);
+  });
+
+  it("sums every written-off amount: ₹500.00 and ₹300.00 written off on closing count ₹800.00", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 300000);
+    ok(await books.execute(mickey, { type: "ExpectRefund", billId: expectedBillId, amount: rupees(50000) }));
+    ok(await books.execute(mickey, { type: "ExpectRefund", billId: expectedBillId, amount: rupees(30000) }));
+    const [first, second] = (await read(mickey, expenseId)).refunds;
+
+    const refunds = { [first!.id]: "written_off", [second!.id]: "written_off" } as const;
+    ok(await books.execute(mickey, { type: "CloseExpense", expenseId, reason: "written_off", refunds }));
+
+    // ₹3,000.00 − ₹800.00 written off; the ₹2,200.00 remainder Bill is cancelled.
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "closed", closedReason: "written_off", openAmount: rupees(220000) });
+  });
+
+  it("Duplicate keeps the Refund expected, adds no tag, and the Refund is still received later", async () => {
+    const mickey = claimant();
+    const { expenseId, refundId } = await withRefund(mickey);
+    jobs.length = 0;
+    ok(await books.execute(mickey, { type: "CloseExpense", expenseId, reason: "duplicate", refunds: { [refundId]: "expected" } }));
+    expect(jobs).toEqual([retag(expenseId, [])]);
+    ok(await books.execute(mickey, { type: "MarkRefundReceived", refundId, refundedOn: "2026-11-26" }));
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "closed", openAmount: rupees(250000), refunds: [{ status: "received" }] });
+  });
+
+  it("refuses closing without an answer for each expected Refund: nothing changes and no job is enqueued", async () => {
+    const mickey = claimant();
+    const { expenseId } = await withRefund(mickey);
+    const before = await auditRowsOf(mickey);
+    jobs.length = 0;
+    expect(await books.execute(mickey, { type: "CloseExpense", expenseId, reason: "personal", refunds: {} })).toEqual({
+      ok: false,
+      reason: "validation",
+      field: "refunds",
+    });
+    expect(jobs).toEqual([]);
+    expect(await auditRowsOf(mickey)).toEqual(before);
+    expect(await read(mickey, expenseId)).toMatchObject({ status: "open", closedReason: null });
+  });
+});
