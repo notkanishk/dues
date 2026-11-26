@@ -18,6 +18,7 @@ import {
   type ExpenseState,
   type ExpenseStatus,
   type Job,
+  type RefundReason,
   type Rejected,
   type Slice,
 } from "./core";
@@ -77,10 +78,10 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       bills: ownBills,
       refunds: refundRows
         .filter((r) => r.expenseId === row.id)
-        .map((r) => ({ amount: money(r.amountPaise, r.currency)!, received: r.refundedOn !== null })),
+        .map((r) => ({ id: r.id, amount: money(r.amountPaise, r.currency)!, reason: r.reason as RefundReason, received: r.refundedOn !== null })),
       writtenOff: zero, // ponytail: nothing is written off until task 2.13d stores it
     };
-    return { row, bills: ownBills, state };
+    return { row, bills: ownBills, refunds: refundRows.filter((r) => r.expenseId === row.id), state };
   });
 }
 
@@ -91,6 +92,8 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
       case "LogExpense":
         return [2, []];
       case "SplitExpectedBill":
+      case "ExpectRefund":
+      case "CancelBill":
         return [1, await expenseOfBill(tx, command.billId)];
     }
   })();
@@ -106,13 +109,18 @@ async function expenseOfBill(tx: Tx, billId: string) {
   return (await tx.select({ id: bills.expenseId }).from(bills).where(eq(bills.id, billId))).map((r) => r.id);
 }
 
-const entityOf = (event: Event): ["expense" | "bill", string] =>
-  event.type === "ExpenseLogged" ? ["expense", event.expenseId] : ["bill", event.billId];
+type Entity = "expense" | "bill" | "refund";
+const entityOf = (event: Event): [Entity, string] =>
+  event.type === "ExpenseLogged" ? ["expense", event.expenseId] : "refundId" in event ? ["refund", event.refundId] : ["bill", event.billId];
 
-function stateOf(slice: Slice, entity: "expense" | "bill", id: string): ExpenseStatus | BillStatus | null {
+function stateOf(slice: Slice, entity: Entity, id: string): ExpenseStatus | BillStatus | "expected" | "received" | null {
   if (entity === "expense") {
     const expense = slice.expenses[id];
     return expense ? deriveExpense(expense).status : null;
+  }
+  if (entity === "refund") {
+    const refund = Object.values(slice.expenses).flatMap((e) => e.refunds).find((r) => r.id === id);
+    return refund ? (refund.received ? "received" : "expected") : null;
   }
   for (const expense of Object.values(slice.expenses)) {
     const bill = expense.bills.find((b) => b.id === id);
@@ -156,6 +164,19 @@ async function write(tx: Tx, event: Event, at: Date) {
       return;
     case "ExpectedBillReduced":
       await tx.update(bills).set({ amountPaise: event.amount.paise }).where(eq(bills.id, event.billId));
+      return;
+    case "BillCancelled":
+      await tx.update(bills).set({ cancelledAt: at }).where(eq(bills.id, event.billId));
+      return;
+    case "RefundExpected":
+      await tx.insert(refunds).values({
+        id: event.refundId,
+        expenseId: event.expenseId,
+        amountPaise: event.amount.paise,
+        currency: event.amount.currency,
+        reason: event.reason,
+        createdAt: at,
+      });
       return;
   }
 }
@@ -231,7 +252,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
     async expense(actor: Actor, id: string) {
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
-      const { row, bills: billStates, state } = found;
+      const { row, bills: billStates, refunds: refundRows, state } = found;
       const derived = deriveExpense(state);
       return {
         ok: true as const,
@@ -259,6 +280,14 @@ export function createBooks({ db, now, enqueue }: Deps) {
             amount: b.amount,
             fulfilledOn: b.fulfilledOn,
             status: deriveBill(b),
+          })),
+          refunds: refundRows.map((r) => ({
+            id: r.id,
+            reference: r.reference,
+            amount: money(r.amountPaise, r.currency)!,
+            reason: r.reason as RefundReason,
+            refundedOn: r.refundedOn,
+            status: r.refundedOn === null ? ("expected" as const) : ("received" as const),
           })),
         },
       };

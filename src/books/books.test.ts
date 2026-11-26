@@ -324,4 +324,71 @@ describe("Order flow", () => {
     expect(await billsOf(mickey, expenseId)).toEqual([[300000, "expected"]]);
     expect(await auditRowsOf(mickey)).toHaveLength(2);
   });
+
+  // ₹3,000.00 Order after the first delivery: expected remainder ₹1,800.00, Fulfilled ₹1,200.00.
+  const delivered = async (actor: Actor) => {
+    const placed = await order(actor, 300000);
+    const split = ok(
+      await books.execute(actor, { type: "SplitExpectedBill", billId: placed.expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }),
+    );
+    const added = split.events[1];
+    if (added?.type !== "BillAdded") throw new Error("expected BillAdded");
+    return { ...placed, deliveredBillId: added.billId };
+  };
+  const refundsOf = async (actor: Actor, id: string) => (await read(actor, id)).refunds.map((r) => [r.amount.paise, r.reason, r.status]);
+
+  it("Partial cancellation, then Cancel everything left: ₹500.00 of ₹1,800.00, then the ₹1,300.00 remainder", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await delivered(mickey);
+
+    ok(await books.execute(mickey, { type: "ExpectRefund", billId: expectedBillId, amount: rupees(50000) }));
+    expect(await billsOf(mickey, expenseId)).toEqual([
+      [130000, "expected"],
+      [120000, "expected"],
+    ]);
+    expect(await refundsOf(mickey, expenseId)).toEqual([[50000, "cancelled", "expected"]]);
+
+    ok(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId }));
+    expect(await billsOf(mickey, expenseId)).toEqual([
+      [130000, "cancelled"],
+      [120000, "expected"],
+    ]);
+    expect(await refundsOf(mickey, expenseId)).toEqual([
+      [50000, "cancelled", "expected"],
+      [130000, "cancelled", "expected"],
+    ]);
+    const expense = await read(mickey, expenseId);
+    expect(expense).toMatchObject({ status: "open", openAmount: rupees(0), reason: { code: "refund_owed" } });
+    expect(expense.refunds[0]!.reference).toMatch(/^R-[1-9]\d*$/);
+
+    expect((await auditRowsOf(mickey)).slice(4).map((r) => [r.command, r.event, r.entity, r.fromState, r.toState])).toEqual([
+      ["ExpectRefund", "ExpectedBillReduced", "bill", "expected", "expected"],
+      ["ExpectRefund", "RefundExpected", "refund", null, "expected"],
+      ["CancelBill", "BillCancelled", "bill", "expected", "cancelled"],
+      ["CancelBill", "RefundExpected", "refund", null, "expected"],
+    ]);
+  });
+
+  it("Cancelled before fulfilment: an expected Bill of ₹800.00 → cancelled, and an expected Refund of ₹800.00", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await order(mickey, 80000);
+    ok(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId }));
+    expect(await billsOf(mickey, expenseId)).toEqual([[80000, "cancelled"]]);
+    expect(await refundsOf(mickey, expenseId)).toEqual([[80000, "cancelled", "expected"]]);
+  });
+
+  it("refuses cancelling more than the remainder, or a cancelled Bill, and changes nothing", async () => {
+    const mickey = claimant();
+    const { expenseId, expectedBillId } = await delivered(mickey);
+    expect(await books.execute(mickey, { type: "ExpectRefund", billId: expectedBillId, amount: rupees(180001) })).toEqual({
+      ok: false,
+      reason: "validation",
+      field: "amount",
+    });
+    ok(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId }));
+    const before = await auditRowsOf(mickey);
+    expect(await books.execute(mickey, { type: "CancelBill", billId: expectedBillId })).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(await refundsOf(mickey, expenseId)).toEqual([[180000, "cancelled", "expected"]]);
+    expect(await auditRowsOf(mickey)).toEqual(before);
+  });
 });

@@ -33,7 +33,12 @@ export type SplitExpectedBill = {
   readonly amount: Money;
   readonly fulfilledOn: string;
 };
-export type Command = LogExpense | SplitExpectedBill;
+/** "Item cancelled" (W2.3): part of an Order's expected remainder is cancelled; all of it cancels the expected Bill. */
+export type ExpectRefund = { readonly type: "ExpectRefund"; readonly billId: string; readonly amount: Money };
+/** Cancels an expected Bill before fulfilment, all of what is left of it (W2.3, Bill lifecycle). */
+export type CancelBill = { readonly type: "CancelBill"; readonly billId: string };
+export type Command = LogExpense | SplitExpectedBill | ExpectRefund | CancelBill;
+export type RefundReason = "cancelled" | "returned" | "partial";
 
 export type Event =
   | {
@@ -60,7 +65,15 @@ export type Event =
       readonly amount: Money;
       readonly fulfilledOn: string | null;
     }
-  | { readonly type: "ExpectedBillReduced"; readonly billId: string; readonly expenseId: string; readonly amount: Money };
+  | { readonly type: "ExpectedBillReduced"; readonly billId: string; readonly expenseId: string; readonly amount: Money }
+  | { readonly type: "BillCancelled"; readonly billId: string; readonly expenseId: string; readonly reason: "cancelled" | "returned" }
+  | {
+      readonly type: "RefundExpected";
+      readonly refundId: string;
+      readonly expenseId: string;
+      readonly amount: Money;
+      readonly reason: RefundReason;
+    };
 
 // No command enqueues a follow-up yet; the shell already writes whatever decide returns.
 export type Job = { readonly name: string; readonly data: unknown };
@@ -90,7 +103,7 @@ export type BillState = {
   /** The state of the Claim it is on; a Bill is claimed from the moment it is added, draft included. Null until Claims exist (the loader fills it then). */
   claim: "draft" | "submitted" | "reimbursed" | null;
 };
-export type RefundState = { amount: Money; received: boolean };
+export type RefundState = { id: string; amount: Money; reason: RefundReason; received: boolean };
 export type ExpenseState = {
   id: string;
   draft: boolean;
@@ -165,6 +178,21 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
         { type: "BillAdded", billId: newBillId, expenseId: expense.id, kind: null, amount: command.amount, fulfilledOn: command.fulfilledOn },
       ]);
     }
+    case "ExpectRefund":
+    case "CancelBill": {
+      const found = expectedBill(slice, command.billId);
+      if (!found.ok) return found;
+      const { expense, bill, remainder } = found;
+      if (command.type === "ExpectRefund" && (!isPayment(command.amount) || command.amount.paise > remainder)) return rejectField("amount");
+      const paise = command.type === "ExpectRefund" ? command.amount.paise : remainder;
+      const [refundId] = slice.newIds as [string];
+      return ok([
+        paise === remainder // everything left is cancelled: the expected Bill goes, its Refund covers the remainder
+          ? { type: "BillCancelled", billId: bill.id, expenseId: expense.id, reason: "cancelled" }
+          : { type: "ExpectedBillReduced", billId: bill.id, expenseId: expense.id, amount: inr(remainder - paise) },
+        { type: "RefundExpected", refundId, expenseId: expense.id, amount: inr(paise), reason: "cancelled" },
+      ]);
+    }
   }
 }
 
@@ -225,6 +253,13 @@ export function apply(slice: Slice, event: Event): Slice {
     }
     case "ExpectedBillReduced":
       return updateBill(slice, event.expenseId, event.billId, { amount: event.amount });
+    case "BillCancelled":
+      return updateBill(slice, event.expenseId, event.billId, { cancelled: true });
+    case "RefundExpected": {
+      const expense = slice.expenses[event.expenseId]!;
+      const refund: RefundState = { id: event.refundId, amount: event.amount, reason: event.reason, received: false };
+      return { ...slice, expenses: { ...slice.expenses, [expense.id]: { ...expense, refunds: [...expense.refunds, refund] } } };
+    }
   }
 }
 
