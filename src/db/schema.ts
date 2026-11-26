@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, char, check, date, foreignKey, index, integer, jsonb, pgSequence, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, bigint, boolean, char, check, date, foreignKey, index, integer, jsonb, pgSequence, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // Keys and References (ADR 0005). The key is a UUIDv7 from Postgres's own uuidv7(), so every
 // writer (app, psql, imports) gets the same time-ordered key without app code.
@@ -82,12 +82,18 @@ export const bills = pgTable(
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     // Why it was cancelled: returned is for good (expense-tracking, Return before submission); cancelled may be undone (2.13d).
     cancelReason: text("cancel_reason"),
+    // "No more invoices" (W2.9): how an Order's expected Bill was closed out; set while closed out, cleared by undo.
+    closedAs: text("closed_as"),
+    // A leftover's No bill (Claim without a bill) names the expected Bill it came from, so undo finds it.
+    fromBillId: uuid("from_bill_id").references((): AnyPgColumn => bills.id),
     createdAt: createdAt(),
   },
   (t) => [
     check("bills_reference_format", referenceFormat("B")),
     check("bills_kind", sql`${t.kind} in ('invoice', 'informal', 'payment_proof', 'no_bill')`),
     check("bills_cancel_reason", sql`${t.cancelReason} in ('cancelled', 'returned')`),
+    check("bills_closed_as", sql`${t.closedAs} in ('refund_coming', 'claim_without_bill', 'not_claiming')`),
+    unique("bills_id_expense_id_unique").on(t.id, t.expenseId), // target of write_offs' (bill_id, expense_id) key
   ],
 );
 
@@ -115,21 +121,24 @@ export const refunds = pgTable(
 );
 
 // Every written-off amount, one row each; Σ amount_paise per Expense is the "Σ written off" of the Open amount (FUNCTIONAL §1).
-// Today a row comes only from a Refund written off on closing (refund_id). The remainder "Not claiming" closes (task
-// 2.13d) joins the same way: a row with a bill_id column it adds, and undo removes the row.
+// A row names either a Refund written off on closing (refund_id) or the expected Bill whose remainder "Not claiming"
+// closed (bill_id, W2.9); undo of Not claiming removes that row.
 export const writeOffs = pgTable(
   "write_offs",
   {
     id: key(),
     expenseId: uuid("expense_id").notNull().references(() => expenses.id),
     refundId: uuid("refund_id").unique(), // a Refund is written off once, and only on its own Expense (the key below)
+    billId: uuid("bill_id").unique(), // an expected Bill's remainder likewise, once and on its own Expense
     amountPaise: amountPaise().notNull(),
     currency: currency(),
     createdAt: createdAt(),
   },
   (t) => [
     check("write_offs_amount", sql`${t.amountPaise} > 0`),
+    check("write_offs_names_one", sql`num_nonnulls(${t.refundId}, ${t.billId}) = 1`),
     foreignKey({ name: "write_offs_refund_expense_fk", columns: [t.refundId, t.expenseId], foreignColumns: [refunds.id, refunds.expenseId] }),
+    foreignKey({ name: "write_offs_bill_expense_fk", columns: [t.billId, t.expenseId], foreignColumns: [bills.id, bills.expenseId] }),
     index("write_offs_expense_id_idx").on(t.expenseId),
   ],
 );
