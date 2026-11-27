@@ -219,6 +219,18 @@ describe("Advance balance", () => {
   });
 });
 
+describe("Advance left out of range", () => {
+  it("is refused, not rounded: Payments summing past the safe-integer range throw instead of reading ₹1 short", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    ok(await setAdvance(mickey, travel, 1_000_000));
+    // 2⁵² + (2⁵² + 1) = 2⁵³ + 1 paise: each a valid Payment, their sum past Number.MAX_SAFE_INTEGER.
+    await pay(mickey, travel, 2 ** 52);
+    await pay(mickey, travel, 2 ** 52 + 1);
+    await expect(books.advances(mickey)).rejects.toThrow(RangeError);
+  });
+});
+
 describe("Closing an Expense with the Advance on", () => {
   // FUNCTIONAL §7: a duplicate is the same payment logged twice, so only one of the two is a Payment. W2.9: "With the
   // Advance on, the amount stays spent" for what is not claimed, so personal and written off stay counted.
