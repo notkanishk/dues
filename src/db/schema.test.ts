@@ -273,12 +273,23 @@ describe("Audit log", () => {
     expect(found?.toState).toBe("open");
   });
 
+  it("refuses TRUNCATE, so the log can't be emptied wholesale either", async () => {
+    // pg raises directly here (no Drizzle wrapper), so the SQLSTATE is on the error itself.
+    await expect(pool.query("truncate audit_log")).rejects.toMatchObject({ code: APPEND_ONLY });
+  });
+
   // "MUST NOT be edited", with no migration exception: no migration lifts the trigger or edits an entry.
   it("is never edited or deleted by a migration either", () => {
     const dir = new URL("../../drizzle/", import.meta.url);
+    const AUDIT = String.raw`(?:"?public"?\.)?"?audit_log"?`;
+    const forbidden = new RegExp(
+      String.raw`DISABLE\s+TRIGGER|DROP\s+TRIGGER\b[^;]*audit_log|session_replication_role|` +
+        String.raw`(?:UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?)\s+` + AUDIT,
+      "i",
+    );
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql"))) {
       const statements = readFileSync(new URL(file, dir), "utf8").replace(/--.*$/gm, "");
-      expect(statements, file).not.toMatch(/DISABLE\s+TRIGGER|(UPDATE|DELETE\s+FROM)\s+"?audit_log"?/i);
+      expect(statements, file).not.toMatch(forbidden);
     }
   });
 });
