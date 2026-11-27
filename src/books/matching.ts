@@ -102,11 +102,12 @@ const sameId = (a: string | null, b: string | null) => a !== null && b !== null 
 
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id, "en", { numeric: true });
 
-type Fit = { e: CandidateExpense; order: boolean; vendor: boolean; exact: boolean; days: number; auto: boolean };
+type Fit = { e: CandidateExpense; order: boolean; vendor: boolean; exact: boolean; inWindow: boolean; days: number; auto: boolean };
 
-/** Better fit first: order number, then vendor, then the exact amount, then the nearer date, then the lower Expense ID. */
-const betterFit = (a: Fit, b: Fit) =>
-  Number(b.order) - Number(a.order) || Number(b.vendor) - Number(a.vendor) || Number(b.exact) - Number(a.exact) || a.days - b.days || byId(a.e, b.e);
+/** Better fit first (amount leads, vendor soft): the exact amount in the window, then vendor or order number, then the nearer date, then the lower Expense ID. */
+const lead = (f: Fit) => Number(f.exact && f.inWindow);
+const matched = (f: Fit) => Number(f.order || f.vendor);
+const betterFit = (a: Fit, b: Fit) => lead(b) - lead(a) || matched(b) - matched(a) || a.days - b.days || byId(a.e, b.e);
 
 /**
  * Which of the Claimant's candidate Expenses a document belongs to. Deterministic: the same facts and candidates,
@@ -201,7 +202,7 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
       const shopMatched = shopMatches(shop, e);
       // A Payback expects a bill of its amount from any vendor (W9): the vendor check is skipped for that amount only.
       // Skipped is not passed: it ranks the Payback, but never auto-attaches it.
-      const fit = { e, order, vendor: shopMatched || (e.payback && exact), exact, days, auto: false };
+      const fit = { e, order, vendor: shopMatched || (e.payback && exact), exact, inWindow, days, auto: false };
       // A candidate: exact amount in the window, a larger online Order in the window, or the same order number.
       return (inWindow && (exact || larger)) || order ? { ...fit, auto: inWindow && (exact || larger) && (order || shopMatched) } : null;
     })
