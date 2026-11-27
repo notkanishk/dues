@@ -149,7 +149,31 @@ describe("A smaller invoice splits the Order", () => {
     ["shop matches through a learned alias", invoice(), [order("E-402", { payeeStandsFor: ["Sample Tools"] })], { type: "attach", expenseId: "E-402" }],
     ["neither matches: the only larger online Expense, with a Check", invoice(), [order("E-403", { vendor: "Fizzy Hardware" })], { type: "attachWithCheck", expenseId: "E-403", others: [] }],
     ["shop matches on day 10", invoice({ billDate: "2026-03-11" }), [order("E-404", { vendor: "Sample Tools" })], { type: "attach", expenseId: "E-404" }],
-    ["shop matches on day 11: not attached automatically", invoice({ billDate: "2026-03-12" }), [order("E-404", { vendor: "Sample Tools" })], { type: "newExpense", askVendor: false }],
+    [
+      "shop matches on day 11: not attached automatically, a Check instead of a second Expense",
+      invoice({ billDate: "2026-03-12" }),
+      [order("E-404", { vendor: "Sample Tools" })],
+      { type: "attachWithCheck", expenseId: "E-404", others: [] },
+    ],
+    [
+      "shop matches 60 days on: still a Check, for an Order waits for its invoices however long",
+      invoice({ billDate: "2026-04-30" }),
+      [order("E-404", { vendor: "Sample Tools" })],
+      { type: "attachWithCheck", expenseId: "E-404", others: [] },
+    ],
+    [
+      "two same-shop Orders outside the window: a Check on the nearer",
+      invoice({ billDate: "2026-03-20" }),
+      [order("E-410", { vendor: "Sample Tools" }), order("E-411", { vendor: "Sample Tools", paidOn: "2026-03-05" })],
+      { type: "attachWithCheck", expenseId: "E-411", others: ["E-410"] },
+    ],
+    ["another shop's Order outside the window: a new Expense", invoice({ billDate: "2026-03-12" }), [order("E-412", { vendor: "Fizzy Hardware" })], { type: "newExpense", askVendor: false }],
+    [
+      "a same-shop Order outside the window with no more open than the bill: a new Expense",
+      invoice({ billDate: "2026-03-12" }),
+      [order("E-413", { vendor: "Sample Tools", openAmount: rs(2100) })],
+      { type: "newExpense", askVendor: false },
+    ],
     [
       "order number matches on day 11: not attached automatically, a Check instead",
       invoice({ billDate: "2026-03-12", orderRef: "ORD-4870" }),
