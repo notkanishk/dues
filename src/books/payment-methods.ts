@@ -144,11 +144,11 @@ export async function writePaymentMethod(tx: Tx, event: PaymentMethodEvent, at: 
   }
 }
 
-/** The Actor's Payment methods, oldest first (keys are UUIDv7), archived included; an admin's by session, everyone's (D6). */
+/** The Actor's Payment methods, oldest first (keys are UUIDv7), archived included; an admin's by session, everyone's (D6), each with its Claimant. */
 export async function listPaymentMethods(q: Q, actor: Actor) {
   const rows = await q.select().from(paymentMethods).where(scope(actor)).orderBy(paymentMethods.id);
   return rows.map((r) => {
-    const { id, label, hints, archived } = stateOf(r);
-    return { id, label, hints, archived };
+    const { id, claimantId, label, hints, archived } = stateOf(r);
+    return { id, claimantId, label, hints, archived };
   });
 }
