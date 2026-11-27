@@ -461,7 +461,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           amount: command.amount,
           paidOn: command.paidOn,
           payee: command.payee ?? null,
-          vendor: null,
+          vendor: command.payback ? null : (command.payee ?? null),
           payback: command.payback ?? false,
           orderRef: null,
           whatFor: command.whatFor ?? null,
