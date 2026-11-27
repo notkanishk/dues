@@ -4,7 +4,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { funds, purposes } from "@/src/db/schema";
 import type { Tx } from "./books";
-import { type Actor, isAdmin, MAKERSPACE } from "./core";
+import { type Actor, isAdmin, MAKERSPACE, own } from "./core";
 import { listFunds, UUID, visible } from "./funds";
 
 /**
@@ -37,7 +37,7 @@ export function decidePurpose(slice: PurposeSlice, command: PurposeCommand, acto
     if (!slice.fundIds.includes(command.fundId)) return { ok: false, reason: "not_found" };
     return { ok: true, events: [{ type: "PurposeCreated", purposeId: slice.newId!, claimantId: actor.claimantId, fundId: command.fundId, name: command.name.trim() }] };
   }
-  const purpose = slice.purposes[command.purposeId];
+  const purpose = own(slice.purposes, command.purposeId);
   if (!purpose) return { ok: false, reason: "not_found" };
   if (!purpose.active) return { ok: false, reason: "invalid_transition" };
   return { ok: true, events: [{ type: "PurposeEnded", purposeId: purpose.id }] };

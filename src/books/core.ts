@@ -14,6 +14,9 @@ export const isAdmin = (actor: Actor) => actor.via === "session" && actor.roles.
 /** Seeded by migration 0007: the one Fund every Claimant has from the start, and the Fund an Expense is in by default. */
 export const MAKERSPACE = "00000000-0000-7000-8000-000000000001";
 
+/** A record's own entry under a key from input: never a built-in such as "constructor" or "__proto__". */
+export const own = <T>(record: Readonly<Record<string, T>>, key: string): T | undefined => (Object.hasOwn(record, key) ? record[key] : undefined);
+
 /** Where an Expense is claimed from (expense-tracking "Expense ownership and fields"): its Fund, and optionally a Purpose of that Fund. */
 type LinkFields = {
   /** Omitted: the Purpose's Fund when one is named, else where the payment goes by default (LogExpense) or where it is. */
@@ -303,9 +306,9 @@ const NO_LINKS: Links = { funds: {}, purposes: {}, fallback: { fundId: MAKERSPAC
  * into an ended Purpose; an Expense already in one keeps it.
  */
 function linkOf(links: Links, base: { fundId: string; purposeId: string | null }, command: LinkFields, isNew: boolean) {
-  const named = command.purposeId == null ? undefined : links.purposes[command.purposeId];
+  const named = command.purposeId == null ? undefined : own(links.purposes, command.purposeId);
   if (command.purposeId != null && !named) return reject("not_found");
-  if (command.fundId !== undefined && !links.funds[command.fundId]) return reject("not_found");
+  if (command.fundId !== undefined && !own(links.funds, command.fundId)) return reject("not_found");
   if (isNew && named && !named.active) return reject("invalid_transition");
   const fundId = command.fundId ?? named?.fundId ?? base.fundId;
   const purposeId = command.purposeId !== undefined ? command.purposeId : fundId === base.fundId ? base.purposeId : null;
@@ -419,7 +422,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       ]);
     }
     case "CorrectExpense": {
-      const expense = slice.expenses[command.expenseId];
+      const expense = own(slice.expenses, command.expenseId);
       if (!expense) return reject("not_found");
       if (expense.closedReason) return reject("invalid_transition");
       if (onSubmittedClaim(expense)) return reject("locked");
@@ -476,7 +479,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       return ok([{ type: "DiffersConfirmed", billId: found.bill.id, expenseId: found.expense.id }]);
     }
     case "CloseExpense": {
-      const expense = slice.expenses[command.expenseId];
+      const expense = own(slice.expenses, command.expenseId);
       if (!expense) return reject("not_found");
       const { status } = deriveExpense(expense);
       if (status !== "draft" && status !== "open") return reject("invalid_transition");
@@ -607,7 +610,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           { type: "BillMoved", billId: bill.id, fromExpenseId: expense.id, toExpenseId: expenseId },
         ]);
       }
-      const target = slice.expenses[command.toExpenseId];
+      const target = own(slice.expenses, command.toExpenseId);
       if (!target) return reject("not_found"); // the loader scoped it: another Claimant's Expense is absent
       if (target.id === expense.id || target.draft || target.closedReason) return reject("invalid_transition");
       // ponytail: a Bill never moves between two Claimants, an admin's move included; no spec allows it (D5 names only

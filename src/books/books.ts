@@ -27,6 +27,7 @@ import {
   type LogExpense,
   type CorrectExpense,
   MAKERSPACE,
+  own,
   type RefundReason,
   type RefundStatus,
   type Rejected,
@@ -185,7 +186,7 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
   const loaded = await loadExpenses(tx, actor, expenseIds);
   const expenses = Object.fromEntries(loaded.map((e) => [e.state.id, e.state]));
   // What the Expense's Claimant may link it to: a new one is the Actor's; a corrected one stays its owner's (an admin's included).
-  const owner = command.type === "LogExpense" ? actor.claimantId : command.type === "CorrectExpense" ? expenses[command.expenseId]?.claimantId : undefined;
+  const owner = command.type === "LogExpense" ? actor.claimantId : command.type === "CorrectExpense" ? own(expenses, command.expenseId)?.claimantId : undefined;
   // A new payment that names neither goes where the Actor's prompt preselects.
   const fallback = command.type === "LogExpense" ? await promptOf(tx, actor) : undefined;
   const links = owner

@@ -5,7 +5,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { funds, fundSettings, fundVersions } from "@/src/db/schema";
 import type { Tx } from "./books";
-import { type Actor, isAdmin, MAKERSPACE } from "./core";
+import { type Actor, isAdmin, MAKERSPACE, own } from "./core";
 
 export { MAKERSPACE };
 
@@ -182,10 +182,10 @@ export function decideFund(slice: FundSlice, command: FundCommand, actor: Actor)
   if (command.type === "OrderFunds") {
     const ids = command.fundIds;
     if (!Array.isArray(ids) || new Set(ids).size !== ids.length) return reject("validation", "fundIds");
-    if (ids.some((id) => !slice.funds[id])) return reject("not_found");
+    if (ids.some((id) => !own(slice.funds, id))) return reject("not_found");
     return ok({ type: "FundsOrdered", claimantId: actor.claimantId, fundIds: ids });
   }
-  const fund = slice.funds[command.fundId];
+  const fund = own(slice.funds, command.fundId);
   if (!fund) return reject("not_found");
   // identity-access: only an admin and the creator edit the team version; anyone else is offered "my version".
   const mayEditTeam = fund.creatorId === actor.claimantId || isAdmin(actor);
