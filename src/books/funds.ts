@@ -47,6 +47,8 @@ export async function listFunds(q: Q, actor: Actor, view: "settings" | "prompt")
       sharing: fund.team ? ("team" as const) : ("private" as const),
       archived: fund.archived,
       hidden: setting?.hidden ?? false,
+      /** The Actor's own Advance total on it, null while off; never another Claimant's. */
+      advance: setting?.advancePaise == null ? null : ({ paise: setting.advancePaise, currency: "INR" } as Money),
       mayEditTeam: fund.creatorId === actor.claimantId || isAdmin(actor),
       claimNamePattern: fund.claimNamePattern,
       teamVersion,
@@ -431,15 +433,7 @@ const paise = (rows: { fundId: string; paise: string | null }[]) => new Map(rows
  */
 export async function advancesOf(q: Q, actor: Actor) {
   const fundList = await listFunds(q, actor, "prompt");
-  const totals = new Map(
-    (
-      await q
-        .select({ fundId: fundSettings.fundId, paise: fundSettings.advancePaise })
-        .from(fundSettings)
-        .where(and(eq(fundSettings.claimantId, actor.claimantId), sql`${fundSettings.advancePaise} is not null`))
-    ).map((r) => [r.fundId, { paise: r.paise!, currency: "INR" as const }]),
-  );
-  const on = fundList.map((f) => f.id).filter((id) => totals.has(id));
+  const on = fundList.flatMap((f) => (f.advance ? [f.id] : []));
   const [payments, received] = on.length
     ? await Promise.all([
         q
@@ -456,7 +450,7 @@ export async function advancesOf(q: Q, actor: Actor) {
       ]).then(([p, r]) => [paise(p), paise(r)])
     : [new Map<string, Money>(), new Map<string, Money>()];
   return fundList.map((f) => {
-    const total = totals.get(f.id) ?? null;
+    const total = f.advance;
     const left = total
       ? advanceLeft({
           total,

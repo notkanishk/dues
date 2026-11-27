@@ -274,7 +274,7 @@ describe("The prompt (prompt query): Funds in the Claimant's order, and the What
   it("Default order: a Claimant who has not ordered their Funds gets Makerspace first and preselected, and no Purpose step", async () => {
     const mickey = claimant();
     const prompt = await promptOf(mickey);
-    expect(prompt.funds[0]).toEqual({ id: MAKERSPACE, name: "Makerspace", whatForHint: null });
+    expect(prompt.funds[0]).toEqual({ id: MAKERSPACE, name: "Makerspace", chip: "Makerspace", whatForHint: null });
     expect(prompt).toMatchObject({ preselectedFundId: MAKERSPACE, purposes: [], preselectedPurposeId: null });
   });
 
@@ -333,8 +333,8 @@ describe("The prompt (prompt query): Funds in the Claimant's order, and the What
     ok(await books.execute(mickey, { type: "OrderFunds", fundIds: [travel, MAKERSPACE] }));
     const mine = await promptOf(mickey);
     expect(mine.funds.slice(0, 2)).toEqual([
-      { id: travel, name: "Travel grant", whatForHint: "e.g. soldering supplies" },
-      { id: MAKERSPACE, name: "Makerspace", whatForHint: null },
+      { id: travel, name: "Travel grant", chip: "Travel grant", whatForHint: "e.g. soldering supplies" },
+      { id: MAKERSPACE, name: "Makerspace", chip: "Makerspace", whatForHint: null },
     ]);
     expect(mine.preselectedFundId).toBe(MAKERSPACE);
     expect((await promptOf(dexter)).funds[0]?.id).toBe(MAKERSPACE);
