@@ -213,7 +213,7 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
     // drawing bills once billed in full. Add a day cap if stale Orders draw Checks.
     const days = (e: CandidateExpense) => daysApart(e.paidOn, facts.billDate);
     const [best, ...rest] = candidates
-      .filter((e) => e.kind === "online" && e.openAmount.paise > facts.total.paise && shopMatches(shop, e))
+      .filter((e) => e.kind === "online" && e.openAmount.paise >= facts.total.paise && shopMatches(shop, e))
       .sort((a, b) => days(a) - days(b) || byId(a, b));
     return best ? { type: "attachWithCheck", expenseId: best.id, others: rest.map((e) => e.id) } : newExpense;
   }
