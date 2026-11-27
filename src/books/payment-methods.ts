@@ -35,16 +35,18 @@ export type PaymentMethodSlice = { readonly newId: string | null; readonly metho
 export type PaymentMethodDecision = { readonly ok: true; readonly events: readonly PaymentMethodEvent[] } | Rejected;
 
 const isLabel = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
-const isHint = (v: unknown) => v === undefined || v === null || isLabel(v);
+const isHint = (v: unknown) => v === undefined || v === null || typeof v === "string";
+/** A hint's text, trimmed; blank or whitespace-only is none. */
+const hintText = (v: unknown) => (typeof v === "string" && v.trim()) || null;
 /** The three hints, blank ones none; null when any is malformed. A card hint is its last four digits. */
 function hintsOf(input: unknown): Hints | null {
   if (input === undefined) return { bank: null, cardLast4: null, upiHandle: null };
   if (typeof input !== "object" || input === null) return null;
   const { bank, cardLast4, upiHandle } = input as Record<string, unknown>;
   if (![bank, cardLast4, upiHandle].every(isHint)) return null;
-  if (typeof cardLast4 === "string" && !/^[0-9]{4}$/.test(cardLast4.trim())) return null;
-  const trimmed = (v: unknown) => (typeof v === "string" ? v.trim() : null);
-  return { bank: trimmed(bank), cardLast4: trimmed(cardLast4), upiHandle: trimmed(upiHandle) };
+  const hints = { bank: hintText(bank), cardLast4: hintText(cardLast4), upiHandle: hintText(upiHandle) };
+  if (hints.cardLast4 !== null && !/^[0-9]{4}$/.test(hints.cardLast4)) return null;
+  return hints;
 }
 
 /** Pure: what a Payment method command does, given what the Actor reaches. */
