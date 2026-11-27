@@ -41,6 +41,14 @@ export const expenses = pgTable(
     payback: boolean("payback").notNull().default(false),
     orderRef: text("order_ref"),
     whatFor: text("what_for"),
+    // Every Expense is claimed from a Fund (expense-tracking "Expense ownership and fields"); Makerspace, the preselected
+    // one, by default, which is also where an Expense logged before Funds existed goes. Migration 0007 seeds it.
+    fundId: uuid("fund_id")
+      .notNull()
+      .default("00000000-0000-7000-8000-000000000001")
+      .references((): AnyPgColumn => funds.id),
+    // Optional; a Purpose of the same Fund and the same Claimant (expenses_purpose_fk).
+    purposeId: uuid("purpose_id"),
     upiRef: text("upi_ref"),
     source: text("source"),
     notes: text("notes"),
@@ -53,6 +61,11 @@ export const expenses = pgTable(
     check("expenses_kind", sql`${t.kind} in ('online', 'shop', 'service')`),
     check("expenses_source", sql`${t.source} in ('manual', 'document', 'amazon', 'back-fill')`),
     check("expenses_closed_reason", sql`${t.closedReason} in ('personal', 'duplicate', 'written_off')`),
+    foreignKey({
+      name: "expenses_purpose_fk",
+      columns: [t.purposeId, t.fundId, t.claimantId],
+      foreignColumns: [purposes.id, purposes.fundId, purposes.claimantId],
+    }),
   ],
 );
 

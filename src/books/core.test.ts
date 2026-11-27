@@ -1535,7 +1535,7 @@ describe("MoveBill and DetachBill", () => {
 
   it("Detach keeps the Order's Fund and Purpose on the new Expense", () => {
     const slice = twoExpenses();
-    slice.expenses["e-1"] = { ...slice.expenses["e-1"]!, fundId: "f-travel", purposeId: "p-trip" };
+    Object.assign(slice.expenses["e-1"]!, { fundId: "f-travel", purposeId: "p-trip" });
     const { decision, slice: after } = run(slice, detach(), ["e-3"]);
     expect(decision.ok && decision.events[1]).toMatchObject({ type: "ExpenseLogged", fundId: "f-travel", purposeId: "p-trip" });
     expect(after.expenses["e-3"]).toMatchObject({ fundId: "f-travel", purposeId: "p-trip" });

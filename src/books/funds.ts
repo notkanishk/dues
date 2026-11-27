@@ -5,10 +5,9 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { funds, fundSettings, fundVersions } from "@/src/db/schema";
 import type { Tx } from "./books";
-import { type Actor, isAdmin } from "./core";
+import { type Actor, isAdmin, MAKERSPACE } from "./core";
 
-/** Seeded by migration 0007: the one Fund every Claimant has from the start. */
-export const MAKERSPACE = "00000000-0000-7000-8000-000000000001";
+export { MAKERSPACE };
 
 export type Mail = { readonly to: readonly string[]; readonly cc: readonly string[]; readonly subject: string; readonly body: string };
 /** What "my version" may override (claims, "Personal versions and the snapshot"). */
@@ -22,7 +21,7 @@ const OVERRIDABLE = ["mail", "formTemplate", "fileNamePattern", "whatForHint"] a
 
 type Q = Pick<NodePgDatabase, "select">;
 /** The Funds a Claimant has: their own and every team Fund. */
-export const visible = (actor: Actor) => or(eq(funds.team, true), eq(funds.creatorId, actor.claimantId));
+export const visible = (who: Pick<Actor, "claimantId">) => or(eq(funds.team, true), eq(funds.creatorId, who.claimantId));
 /** An admin reaches every Fund (D6); anyone else the Funds they have. */
 const reachable = (actor: Actor) => (isAdmin(actor) ? undefined : visible(actor));
 

@@ -2,7 +2,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { auditLog, bills, expenses, idempotencyKeys, refunds, writeOffs } from "@/src/db/schema";
+import { auditLog, bills, expenses, funds as fundsTable, idempotencyKeys, purposes, refunds, writeOffs } from "@/src/db/schema";
 import { type Money, sum } from "@/src/money/money";
 import {
   type Actor,
@@ -23,12 +23,16 @@ import {
   type ExpenseState,
   type ExpenseStatus,
   type Job,
+  type Links,
+  type LogExpense,
+  type CorrectExpense,
+  MAKERSPACE,
   type RefundReason,
   type RefundStatus,
   type Rejected,
   type Slice,
 } from "./core";
-import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, templatesOf, UUID, writeFund } from "./funds";
+import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, templatesOf, UUID, visible, writeFund } from "./funds";
 import { decidePurpose, isPurposeCommand, listPurposes, loadPurposeSlice, type PurposeCommand, type PurposeEvent, purposeEntries, purposeOwners, writePurpose } from "./purposes";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
@@ -120,6 +124,8 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       payee: row.payee,
       paidOn: row.paidOn,
       whatFor: row.whatFor,
+      fundId: row.fundId,
+      purposeId: row.purposeId,
       bills: ownBills,
       refunds: ownRefunds,
       writtenOff: sum(ownWriteOffs), // Σ written off (FUNCTIONAL §1), every row summed
@@ -177,7 +183,26 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
   // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
   const { rows } = await tx.execute<{ id: string }>(sql`select uuidv7() as id from generate_series(1, ${count})`);
   const loaded = await loadExpenses(tx, actor, expenseIds);
-  return { newIds: rows.map((r) => r.id), expenses: Object.fromEntries(loaded.map((e) => [e.state.id, e.state])) };
+  const expenses = Object.fromEntries(loaded.map((e) => [e.state.id, e.state]));
+  // What the Expense's Claimant may link it to: a new one is the Actor's; a corrected one stays its owner's (an admin's included).
+  const owner = command.type === "LogExpense" ? actor.claimantId : command.type === "CorrectExpense" ? expenses[command.expenseId]?.claimantId : undefined;
+  const links = owner ? await linksFor(tx, owner, command as LogExpense | CorrectExpense) : undefined;
+  return { newIds: rows.map((r) => r.id), expenses, ...(links && { links }) };
+}
+
+/** The Fund and Purpose the command names, if the Expense's Claimant has them (else absent: not_found), and the default. */
+async function linksFor(tx: Tx, claimantId: string, command: LogExpense | CorrectExpense): Promise<Links> {
+  const [fund] = typeof command.fundId === "string" && UUID.test(command.fundId)
+    ? await tx.select({ id: fundsTable.id }).from(fundsTable).where(and(eq(fundsTable.id, command.fundId), visible({ claimantId })))
+    : [];
+  const [purpose] = typeof command.purposeId === "string" && UUID.test(command.purposeId)
+    ? await tx.select().from(purposes).where(and(eq(purposes.id, command.purposeId), eq(purposes.claimantId, claimantId)))
+    : [];
+  return {
+    funds: fund ? { [fund.id]: true } : {},
+    purposes: purpose ? { [purpose.id]: { fundId: purpose.fundId, active: purpose.active } } : {},
+    fallback: { fundId: MAKERSPACE, purposeId: null },
+  };
 }
 
 // Unscoped on purpose: loadExpenses applies the Actor's scope next, so another Claimant's Bill or Refund loads nothing.
@@ -253,6 +278,8 @@ async function write(tx: Tx, event: Event, at: Date) {
         payback: event.payback,
         orderRef: event.orderRef,
         whatFor: event.whatFor,
+        fundId: event.fundId,
+        purposeId: event.purposeId,
         upiRef: event.upiRef,
         notes: event.notes,
         source: event.source,
@@ -354,13 +381,16 @@ async function write(tx: Tx, event: Event, at: Date) {
       await tx.update(expenses).set({ closedReason: event.reason }).where(eq(expenses.id, event.expenseId));
       return;
     case "ExpenseCorrected": {
-      const { amount, payee, paidOn } = event.changes;
+      const { amount, payee, paidOn, fundId, purposeId, whatFor } = event.changes;
       await tx
         .update(expenses)
         .set({
           ...(amount && { amountPaise: amount.to?.paise ?? null }),
           ...(payee && { payee: payee.to }),
           ...(paidOn && { paidOn: paidOn.to }),
+          ...(fundId && { fundId: fundId.to }),
+          ...(purposeId && { purposeId: purposeId.to }),
+          ...(whatFor && { whatFor: whatFor.to }),
         })
         .where(eq(expenses.id, event.expenseId));
       return;
@@ -559,6 +589,8 @@ export function createBooks({ db, now, enqueue }: Deps) {
           payback: row.payback,
           orderRef: row.orderRef,
           whatFor: row.whatFor,
+          fundId: row.fundId,
+          purposeId: row.purposeId,
           upiRef: row.upiRef,
           notes: row.notes,
           source: row.source,
