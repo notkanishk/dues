@@ -94,16 +94,18 @@ export type OrderFunds = { readonly type: "OrderFunds"; readonly fundIds: readon
 /** Hides a Fund from the Actor's own prompt, or shows it again. */
 export type HideFund = { readonly type: "HideFund"; readonly fundId: string; readonly hidden: boolean };
 export type FundCommand = CreateFund | EditFund | ShareFund | ArchiveFund | SetPersonalVersion | ResetToTeamVersion | OrderFunds | HideFund;
-const FUND_COMMANDS: readonly string[] = [
-  "CreateFund",
-  "EditFund",
-  "ShareFund",
-  "ArchiveFund",
-  "SetPersonalVersion",
-  "ResetToTeamVersion",
-  "OrderFunds",
-  "HideFund",
-] satisfies FundCommand["type"][];
+/** Every Fund command, once: the type makes a new one fail the typecheck until it is listed here. */
+const FUND_COMMAND_TYPES: Record<FundCommand["type"], true> = {
+  CreateFund: true,
+  EditFund: true,
+  ShareFund: true,
+  ArchiveFund: true,
+  SetPersonalVersion: true,
+  ResetToTeamVersion: true,
+  OrderFunds: true,
+  HideFund: true,
+};
+const FUND_COMMANDS: readonly string[] = Object.keys(FUND_COMMAND_TYPES);
 export const isFundCommand = (command: { type: string }): command is FundCommand => FUND_COMMANDS.includes(command.type);
 /** Commands on the Fund's own row (its team version); the rest change only the Actor's own settings. */
 const ON_THE_FUND: readonly string[] = ["EditFund", "ShareFund", "ArchiveFund"] satisfies FundCommand["type"][];
