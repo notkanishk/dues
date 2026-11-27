@@ -191,6 +191,8 @@ describe("Bill for a Payback matches on amount and date", () => {
   });
 });
 
+const NEW_EXPENSE: Proposal = { type: "newExpense", askVendor: false };
+
 const payment = (over: Partial<PaymentFacts> = {}): PaymentFacts => ({
   type: "payment",
   amount: rs(1180),
@@ -261,5 +263,34 @@ describe("\"Same payment as E-x?\" without a reference", () => {
 
   it("a confirmation with a readable reference gets no offer", () => {
     expect(propose(payment({ amount: null }), [unreadable("E-901", "2026-03-06T09:08:10Z")])).toEqual({ type: "newExpense", askVendor: false });
+  });
+});
+
+describe("One Payment for several invoices", () => {
+  const inv = (id: string, rupees: number, over: Partial<CandidateExpense> = {}) => invoiceOnly(id, { payment: rs(rupees), ...over });
+
+  it.each<[string, PaymentFacts, CandidateExpense[], Proposal]>([
+    ["₹1,500.00 for invoices of ₹900.00 and ₹600.00: merge suggested", payment({ amount: rs(1500) }), [inv("E-951", 900), inv("E-952", 600)], { type: "mergeSuggestion", expenseIds: ["E-951", "E-952"] }],
+    ["sum within ±₹1: ₹1,499.50", payment({ amount: rs(1499, 50) }), [inv("E-951", 900), inv("E-952", 600)], { type: "mergeSuggestion", expenseIds: ["E-951", "E-952"] }],
+    ["sum ₹1.01 off: none", payment({ amount: rs(1498, 99) }), [inv("E-951", 900), inv("E-952", 600)], NEW_EXPENSE],
+    [
+      "three invoices",
+      payment({ amount: rs(1500) }),
+      [inv("E-951", 500), inv("E-952", 600), inv("E-953", 400), inv("E-954", 250)],
+      { type: "mergeSuggestion", expenseIds: ["E-951", "E-952", "E-953"] },
+    ],
+    ["four invoices: no merge suggested", payment({ amount: rs(1500) }), [inv("E-951", 400), inv("E-952", 400), inv("E-953", 400), inv("E-954", 300)], NEW_EXPENSE],
+    ["two vendors: none", payment({ amount: rs(1500) }), [inv("E-951", 900), inv("E-952", 600, { vendor: "Fizzy Hardware" })], NEW_EXPENSE],
+    ["an invoice 11 days from the payment: none", payment({ amount: rs(1500) }), [inv("E-951", 900), inv("E-952", 600, { paidOn: "2026-02-23" })], NEW_EXPENSE],
+    ["an invoice 10 days from the payment: suggested", payment({ amount: rs(1500) }), [inv("E-951", 900), inv("E-952", 600, { paidOn: "2026-02-24" })], { type: "mergeSuggestion", expenseIds: ["E-951", "E-952"] }],
+    ["an Expense that has its Payment proof is not invoice-only: none", payment({ amount: rs(1500) }), [inv("E-951", 900), inv("E-952", 600, { invoiceOnly: false })], NEW_EXPENSE],
+    [
+      "of two pairs, the nearer sum wins",
+      payment({ amount: rs(1500) }),
+      [inv("E-951", 900), inv("E-952", 600, { paidOn: "2026-03-01" }), inv("E-953", 599, { paidOn: "2026-03-05" })],
+      { type: "mergeSuggestion", expenseIds: ["E-951", "E-952"] },
+    ],
+  ])("%s", (_, facts, candidates, expected) => {
+    expect(propose(facts, candidates)).toEqual(expected);
   });
 });
