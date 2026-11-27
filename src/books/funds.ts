@@ -439,7 +439,9 @@ export async function advancesOf(q: Q, actor: Actor) {
         q
           .select({ fundId: expenses.fundId, paise: sql<string | null>`sum(${expenses.amountPaise})` })
           .from(expenses)
-          .where(and(eq(expenses.claimantId, actor.claimantId), inArray(expenses.fundId, on)))
+          // A duplicate is the same payment logged twice (FUNCTIONAL §7), so it is no Payment; personal and written off
+          // stay spent (W2.9).
+          .where(and(eq(expenses.claimantId, actor.claimantId), inArray(expenses.fundId, on), sql`${expenses.closedReason} is distinct from 'duplicate'`))
           .groupBy(expenses.fundId),
         q
           .select({ fundId: expenses.fundId, paise: sql<string | null>`sum(${refunds.amountPaise})` })
