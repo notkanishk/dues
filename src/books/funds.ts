@@ -237,7 +237,7 @@ const idsOf = (command: FundCommand) =>
 /**
  * Whose lock a Fund command takes (D5): the Fund's creator for a change to the Fund itself, so the creator's and an
  * admin's edits queue; the Actor's own for their order, hiding and version. A creator never changes, so it is not
- * re-checked under the lock; Makerspace has none, and its row lock (FOR UPDATE in loadFundSlice) serialises its edits.
+ * re-checked under the lock; Makerspace has none, and its row lock (FOR UPDATE in loadFundSlice) serialises its edits and archive.
  */
 export async function fundOwners(tx: Tx, actor: Actor, command: FundCommand): Promise<string[]> {
   if (!ON_THE_FUND.includes(command.type)) return [actor.claimantId];
@@ -250,7 +250,13 @@ export async function loadFundSlice(tx: Tx, actor: Actor, command: FundCommand):
   const newId =
     command.type === "CreateFund" ? (await tx.execute<{ id: string }>(sql`select uuidv7() as id`)).rows[0]!.id : null;
   if (ids.length === 0) return { newId, funds: {} };
-  const rows = await tx.select().from(funds).where(and(inArray(funds.id, ids), reachable(actor))).for("update");
+  // A change to the Fund takes its row for update, so its edits queue. A command on the Actor's own settings only shares
+  // it: the Fund stays as read until it commits, and many Claimants' orders and versions never queue on each other.
+  const rows = await tx
+    .select()
+    .from(funds)
+    .where(and(inArray(funds.id, ids), reachable(actor)))
+    .for(ON_THE_FUND.includes(command.type) ? "update" : "share");
   const mine = await tx.select().from(fundVersions).where(and(inArray(fundVersions.fundId, ids), eq(fundVersions.claimantId, actor.claimantId)));
   const settings = await tx.select().from(fundSettings).where(and(inArray(fundSettings.fundId, ids), eq(fundSettings.claimantId, actor.claimantId)));
   const states = rows.map((row): FundState => {
