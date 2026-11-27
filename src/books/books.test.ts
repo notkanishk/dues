@@ -1088,6 +1088,44 @@ describe("Authorization at the Actor Seam", () => {
     expect(await auditRowsOf(minnie)).toEqual([]);
   });
 
+  // A writer holds Mickey's lock and, once released by move(), puts Mickey's delivered Bill into another Expense.
+  const holdAndMove = async (owner: Actor, billId: string, toExpenseId: string) => {
+    let go!: () => void;
+    const went = new Promise<void>((r) => (go = r));
+    let locked!: () => void;
+    const isLocked = new Promise<void>((r) => (locked = r));
+    const writer = db.transaction(async (tx) => {
+      await lockClaimant(tx, owner.claimantId);
+      locked();
+      await went;
+      // ponytail: no Books command moves a Bill between Claimants any more, so the owner change is written directly.
+      await tx.update(bills).set({ expenseId: toExpenseId }).where(eq(bills.id, billId));
+    });
+    await isLocked;
+    return async () => {
+      go();
+      await writer;
+    };
+  };
+
+  it("a move whose Bill changes owner while it waits is decided only under the new owner's lock", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const minnie = admin();
+    const from = await books3000(mickey);
+    const to = await order(mickey, 500000);
+    const elsewhere = await order(dexter, 500000);
+    const move = await holdAndMove(mickey, from.deliveredBillId, elsewhere.expenseId);
+    const moving = books.execute(minnie, { type: "MoveBill", billId: from.deliveredBillId, toExpenseId: to.expenseId });
+    expect(await settle(moving)).toBe("waiting");
+    const releaseDexter = await holdLocks(dexter.claimantId);
+    await move();
+    // The Bill is now in Dexter's books, whose lock the command never took: it reruns and waits for it.
+    expect(await settle(moving)).toBe("waiting");
+    await releaseDexter();
+    expect(await moving).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(await auditRowsOf(minnie)).toEqual([]);
+  });
+
   it("what an admin's command creates belongs to the Claimant it acts for; what an admin logs is the admin's own", async () => {
     const mickey = claimant();
     const root = admin();

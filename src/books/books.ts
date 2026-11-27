@@ -387,6 +387,8 @@ export function createBooks({ db, now, enqueue }: Deps) {
       }
 
       const slice = await loadSlice(tx, actor, command);
+      // Nothing is decided on a Claimant whose lock is not held: a Bill changed owner after the owners were read. Rerun.
+      if (Object.values(slice.expenses).some((e) => !owners.includes(e.claimantId))) throw new OwnersMoved();
       const at = now();
       const decision = decide(slice, command, actor, at);
       if (!decision.ok) return decision; // a rejected command changes nothing
@@ -412,7 +414,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
           idempotencyKey: i === 0 ? (key ?? null) : null,
         };
       });
-      // Every change is to a Claimant whose lock is held; else a Bill changed owner before the lock (rerun), never written unlocked.
+      // And nothing is written to one: what a command creates is the Actor's or a locked owner's (checked, not assumed).
       if (entries.some((e) => !owners.includes(e.ownerId))) throw new OwnersMoved();
       if (entries.length) await tx.insert(auditLog).values(entries); // a correction that keeps every value writes nothing
       for (const event of decision.events) await write(tx, event, at);
