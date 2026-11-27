@@ -544,4 +544,33 @@ describe("Fund commands in Books' shell", () => {
       await resetMakerspace();
     }
   });
+
+  it("a Claimant's own order, hiding and version share Makerspace's row with others in flight; an admin's edit waits for them", async () => {
+    const [dexter, minnie] = [claimant(), admin()];
+    const settled = (p: Promise<unknown>, ms: number) => Promise.race([p.then(() => "done"), new Promise((r) => setTimeout(r, ms, "waiting"))]);
+    // Another Claimant's per-Claimant command still open on Makerspace.
+    const inFlight = await pool.connect();
+    let edit: Promise<Result> | undefined;
+    try {
+      await inFlight.query("begin");
+      await inFlight.query("select 1 from funds where id = $1 for share", [MAKERSPACE]);
+      for (const command of [
+        { type: "OrderFunds", fundIds: [MAKERSPACE] },
+        { type: "HideFund", fundId: MAKERSPACE, hidden: true },
+        { type: "SetPersonalVersion", fundId: MAKERSPACE, whatForHint: "e.g. mine" },
+        { type: "ResetToTeamVersion", fundId: MAKERSPACE },
+      ] as const)
+        expect(await settled(books.execute(dexter, command), 2_000), command.type).toBe("done");
+      edit = books.execute(minnie, { type: "EditFund", fundId: MAKERSPACE, notes: "Checked by the office" });
+      expect(await settled(edit, 300)).toBe("waiting");
+    } finally {
+      await inFlight.query("commit");
+      inFlight.release();
+    }
+    try {
+      expect(await edit).toMatchObject({ ok: true });
+    } finally {
+      await resetMakerspace();
+    }
+  });
 });
