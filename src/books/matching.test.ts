@@ -475,26 +475,49 @@ describe("propose properties", () => {
     }
   });
 
+  // The oracle reads only the spec ("Auto-attach only on a strong match", "A smaller invoice splits the Order"), the
+  // generator's own day offsets and plain name equality; it never asks propose how it reads names, dates or Paybacks.
+  const oracle = (facts: BillFacts, candidates: readonly CandidateExpense[], offsets: Map<string, number>) => {
+    const inWindow = (c: CandidateExpense) => Math.abs(offsets.get(c.id)!) <= 10;
+    const exact = (c: CandidateExpense) => c.openAmount.paise === facts.total.paise;
+    const larger = (c: CandidateExpense) => c.kind === "online" && c.openAmount.paise > facts.total.paise;
+    const order = (c: CandidateExpense) => facts.orderRef !== null && c.orderRef === facts.orderRef;
+    const shop = facts.platform ?? facts.vendor;
+    const vendor = (c: CandidateExpense) => shop !== null && [c.vendor, c.payee, ...c.payeeStandsFor].includes(shop);
+    const candidate = (c: CandidateExpense) => (inWindow(c) && (exact(c) || larger(c))) || order(c);
+    const count = candidates.filter(candidate).length;
+    return {
+      /** May auto-attach: the spec's conditions, nothing more. */
+      allowed: (e: CandidateExpense) => inWindow(e) && ((exact(e) && (vendor(e) || order(e) || count === 1)) || (larger(e) && (order(e) || vendor(e)))),
+      /** Must auto-attach: exact, in the window, vendor or order number matches, and no other exact candidate. */
+      strong: (e: CandidateExpense) => inWindow(e) && exact(e) && (vendor(e) || order(e)) && !candidates.some((c) => c !== e && candidate(c) && exact(c)),
+    };
+  };
+
   it("attaches a bill only when the auto-attach conditions hold", () => {
     let attaches = 0;
     for (let seed = 1; seed <= RUNS; seed++) {
       const { facts, candidates, offsets } = world(seed);
-      if (facts.type !== "bill") continue;
+      if (facts.type !== "bill" || facts.expenseId !== null) continue;
       const p = propose(facts, candidates);
       if (p.type !== "attach") continue;
       attaches++;
-      const e = candidates.find((c) => c.id === p.expenseId)!;
-      if (facts.expenseId === e.id) continue;
-      const inWindow = (c: CandidateExpense) => Math.abs(offsets.get(c.id)!) <= 10;
-      const exact = (c: CandidateExpense) => c.openAmount.paise === facts.total.paise;
-      const larger = (c: CandidateExpense) => c.kind === "online" && c.openAmount.paise > facts.total.paise;
-      const order = (c: CandidateExpense) => facts.orderRef !== null && c.orderRef === facts.orderRef;
-      const shop = facts.platform ?? facts.vendor;
-      const vendor = (c: CandidateExpense) => c.payback || (shop !== null && [c.vendor, c.payee, ...c.payeeStandsFor].includes(shop));
-      const candidateCount = candidates.filter((c) => (inWindow(c) && (exact(c) || larger(c))) || order(c)).length;
-      const strong = inWindow(e) && ((exact(e) && (vendor(e) || order(e) || candidateCount === 1)) || (larger(e) && (order(e) || vendor(e))));
-      expect(strong, `seed ${seed}`).toBe(true);
+      expect(oracle(facts, candidates, offsets).allowed(candidates.find((c) => c.id === p.expenseId)!), `seed ${seed}`).toBe(true);
     }
     expect(attaches).toBeGreaterThan(50); // the generator does reach the rule
   });
+
+  it("does attach a bill on a strong match", () => {
+    let strong = 0;
+    for (let seed = 1; seed <= RUNS; seed++) {
+      const { facts, candidates, offsets } = world(seed);
+      if (facts.type !== "bill" || facts.expenseId !== null) continue;
+      const e = candidates.find(oracle(facts, candidates, offsets).strong);
+      if (!e) continue;
+      strong++;
+      expect(propose(facts, candidates), `seed ${seed}`).toEqual({ type: "attach", expenseId: e.id });
+    }
+    expect(strong).toBeGreaterThan(50);
+  });
+
 });
