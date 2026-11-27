@@ -1264,4 +1264,36 @@ describe("Authorization at the Actor Seam", () => {
     const accepted = names.filter((n) => outcomes.has(`${n}:ok`));
     expect(accepted).toEqual(names.filter((n) => n !== "CorrectBill" && n !== "ConfirmDiffers"));
   }, 60_000);
+
+  it("an id that names a built-in property (constructor, __proto__, toString) is refused as not_found or validation, never thrown", async () => {
+    const mickey = claimant();
+    const t = await books3000(mickey);
+    const before = await snapshot(mickey, t);
+    for (const id of ["constructor", "__proto__", "toString"]) {
+      const all = everyCommand(t, id);
+      const commands = [
+        ...Object.values(everyCommand({ expenseId: id, expectedBillId: id, deliveredBillId: id, refundId: id, purposeId: id })),
+        all.MoveBill,
+        { ...all.CloseExpense, refunds: { [id]: "expected" as const } },
+        logExpense("shop", 100, { fundId: id }),
+        logExpense("shop", 100, { purposeId: id }),
+        { type: "CorrectExpense" as const, expenseId: t.expenseId, fundId: id },
+        { type: "CorrectExpense" as const, expenseId: t.expenseId, purposeId: id },
+        { type: "EditFund" as const, fundId: id, name: "Travel grant" },
+        { type: "ShareFund" as const, fundId: id },
+        { type: "ArchiveFund" as const, fundId: id },
+        { type: "HideFund" as const, fundId: id, hidden: true },
+        { type: "OrderFunds" as const, fundIds: [id] },
+        { type: "CreatePurpose" as const, name: "Robotics trip", fundId: id },
+        { type: "EndPurpose" as const, purposeId: id },
+      ];
+      for (const command of commands) {
+        // LogExpense with every id real is the one command here that may go through.
+        if (command.type === "LogExpense" && !("fundId" in command) && !("purposeId" in command)) continue;
+        const result = await books.execute(mickey, command);
+        expect(result.ok ? "ok" : result.reason, `${command.type} ${JSON.stringify(command)}`).toMatch(/^(not_found|validation)$/);
+      }
+    }
+    expect(await snapshot(mickey, t)).toEqual(before);
+  }, 30_000);
 });
