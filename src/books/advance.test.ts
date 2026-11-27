@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
 import { auditLog } from "@/src/db/schema";
 import { createBooks, type Result } from "./books";
-import { type Actor, type LogExpense, MAKERSPACE } from "./core";
+import { type Actor, type CloseReason, type LogExpense, MAKERSPACE } from "./core";
 
 // The Advance through Books' Interface against a real Postgres (DATABASE_URL): identity-access "Advance is a personal
 // amount on a Fund"; expense-tracking "Advance balance", "Home lists and the Advance block", "Funds and Purposes work with
@@ -219,6 +219,24 @@ describe("Advance balance", () => {
   });
 });
 
+describe("Closing an Expense with the Advance on", () => {
+  // FUNCTIONAL §7: a duplicate is the same payment logged twice, so only one of the two is a Payment. W2.9: "With the
+  // Advance on, the amount stays spent" for what is not claimed, so personal and written off stay counted.
+  it.each([
+    ["duplicate", "counts the payment once: two ₹2,500.00 Expenses, one closed as duplicate, leave ₹7,500.00", 750_000],
+    ["personal", "stays spent: two ₹2,500.00 Expenses, one closed as personal, leave ₹5,000.00", 500_000],
+    ["written_off", "stays spent: two ₹2,500.00 Expenses, one closed as written off, leave ₹5,000.00", 500_000],
+  ] as const)("closed as %s %s", async (reason, _, left) => {
+    const mickey = claimant();
+    ok(await setAdvance(mickey, MAKERSPACE, 1_000_000));
+    await pay(mickey, MAKERSPACE, 250_000);
+    const { expenseId } = await pay(mickey, MAKERSPACE, 250_000);
+    expect(await leftOf(mickey, MAKERSPACE)).toBe(500_000);
+    ok(await books.execute(mickey, { type: "CloseExpense", expenseId, reason, refunds: {} }));
+    expect(await leftOf(mickey, MAKERSPACE)).toBe(left);
+  });
+});
+
 describe("Home Advance block", () => {
   // ₹10,000.00 total; ₹15% of it is ₹1,500.00.
   const leftAt = async (left: number) => {
@@ -314,7 +332,8 @@ describe("Funds on the upload prompt: the chip", () => {
 
 // Property (expense-tracking "Advance balance"): for random command sequences across two Funds, every Advance left the
 // query returns equals the formula worked out here from the commands Books accepted, independently of how Books stores
-// or sums them: total − Σ Payments + Σ Refunds received (+ Σ Reimbursements received, none before Claims).
+// or sums them: total − Σ Payments + Σ Refunds received (+ Σ Reimbursements received, none before Claims), where an
+// Expense closed as duplicate is no Payment (FUNCTIONAL §7) and one closed as personal or written off still is (W2.9).
 describe("Advance left, for any command sequence across two Funds", () => {
   // ponytail: a seeded generator instead of a property-testing dependency, as in core.test.ts; same seed, same runs.
   let seed = 0xad7a;
@@ -336,11 +355,22 @@ describe("Advance left, for any command sequence across two Funds", () => {
       // Both on from the start, so most steps check a live Advance; SetAdvance turns one off a quarter of the time.
       const total: Record<string, number | null> = { [MAKERSPACE]: 1_000_000, [travel]: 500_000 };
       for (const fundId of fundIds) ok(await setAdvance(mickey, fundId, total[fundId]!));
-      const model: { expenseId: string; billId: string; fundId: string; paise: number; online: boolean; refunds: { id: string; paise: number; received: boolean }[] }[] = [];
+      const model: {
+        expenseId: string;
+        billId: string;
+        fundId: string;
+        paise: number;
+        /** An Order whose expected Bill is still there: a Refund can come from it. */
+        awaiting: boolean;
+        closed: CloseReason | null;
+        refunds: { id: string; paise: number; received: boolean }[];
+      }[] = [];
       for (let step = 0; step < 30; step++) {
         const expense = model.length ? pick(model) : undefined;
-        const refund = expense && expense.refunds.length ? pick(expense.refunds) : undefined;
-        const roll = next() % 8;
+        // Any Refund still expected, on any Expense: picking an Expense first rarely lands on one.
+        const expected = model.flatMap((e) => e.refunds.filter((r) => !r.received));
+        const refund = expected.length ? pick(expected) : undefined;
+        const roll = next() % 9;
         let result: Result;
         if (roll === 0) {
           const fundId = pick(fundIds);
@@ -353,7 +383,7 @@ describe("Advance left, for any command sequence across two Funds", () => {
           const online = next() % 2 === 0;
           const paise = amount();
           const made = await pay(mickey, fundId, paise, online ? "online" : "shop");
-          model.push({ ...made, fundId, paise, online, refunds: [] });
+          model.push({ ...made, fundId, paise, awaiting: online, closed: null, refunds: [] });
           result = { ok: true, events: [] };
           kinds.add("LogExpense:true");
         } else if (roll === 3) {
@@ -367,18 +397,29 @@ describe("Advance left, for any command sequence across two Funds", () => {
           if (result.ok) expense.paise = paise;
           kinds.add(`CorrectExpense amount:${result.ok}`);
         } else if (roll === 5) {
-          const paise = 1 + (next() % Math.max(1, Math.floor(expense.paise / 2)));
-          result = await books.execute(mickey, { type: "ExpectRefund", billId: expense.billId, amount: rupees(paise) });
+          // An open Order when there is one: closing would otherwise leave few Bills a Refund can come from.
+          const open = model.filter((e) => e.awaiting && !e.closed);
+          const order = open.length ? pick(open) : expense;
+          const paise = 1 + (next() % Math.max(1, Math.floor(order.paise / 2)));
+          result = await books.execute(mickey, { type: "ExpectRefund", billId: order.billId, amount: rupees(paise) });
           const made = result.ok ? result.events.find((e) => e.type === "RefundExpected") : undefined;
-          if (made?.type === "RefundExpected") expense.refunds.push({ id: made.refundId, paise, received: false });
+          if (made?.type === "RefundExpected") order.refunds.push({ id: made.refundId, paise, received: false });
           kinds.add(`ExpectRefund:${result.ok}`);
         } else if (roll === 6 && refund) {
           result = await books.execute(mickey, { type: "MarkRefundReceived", refundId: refund.id, refundedOn: "2026-11-27" });
           if (result.ok) refund.received = true;
           kinds.add(`MarkRefundReceived:${result.ok}`);
+        } else if (roll === 7) {
+          // Every expected Refund stays expected, so a later MarkRefundReceived may still reach it.
+          const reason = pick(["duplicate", "personal", "written_off"] as const);
+          const refunds = Object.fromEntries(expense.refunds.filter((r) => !r.received).map((r) => [r.id, "expected" as const]));
+          result = await books.execute(mickey, { type: "CloseExpense", expenseId: expense.expenseId, reason, refunds });
+          if (result.ok) expense.closed = reason;
+          kinds.add(`CloseExpense ${reason}:${result.ok}`);
         } else {
           // Not claiming the rest of an Order: written off, never received.
           result = await books.execute(mickey, { type: "CloseOrder", billId: expense.billId, choice: "not_claiming" });
+          if (result.ok) expense.awaiting = false;
           kinds.add(`CloseOrder:${result.ok}`);
         }
         if (!result.ok && !["invalid_transition", "validation", "not_found"].includes(result.reason)) throw new Error(JSON.stringify(result));
@@ -387,7 +428,7 @@ describe("Advance left, for any command sequence across two Funds", () => {
         for (const fundId of fundIds) {
           const t = total[fundId] ?? null;
           const mine = model.filter((e) => e.fundId === fundId);
-          const payments = mine.reduce((s, e) => s + e.paise, 0);
+          const payments = mine.reduce((s, e) => s + (e.closed === "duplicate" ? 0 : e.paise), 0);
           const received = mine.flatMap((e) => e.refunds).reduce((s, r) => s + (r.received ? r.paise : 0), 0);
           const expected = t === null ? null : rupees(t - payments + received);
           expect(read.find((b) => b.fundId === fundId)?.left, `run ${run}, step ${step}`).toEqual(expected);
@@ -395,7 +436,7 @@ describe("Advance left, for any command sequence across two Funds", () => {
       }
     }
     // The sequences reach every money path, accepted: a Refund received, a move, an amount corrected, Not claiming.
-    for (const k of ["SetAdvance:true", "CorrectExpense fund:true", "CorrectExpense amount:true", "ExpectRefund:true", "MarkRefundReceived:true", "CloseOrder:true"])
+    for (const k of ["SetAdvance:true", "CorrectExpense fund:true", "CorrectExpense amount:true", "ExpectRefund:true", "MarkRefundReceived:true", "CloseOrder:true", "CloseExpense duplicate:true", "CloseExpense personal:true", "CloseExpense written_off:true"])
       expect([...kinds], k).toContain(k);
   }, 120_000);
 });
