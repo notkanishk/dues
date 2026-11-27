@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type BillFacts, type CandidateExpense, type Proposal, propose } from "./matching";
+import { type BillFacts, type CandidateExpense, type PaymentFacts, type Proposal, propose } from "./matching";
 
 // bill-matching spec. Figures are hand-typed fictional amounts; shops are invented, people are cartoon characters.
 const rs = (rupees: number, paise = 0) => ({ paise: rupees * 100 + paise, currency: "INR" as const });
@@ -188,5 +188,78 @@ describe("Bill for a Payback matches on amount and date", () => {
   it("a Payback 11 days away is no candidate", () => {
     const facts = bill({ total: rs(900), billDate: "2026-03-12" });
     expect(propose(facts, [expense("E-701", { payment: rs(900), openAmount: rs(900), payee: "Dexter", payback: true })])).toEqual({ type: "newExpense", askVendor: false });
+  });
+});
+
+const payment = (over: Partial<PaymentFacts> = {}): PaymentFacts => ({
+  type: "payment",
+  amount: rs(1180),
+  paidOn: "2026-03-06",
+  payee: "Sample Tools",
+  payeeStandsFor: [],
+  reference: "612345678901",
+  receivedAt: "2026-03-06T09:14:10Z",
+  ...over,
+});
+
+// An Expense logged from a ₹1,180.00 Sample Tools invoice of 4 March, still waiting for its Payment proof.
+const invoiceOnly = (id: string, over: Partial<CandidateExpense> = {}) =>
+  expense(id, { paidOn: "2026-03-04", vendor: "Sample Tools", openAmount: rs(0), invoiceOnly: true, ...over });
+
+describe("Same reference means same Payment", () => {
+  it("a second confirmation with the same UPI reference attaches as Payment proof, whatever it reads", () => {
+    const candidates = [expense("E-801", { references: ["612345678901"], payee: "Fizzy Hardware" })];
+    expect(propose(payment({ amount: null, payee: null }), candidates)).toEqual({ type: "attachProof", expenseId: "E-801" });
+  });
+});
+
+describe("Late payment confirmation attaches to the Expense", () => {
+  it.each<[string, PaymentFacts, CandidateExpense[], Proposal]>([
+    ["within tolerance: ₹1,179.50 for a ₹1,180.00 bill 2 days earlier", payment({ amount: rs(1179, 50) }), [invoiceOnly("E-802")], { type: "attachProof", expenseId: "E-802" }],
+    ["₹1 under is inside", payment({ amount: rs(1179) }), [invoiceOnly("E-802")], { type: "attachProof", expenseId: "E-802" }],
+    ["₹1 over is inside", payment({ amount: rs(1181) }), [invoiceOnly("E-802")], { type: "attachProof", expenseId: "E-802" }],
+    ["₹1.01 under is outside", payment({ amount: rs(1178, 99) }), [invoiceOnly("E-802")], { type: "newExpense", askVendor: false }],
+    ["₹1.01 over is outside", payment({ amount: rs(1181, 1) }), [invoiceOnly("E-802")], { type: "newExpense", askVendor: false }],
+    ["outside amount tolerance: ₹1,178.00", payment({ amount: rs(1178) }), [invoiceOnly("E-802")], { type: "newExpense", askVendor: false }],
+    ["day 10 is inside", payment({ paidOn: "2026-03-14" }), [invoiceOnly("E-802")], { type: "attachProof", expenseId: "E-802" }],
+    ["day 11 is outside", payment({ paidOn: "2026-03-15" }), [invoiceOnly("E-802")], { type: "newExpense", askVendor: false }],
+    [
+      "a gateway payee matches through a learned alias",
+      payment({ payee: "GatewayPay Merchant 77", payeeStandsFor: ["Sample Tools"] }),
+      [invoiceOnly("E-802")],
+      { type: "attachProof", expenseId: "E-802" },
+    ],
+    ["a payee unlike the vendor is no match", payment({ payee: "GatewayPay Merchant 77" }), [invoiceOnly("E-802")], { type: "newExpense", askVendor: false }],
+    ["an Expense that already has its Payment proof is no match", payment(), [invoiceOnly("E-802", { invoiceOnly: false })], { type: "newExpense", askVendor: false }],
+    [
+      "of two that fit, the nearer amount wins",
+      payment({ amount: rs(1180, 50) }),
+      [invoiceOnly("E-802", { payment: rs(1179) }), invoiceOnly("E-803", { payment: rs(1181) })],
+      { type: "attachProof", expenseId: "E-803" },
+    ],
+  ])("%s", (_, facts, candidates, expected) => {
+    expect(propose(facts, candidates)).toEqual(expected);
+  });
+});
+
+describe("\"Same payment as E-x?\" without a reference", () => {
+  const unreadable = (id: string, receivedAt: string) => expense(id, { references: [], proofReceivedAt: receivedAt, payee: "Fizzy Hardware" });
+  const second = payment({ reference: null, amount: null, payee: null, receivedAt: "2026-03-06T09:14:10Z" });
+
+  it.each<[string, CandidateExpense[], Proposal]>([
+    ["6 minutes apart: offered", [unreadable("E-901", "2026-03-06T09:08:10Z")], { type: "samePaymentSuggestion", expenseId: "E-901" }],
+    ["10 minutes apart: offered", [unreadable("E-901", "2026-03-06T09:04:10Z")], { type: "samePaymentSuggestion", expenseId: "E-901" }],
+    ["11 minutes apart: no offer", [unreadable("E-901", "2026-03-06T09:03:10Z")], { type: "newExpense", askVendor: false }],
+    [
+      "an earlier confirmation that had a reference: no offer",
+      [expense("E-902", { references: ["612345678901"], proofReceivedAt: "2026-03-06T09:10:10Z" })],
+      { type: "newExpense", askVendor: false },
+    ],
+  ])("%s", (_, candidates, expected) => {
+    expect(propose(second, candidates)).toEqual(expected);
+  });
+
+  it("a confirmation with a readable reference gets no offer", () => {
+    expect(propose(payment({ amount: null }), [unreadable("E-901", "2026-03-06T09:08:10Z")])).toEqual({ type: "newExpense", askVendor: false });
   });
 });
