@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { expenses, funds, fundSettings, fundVersions, refunds } from "@/src/db/schema";
-import { type Money, zero } from "@/src/money/money";
+import { type Money, sum, zero } from "@/src/money/money";
 import type { Tx } from "./books";
 import { type Actor, advanceLeft, advanceState, isAdmin, MAKERSPACE, own } from "./core";
 
@@ -424,7 +424,9 @@ export async function templatesOf(q: Q, actor: Actor, fundId: string): Promise<F
 
 // ---- The Advance, read (expense-tracking "Advance balance", "Home lists and the Advance block") --------------------
 
-const paise = (rows: { fundId: string; paise: string | null }[]) => new Map(rows.map((r) => [r.fundId, { paise: Number(r.paise ?? 0), currency: "INR" as const }]));
+/** Postgres's sums (numeric text) as Money, through `sum`'s safe-integer check: past the range is an error, never rounded. */
+const paise = (rows: { fundId: string; paise: string | null }[]) =>
+  new Map(rows.map((r) => [r.fundId, sum([{ paise: Number(r.paise ?? 0), currency: "INR" }])]));
 
 /**
  * The Actor's own Advance on each Fund they have, in their order: total, Advance left and the block's state (hidden
