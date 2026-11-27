@@ -55,3 +55,58 @@ describe("No match logs a new Expense", () => {
     expect(propose(bill({ total: rs(640), vendor: null }), [])).toEqual({ type: "newExpense", askVendor: true });
   });
 });
+
+describe("Auto-attach only on a strong match, anything else raises a Check", () => {
+  const gateway = { payee: "GatewayPay Merchant 77" };
+  it.each<[string, BillFacts, CandidateExpense[], Proposal]>([
+    [
+      "vendor matches one of two candidates",
+      bill(),
+      [expense("E-201", { paidOn: "2026-03-02", vendor: "Fizzy Hardware" }), expense("E-202", { vendor: "Sample Tools" })],
+      { type: "attach", expenseId: "E-202" },
+    ],
+    [
+      "the payee counts as the vendor, legal suffixes aside",
+      bill(),
+      [expense("E-201", gateway), expense("E-202", { payee: "SAMPLE TOOLS PVT. LTD." })],
+      { type: "attach", expenseId: "E-202" },
+    ],
+    ["single candidate, vendor differs (a gateway payee)", bill(), [expense("E-201", gateway)], { type: "attach", expenseId: "E-201" }],
+    [
+      "order number matches one of two candidates",
+      bill({ orderRef: "ORD-5501" }),
+      [expense("E-201", gateway), expense("E-202", { ...gateway, orderRef: "ORD-5501" })],
+      { type: "attach", expenseId: "E-202" },
+    ],
+    [
+      "two candidates, no vendor or order match: the nearer date is the better fit",
+      bill(),
+      [expense("E-201", { ...gateway, paidOn: "2026-02-25" }), expense("E-202", { ...gateway, paidOn: "2026-03-02" })],
+      { type: "attachWithCheck", expenseId: "E-202", others: ["E-201"] },
+    ],
+    [
+      "two candidates on the same day: the lower Expense ID is the better fit",
+      bill(),
+      [expense("E-209", gateway), expense("E-201", gateway)],
+      { type: "attachWithCheck", expenseId: "E-201", others: ["E-209"] },
+    ],
+    [
+      "two candidates that both match the vendor still raise a Check",
+      bill(),
+      [expense("E-201", { vendor: "Sample Tools" }), expense("E-202", { vendor: "Sample Tools", paidOn: "2026-03-03" })],
+      { type: "attachWithCheck", expenseId: "E-202", others: ["E-201"] },
+    ],
+  ])("%s", (_, facts, candidates, expected) => {
+    expect(propose(facts, candidates)).toEqual(expected);
+  });
+});
+
+describe("Confirmed matches teach payee aliases", () => {
+  it("a learned alias makes the gateway payee count as the vendor", () => {
+    const candidates = [
+      expense("E-301", { payee: "GatewayPay Merchant 77", payeeStandsFor: ["Sample Tools"] }),
+      expense("E-302", { payee: "GatewayPay Merchant 12", paidOn: "2026-03-03" }),
+    ];
+    expect(propose(bill(), candidates)).toEqual({ type: "attach", expenseId: "E-301" });
+  });
+});
