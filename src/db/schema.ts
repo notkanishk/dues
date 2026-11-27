@@ -246,3 +246,19 @@ export const fundSettings = pgTable(
   },
   (t) => [primaryKey({ columns: [t.claimantId, t.fundId] })],
 );
+
+// Purposes (expense-tracking "Purpose"): an optional group inside a Fund, one Claimant's own. Ending one ("End trip")
+// clears active; its Expenses keep it. (id, fund_id, claimant_id) is the target of the Expense's link, so the database
+// itself refuses a Purpose of another Fund or another Claimant on an Expense.
+export const purposes = pgTable(
+  "purposes",
+  {
+    id: key(),
+    claimantId: uuid("claimant_id").notNull(),
+    fundId: uuid("fund_id").notNull().references(() => funds.id),
+    name: text("name").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [unique("purposes_link_target").on(t.id, t.fundId, t.claimantId), index("purposes_claimant_id_idx").on(t.claimantId)],
+);

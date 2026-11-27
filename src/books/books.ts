@@ -28,10 +28,11 @@ import {
   type Rejected,
   type Slice,
 } from "./core";
-import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, templatesOf, writeFund } from "./funds";
+import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, templatesOf, UUID, writeFund } from "./funds";
+import { decidePurpose, isPurposeCommand, listPurposes, loadPurposeSlice, type PurposeCommand, type PurposeEvent, purposeEntries, purposeOwners, writePurpose } from "./purposes";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
-export type Result = { readonly ok: true; readonly events: readonly (Event | FundEvent)[] } | Rejected;
+export type Result = { readonly ok: true; readonly events: readonly (Event | FundEvent | PurposeEvent)[] } | Rejected;
 export type Deps = {
   readonly db: NodePgDatabase;
   readonly now: () => Date;
@@ -56,7 +57,6 @@ const mayEnter = (actor: Actor) => actor.roles.includes("claimant");
  */
 const scope = (actor: Actor) => (isAdmin(actor) ? undefined : eq(expenses.claimantId, actor.claimantId));
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const money = (paise: number | null, currency: string): Money | null => (paise === null ? null : { paise, currency: currency as "INR" });
 
 /**
@@ -379,7 +379,7 @@ const isKeyRace = (e: unknown) => {
 type Staged =
   | {
       readonly ok: true;
-      readonly events: readonly (Event | FundEvent)[];
+      readonly events: readonly (Event | FundEvent | PurposeEvent)[];
       readonly entries: readonly Omit<typeof auditLog.$inferInsert, "at" | "actorId" | "command" | "idempotencyKey">[];
       readonly commit: () => Promise<void>;
     }
@@ -435,10 +435,28 @@ async function stageFund(tx: Tx, actor: Actor, command: FundCommand, at: Date): 
   };
 }
 
+async function stagePurpose(tx: Tx, actor: Actor, command: PurposeCommand, at: Date): Promise<Staged> {
+  const slice = await loadPurposeSlice(tx, actor, command);
+  const decision = decidePurpose(slice, command, actor);
+  if (!decision.ok) return decision;
+  return {
+    ok: true,
+    events: decision.events,
+    entries: purposeEntries(slice, decision.events),
+    commit: async () => {
+      for (const event of decision.events) await writePurpose(tx, event, at);
+    },
+  };
+}
+
+type AnyCommand = Command | FundCommand | PurposeCommand;
+const ownersFor = (tx: Tx, actor: Actor, command: AnyCommand) =>
+  isFundCommand(command) ? fundOwners(tx, actor, command) : isPurposeCommand(command) ? purposeOwners(tx, actor, command) : ownersOf(tx, actor, command);
+
 export function createBooks({ db, now, enqueue }: Deps) {
-  async function attempt(actor: Actor, command: Command | FundCommand, key: string | undefined): Promise<Result> {
+  async function attempt(actor: Actor, command: AnyCommand, key: string | undefined): Promise<Result> {
     return db.transaction(async (tx) => {
-      const owners = isFundCommand(command) ? await fundOwners(tx, actor, command) : await ownersOf(tx, actor, command);
+      const owners = await ownersFor(tx, actor, command);
       for (const owner of owners) await lockClaimant(tx, owner);
 
       // A key is the requester's (the Actor's), not the owner's: the same key from anyone else is a conflict.
@@ -451,7 +469,11 @@ export function createBooks({ db, now, enqueue }: Deps) {
       }
 
       const at = now();
-      const staged = isFundCommand(command) ? await stageFund(tx, actor, command, at) : await stageExpense(tx, actor, command, owners, at, enqueue);
+      const staged = isFundCommand(command)
+        ? await stageFund(tx, actor, command, at)
+        : isPurposeCommand(command)
+          ? await stagePurpose(tx, actor, command, at)
+          : await stageExpense(tx, actor, command, owners, at, enqueue);
       if (!staged.ok) return staged; // a rejected command changes nothing
 
       // Audit rows first (design D2). The audit log holds a key once (schema), so the command's first entry carries it.
@@ -470,7 +492,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
      * Every write. Typed rejections; throws when the database fails, or with OwnersMoved when owners still moved under it
      * after 3 tries, and then nothing is written.
      */
-    async execute(actor: Actor, command: Command | FundCommand, opts: { idempotencyKey?: string } = {}): Promise<Result> {
+    async execute(actor: Actor, command: AnyCommand, opts: { idempotencyKey?: string } = {}): Promise<Result> {
       if (!mayEnter(actor)) return forbidden;
       for (let tries = 1; ; tries++) {
         try {
@@ -498,6 +520,12 @@ export function createBooks({ db, now, enqueue }: Deps) {
       if (!mayEnter(actor)) return forbidden;
       const offered = (await listFunds(db, actor, "prompt")).filter((f) => !f.hidden && !f.archived);
       return { ok: true as const, funds: offered.map((f) => ({ id: f.id, name: f.name, whatForHint: f.effective.whatForHint })) };
+    },
+
+    /** Settings → Purposes: the Actor's own Purposes, active and ended (an admin's by session: every Claimant's, D6). */
+    async purposes(actor: Actor) {
+      if (!mayEnter(actor)) return forbidden;
+      return { ok: true as const, purposes: await listPurposes(db, actor) };
     },
 
     /** The Actor's effective templates for a Claim of this Fund (design §6); never its notes. */

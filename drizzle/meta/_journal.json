@@ -57,6 +57,13 @@
       "when": 1795739809828,
       "tag": "0007_funds",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795742237308,
+      "tag": "0008_purposes",
+      "breakpoints": true
     }
   ]
 }

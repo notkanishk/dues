@@ -22,7 +22,7 @@ const OVERRIDABLE = ["mail", "formTemplate", "fileNamePattern", "whatForHint"] a
 
 type Q = Pick<NodePgDatabase, "select">;
 /** The Funds a Claimant has: their own and every team Fund. */
-const visible = (actor: Actor) => or(eq(funds.team, true), eq(funds.creatorId, actor.claimantId));
+export const visible = (actor: Actor) => or(eq(funds.team, true), eq(funds.creatorId, actor.claimantId));
 /** An admin reaches every Fund (D6); anyone else the Funds they have. */
 const reachable = (actor: Actor) => (isAdmin(actor) ? undefined : visible(actor));
 
@@ -230,7 +230,7 @@ export function decideFund(slice: FundSlice, command: FundCommand, actor: Actor)
 
 // ---- Shell: whose lock, the load, the writes ----------------------------------------------------------------------
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const idsOf = (command: FundCommand) =>
   (command.type === "CreateFund" ? [] : command.type === "OrderFunds" ? (Array.isArray(command.fundIds) ? command.fundIds : []) : [command.fundId]).filter(
     (id) => typeof id === "string" && UUID.test(id),
