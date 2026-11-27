@@ -223,9 +223,9 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
   const anyExact = fits.some((f) => f.exact);
   const auto = fits.filter((f) => (f.auto && (f.exact || !anyExact)) || (fits.length === 1 && f.exact && f.days <= config.billWindowDays));
   const byOrder = auto.filter((f) => f.order);
-  // A Payback awaiting this exact amount among several candidates is a real rival only a person can rule out.
-  const paybackWaits = fits.length > 1 && fits.some((f) => f.e.payback && f.exact);
-  const chosen = byOrder.length === 1 ? byOrder[0] : auto.length === 1 && !paybackWaits ? auto[0] : null;
+  // Another Payback awaiting this exact amount is a rival only a person can rule out, unless the order number decided.
+  const paybackRival = (chosen: Fit) => fits.some((f) => f !== chosen && f.e.payback && f.exact);
+  const chosen = byOrder.length === 1 ? byOrder[0] : auto.length === 1 && !paybackRival(auto[0]) ? auto[0] : null;
   if (chosen) return { type: "attach", expenseId: chosen.e.id };
   const [best, ...rest] = fits;
   return { type: "attachWithCheck", expenseId: best.e.id, others: rest.map((f) => f.e.id) };
