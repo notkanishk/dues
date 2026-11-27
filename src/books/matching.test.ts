@@ -175,9 +175,15 @@ describe("A smaller invoice splits the Order", () => {
     ],
     ["another shop's Order outside the window: a new Expense", invoice({ billDate: "2026-03-12" }), [order("E-412", { vendor: "Fizzy Hardware" })], { type: "newExpense", askVendor: false }],
     [
-      "a same-shop Order outside the window with no more open than the bill: a new Expense",
+      "a same-shop Order outside the window with exactly the bill open, its last invoice: a Check, not a second Expense",
       invoice({ billDate: "2026-03-12" }),
       [order("E-413", { vendor: "Sample Tools", openAmount: rs(2100) })],
+      { type: "attachWithCheck", expenseId: "E-413", others: [] },
+    ],
+    [
+      "a same-shop Order outside the window with less open than the bill: a new Expense",
+      invoice({ billDate: "2026-03-12" }),
+      [order("E-416", { vendor: "Sample Tools", openAmount: rs(2000) })],
       { type: "newExpense", askVendor: false },
     ],
     [
