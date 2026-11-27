@@ -47,6 +47,7 @@ describe("decide LogExpense", () => {
           whatFor: null,
           fundId: MAKERSPACE,
           purposeId: null,
+          paymentMethodId: null,
           upiRef: null,
           notes: null,
           source: "manual",
@@ -123,6 +124,7 @@ describe("apply and derivation", () => {
                 whatFor: null,
                 fundId: MAKERSPACE,
                 purposeId: null,
+                paymentMethodId: null,
                 refunds: [],
                 writtenOff: rupees(0),
                 bills: [
@@ -170,6 +172,7 @@ describe("apply and derivation", () => {
     whatFor: null,
     fundId: MAKERSPACE,
     purposeId: null,
+    paymentMethodId: null,
     bills: bills.map((b, i) => ({
       id: `b-${i}`,
       kind: "invoice",
@@ -1567,6 +1570,7 @@ describe("MoveBill and DetachBill", () => {
           // The Order's Fund and Purpose: detaching the Bill does not move its money to another Claim.
           fundId: MAKERSPACE,
           purposeId: null,
+          paymentMethodId: null,
           upiRef: null,
           notes: null,
           source: "manual",
