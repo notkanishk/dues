@@ -25,6 +25,7 @@ import {
   type Job,
   type Links,
   type LogExpense,
+  type LogNoBillEntry,
   type CorrectExpense,
   NO_LINKS,
   own,
@@ -152,6 +153,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
 async function touches(tx: Tx, command: Command): Promise<[number, string[]]> {
   switch (command.type) {
     case "LogExpense":
+    case "LogNoBillEntry":
       return [2, []];
     case "MoveBill":
       // Both Expenses load under their owners' locks (design D5): a Claimant owns both or it is not_found. An admin's may be
@@ -201,7 +203,7 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
   // What the Expense's Claimant may link it to: a new one is the Actor's, and goes where the Actor's prompt preselects
   // when it names neither; a corrected one stays its owner's (an admin's included).
   let links: Links | undefined;
-  if (command.type === "LogExpense") {
+  if (command.type === "LogExpense" || command.type === "LogNoBillEntry") {
     const prompt = await promptOf(tx, actor);
     links = await linksFor(tx, actor.claimantId, command, { fundId: prompt.preselectedFundId, purposeId: prompt.preselectedPurposeId });
   } else if (command.type === "CorrectExpense") {
@@ -212,7 +214,7 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
 }
 
 /** The Fund, Purpose and Payment method the command names, if the Expense's Claimant has them (else absent: not_found), and the default. */
-async function linksFor(tx: Tx, claimantId: string, command: LogExpense | CorrectExpense, fallback = NO_LINKS.fallback): Promise<Links> {
+async function linksFor(tx: Tx, claimantId: string, command: LogExpense | LogNoBillEntry | CorrectExpense, fallback = NO_LINKS.fallback): Promise<Links> {
   const [fund] = isUuid(command.fundId)
     ? await tx.select({ id: fundsTable.id }).from(fundsTable).where(and(eq(fundsTable.id, command.fundId), visible({ claimantId })))
     : [];
@@ -672,6 +674,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
             billNo: b.billNo,
             billDate: b.billDate,
             differs: b.differs,
+            remarks: b.remarks, // the form's remarks column; a No bill always has one
             fulfilledOn: b.fulfilledOn,
             cancelReason: b.cancelReason,
             closedAs: b.closedAs, // set on a remainder "No more invoices" closed out, so it is not read as Item cancelled

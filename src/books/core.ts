@@ -42,6 +42,25 @@ export type LogExpense = LinkFields & {
   readonly notes?: string;
 };
 /**
+ * "+ Add without a bill" (expense-tracking "Entry without a bill", W1): an open Expense and one No bill of the same
+ * amount, Fulfilled and ready. No bill number, GSTIN, order reference, UPI reference or document: nothing to match or review.
+ */
+// ponytail: the sheet fills the Date (today in the Claimant's zone, which arrives with 2.7) and the Payment method;
+// Books takes what it is given. Ordered by arrives with People. Both listed for the owner.
+export type LogNoBillEntry = LinkFields & {
+  readonly type: "LogNoBillEntry";
+  readonly kind: LogExpense["kind"];
+  readonly amount: Money;
+  readonly paidOn: string; // business date, YYYY-MM-DD; any past date
+  readonly whatFor?: string; // the claim form line
+  readonly payee?: string; // Vendor/payee, free text
+  readonly payback?: boolean;
+  /** The form's remarks column; starts as NO_BILL_REMARK, never blank. */
+  readonly remarks?: string;
+};
+/** The remark an entry without a bill starts with (FUNCTIONAL §2 Bill, W1); the Claimant can edit it. */
+export const NO_BILL_REMARK = "No bill (cash)";
+/**
  * Records a delivery's Invoice amount against an Order's expected Bill (W2.2): split off as its own Fulfilled Bill,
  * the expected remainder shrinks. LogDocument will issue it when a matched document arrives (Phase 2); until then
  * the new Bill has no document link.
@@ -146,6 +165,7 @@ export const NO_INVOICE_REMARK = "No invoice from seller";
 const CLOSE_REASONS: readonly string[] = ["personal", "duplicate", "written_off"] satisfies CloseReason[];
 export type Command =
   | LogExpense
+  | LogNoBillEntry
   | SplitExpectedBill
   | ExpectRefund
   | CancelBill
@@ -359,6 +379,7 @@ function methodOf(links: Links, current: string | null, named: string | null | u
   return { ok: true as const, paymentMethodId: named };
 }
 const isText = (v: unknown) => v === undefined || v === null || typeof v === "string";
+const isRemark = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const isDate = (s: unknown) => {
@@ -414,6 +435,45 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           remarks: null,
           fromBillId: null,
         },
+      ]);
+    }
+    case "LogNoBillEntry": {
+      if (!["online", "shop", "service"].includes(command.kind)) return rejectField("kind");
+      if (!isPayment(command.amount)) return rejectField("amount");
+      if (!isDate(command.paidOn)) return rejectField("paidOn");
+      if (!isText(command.whatFor)) return rejectField("whatFor");
+      if (!isText(command.payee)) return rejectField("payee");
+      if (command.payback !== undefined && typeof command.payback !== "boolean") return rejectField("payback");
+      const remarks = command.remarks === undefined ? NO_BILL_REMARK : command.remarks;
+      if (!isRemark(remarks)) return rejectField("remarks"); // a No bill must have remarks (Bill kinds and remarks)
+      const links = slice.links ?? NO_LINKS;
+      const link = linkOf(links, links.fallback, command);
+      if (!link.ok) return link;
+      const method = methodOf(links, null, command.paymentMethodId);
+      if (!method.ok) return method;
+      const [expenseId, billId] = slice.newIds as [string, string];
+      return ok([
+        {
+          type: "ExpenseLogged",
+          expenseId,
+          claimantId: actor.claimantId, // never from input (design D6)
+          kind: command.kind,
+          amount: command.amount,
+          paidOn: command.paidOn,
+          payee: command.payee ?? null,
+          vendor: null,
+          payback: command.payback ?? false,
+          orderRef: null,
+          whatFor: command.whatFor ?? null,
+          fundId: link.fundId,
+          purposeId: link.purposeId,
+          paymentMethodId: method.paymentMethodId,
+          upiRef: null,
+          notes: null,
+          source: "manual",
+        },
+        // Fulfilled on the day paid. Its form line is the Expense's What for (decision 47), read through, never copied.
+        { type: "BillAdded", billId, expenseId, kind: "no_bill", amount: command.amount, fulfilledOn: command.paidOn, description: null, remarks: remarks.trim(), fromBillId: null },
       ]);
     }
     case "SplitExpectedBill": {
@@ -491,7 +551,13 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       // Keeping a value changes nothing and writes nothing.
       if (!Object.keys(changes).length) return ok([]);
       const { from, to } = changes.amount ?? {};
-      const moved = from && to ? moveExpected(expense, to.paise - from.paise) : [];
+      const entry = entryBill(expense);
+      const moved: Event[] | Rejected =
+        from && to
+          ? entry
+            ? [{ type: "BillCorrected", billId: entry.id, expenseId: expense.id, changes: { amount: { from, to } }, differs: entry.differs }]
+            : moveExpected(expense, to.paise - from.paise)
+          : [];
       if (!Array.isArray(moved)) return moved;
       return ok([{ type: "ExpenseCorrected", expenseId: expense.id, changes }, ...moved]);
     }
@@ -716,6 +782,19 @@ function findBill(slice: Slice, billId: string) {
     return { ok: true as const, expense, bill };
   }
   return reject("not_found");
+}
+
+/**
+ * An entry without a bill (W1): its one live Bill is its own No bill (not an Order's leftover) for the whole Payment.
+ * The entry's Amount is its Payment's: a corrected Payment carries its No bill with it, as an Order's carries its expected
+ * Bill (moveExpected), so the Open amount stays where it was. A corrected Bill is a Bill correction, as for any Bill.
+ */
+// ponytail: derived, not stored: a shop Expense whose one Bill is a whole-amount No bill reads as an entry too.
+function entryBill(expense: ExpenseState) {
+  const live = expense.bills.filter((b) => !b.cancelled);
+  const bill = live[0];
+  if (live.length !== 1 || bill?.kind !== "no_bill" || bill.fromBillId !== null) return undefined;
+  return bill.amount && expense.amount && bill.amount.paise === expense.amount.paise ? bill : undefined;
 }
 
 /** An Order's expected Bill: not cancelled, goods not yet arrived, not on a draft Claim, with an amount. */
