@@ -16,6 +16,10 @@ _Avoid_: Manager, reviewer
 The person who placed the order with the vendor: the Claimant or a colleague. Tracked because colleagues often order on the lab's shared accounts.
 _Avoid_: Buyer, placed by, requester
 
+**Owner**:
+The Claimant whose Expense a change touches. Not always the person making the change: an admin acting on a Claimant's books changes that Claimant's data, and the Claimant stays the Owner.
+_Avoid_: Holder, account owner, the actor
+
 ## Money out
 
 **Expense**:

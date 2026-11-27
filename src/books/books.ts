@@ -42,13 +42,25 @@ export const lockClaimant = (tx: Tx, claimantId: string) =>
   tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`claimant:${claimantId}`}, 0))`);
 
 const notFound: Rejected = { ok: false, reason: "not_found" };
+const forbidden: Rejected = { ok: false, reason: "forbidden" };
+/**
+ * The role gate (identity-access): only `claimant` opens Books; `admin` never opens it alone, it only widens the scope (D6).
+ * Anything else is forbidden from every command and query before a row is read, so not even existence leaks.
+ */
+const mayEnter = (actor: Actor) => actor.roles.includes("claimant");
+/**
+ * The ownership filter: an admin signed in by session passes it (D6); anyone else sees only their own Expenses. An MCP
+ * token carries its issuing Claimant's scope and nothing more, and Intake acts as the document owner's Claimant.
+ */
+const scope = (actor: Actor) =>
+  actor.via === "session" && actor.roles.includes("admin") ? undefined : eq(expenses.claimantId, actor.claimantId);
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const money = (paise: number | null, currency: string): Money | null => (paise === null ? null : { paise, currency: currency as "INR" });
 
 /**
  * The one place Books loads rows. Scoped to the Actor's Claimant: another Claimant's Expense is
- * simply absent, so callers answer not_found and existence does not leak (design D6).
+ * simply absent, so callers answer not_found and existence does not leak (design D6). An admin's scope is everyone's.
  */
 async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly string[]) {
   const wanted = ids.filter((id) => UUID.test(id));
@@ -56,7 +68,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   const rows = await q
     .select()
     .from(expenses)
-    .where(and(inArray(expenses.id, wanted), eq(expenses.claimantId, actor.claimantId)));
+    .where(and(inArray(expenses.id, wanted), scope(actor)));
   if (rows.length === 0) return [];
   const found = rows.map((r) => r.id);
   const billRows = await q.select().from(bills).where(inArray(bills.expenseId, found)).orderBy(bills.id);
@@ -99,6 +111,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
     const ownWriteOffs = writeOffRows.filter((w) => w.expenseId === row.id).map((w) => money(w.amountPaise, w.currency)!);
     const state: ExpenseState = {
       id: row.id,
+      claimantId: row.claimantId,
       draft: row.draft,
       closedReason: row.closedReason as CloseReason | null, // the expenses_closed_reason check keeps it one of these
       kind: row.kind as ExpenseState["kind"], // the expenses_kind check
@@ -114,33 +127,52 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
   });
 }
 
-// How many new rows each command may create, and which Expense it touches.
+// How many new rows each command may create, and which Expenses it touches.
+async function touches(tx: Tx, command: Command): Promise<[number, string[]]> {
+  switch (command.type) {
+    case "LogExpense":
+      return [2, []];
+    case "MoveBill":
+      // Both Expenses load under their owners' locks (design D5): a Claimant owns both or it is not_found. An admin's may be
+      // two Claimants; the core refuses that move, but only after loading both, so both are locked.
+      return [0, [...(await expenseOf(tx, bills, command.billId)), command.toExpenseId]];
+    case "DetachBill":
+    case "SplitExpectedBill":
+    case "CloseOrder":
+    case "ExpectRefund":
+    case "CancelBill":
+    case "ReturnBill":
+      return [1, await expenseOf(tx, bills, command.billId)];
+    case "CorrectBill":
+    case "ConfirmDiffers":
+    case "UndoCloseOrder":
+      return [0, await expenseOf(tx, bills, command.billId)];
+    case "MarkRefundReceived":
+      return [0, await expenseOf(tx, refunds, command.refundId)];
+    case "CorrectExpense":
+    case "CloseExpense":
+      return [0, [command.expenseId]];
+  }
+}
+
+/**
+ * Whose lock a command takes (design D5): the owners of the Expenses it touches, in ID order, so two Claimants are
+ * always locked the same way round. The Actor's own when it touches none of theirs: a new Expense is the Actor's, and
+ * anything else is not_found. Read before the lock, so `attempt` checks it again under the lock.
+ */
+async function ownersOf(tx: Tx, actor: Actor, command: Command): Promise<string[]> {
+  const wanted = (await touches(tx, command))[1].filter((id) => UUID.test(id));
+  const rows = wanted.length
+    ? await tx.select({ id: expenses.id, owner: expenses.claimantId }).from(expenses).where(and(inArray(expenses.id, wanted), scope(actor)))
+    : [];
+  // Gathered in the command's order, so the sort alone fixes the lock order, never the database's row order.
+  const owner = new Map(rows.map((r) => [r.id, r.owner]));
+  const owners = [...new Set(wanted.flatMap((id) => owner.get(id) ?? []))];
+  return owners.length ? owners.sort() : [actor.claimantId];
+}
+
 async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice> {
-  const [count, expenseIds] = await (async (): Promise<[number, string[]]> => {
-    switch (command.type) {
-      case "LogExpense":
-        return [2, []];
-      case "MoveBill":
-        // Both Expenses load under the one Claimant lock already held (design D5): the Actor owns both or it is not_found.
-        return [0, [...(await expenseOf(tx, bills, command.billId)), command.toExpenseId]];
-      case "DetachBill":
-      case "SplitExpectedBill":
-      case "CloseOrder":
-      case "ExpectRefund":
-      case "CancelBill":
-      case "ReturnBill":
-        return [1, await expenseOf(tx, bills, command.billId)];
-      case "CorrectBill":
-      case "ConfirmDiffers":
-      case "UndoCloseOrder":
-        return [0, await expenseOf(tx, bills, command.billId)];
-      case "MarkRefundReceived":
-        return [0, await expenseOf(tx, refunds, command.refundId)];
-      case "CorrectExpense":
-      case "CloseExpense":
-        return [0, [command.expenseId]];
-    }
-  })();
+  const [count, expenseIds] = await touches(tx, command);
   // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
   const { rows } = await tx.execute<{ id: string }>(sql`select uuidv7() as id from generate_series(1, ${count})`);
   const loaded = await loadExpenses(tx, actor, expenseIds);
@@ -152,6 +184,12 @@ async function expenseOf(tx: Tx, table: typeof bills | typeof refunds, id: strin
   if (!UUID.test(id)) return [];
   return (await tx.select({ id: table.expenseId }).from(table).where(eq(table.id, id))).map((r) => r.id);
 }
+
+/** An event would change a Claimant whose lock is not held (an admin moved the Bill after the owners were read): rerun. */
+class OwnersMoved extends Error {}
+
+/** The Expense an event changes; its owner is the audit entry's owner. A moved Bill belongs where it lands. */
+const expenseOfEvent = (event: Event) => ("expenseId" in event ? event.expenseId : event.toExpenseId);
 
 type Entity = "expense" | "bill" | "refund";
 function entityOf(event: Event): [Entity, string] {
@@ -339,8 +377,10 @@ const isKeyRace = (e: unknown) => {
 export function createBooks({ db, now, enqueue }: Deps) {
   async function attempt(actor: Actor, command: Command, key: string | undefined): Promise<Result> {
     return db.transaction(async (tx) => {
-      await lockClaimant(tx, actor.claimantId);
+      const owners = await ownersOf(tx, actor, command);
+      for (const owner of owners) await lockClaimant(tx, owner);
 
+      // A key is the requester's (the Actor's), not the owner's: the same key from anyone else is a conflict.
       if (key !== undefined) {
         const [seen] = await tx.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, key));
         if (seen) {
@@ -350,6 +390,8 @@ export function createBooks({ db, now, enqueue }: Deps) {
       }
 
       const slice = await loadSlice(tx, actor, command);
+      // Nothing is decided on a Claimant whose lock is not held: a Bill changed owner after the owners were read. Rerun.
+      if (Object.values(slice.expenses).some((e) => !owners.includes(e.claimantId))) throw new OwnersMoved();
       const at = now();
       const decision = decide(slice, command, actor, at);
       if (!decision.ok) return decision; // a rejected command changes nothing
@@ -363,6 +405,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
         return {
           at,
           actorId: actor.claimantId,
+          ownerId: state.expenses[expenseOfEvent(event)]!.claimantId,
           command: command.type,
           event: event.type,
           entity,
@@ -374,6 +417,8 @@ export function createBooks({ db, now, enqueue }: Deps) {
           idempotencyKey: i === 0 ? (key ?? null) : null,
         };
       });
+      // And nothing is written to one: what a command creates is the Actor's or a locked owner's (checked, not assumed).
+      if (entries.some((e) => !owners.includes(e.ownerId))) throw new OwnersMoved();
       if (entries.length) await tx.insert(auditLog).values(entries); // a correction that keeps every value writes nothing
       for (const event of decision.events) await write(tx, event, at);
       for (const job of decision.jobs) await enqueue(tx, job);
@@ -385,19 +430,27 @@ export function createBooks({ db, now, enqueue }: Deps) {
   }
 
   return {
-    /** Every write. Typed rejections; throws only when the database fails, and then nothing is written. */
+    /**
+     * Every write. Typed rejections; throws when the database fails, or with OwnersMoved when owners still moved under it
+     * after 3 tries, and then nothing is written.
+     */
     async execute(actor: Actor, command: Command, opts: { idempotencyKey?: string } = {}): Promise<Result> {
-      try {
-        return await attempt(actor, command, opts.idempotencyKey);
-      } catch (e) {
-        // Two Claimants raced on one new key: the loser's transaction rolled back; rerun it to see the winner's row.
-        if (isKeyRace(e)) return attempt(actor, command, opts.idempotencyKey);
-        throw e;
+      if (!mayEnter(actor)) return forbidden;
+      for (let tries = 1; ; tries++) {
+        try {
+          return await attempt(actor, command, opts.idempotencyKey);
+        } catch (e) {
+          // Two Actors raced on one new key, or a Bill changed owner before the lock: the transaction rolled back; rerun it.
+          // ponytail: 3 tries, then the error reaches the caller; a backoff or more tries if owners ever churn that fast.
+          if (tries < 3 && (isKeyRace(e) || e instanceof OwnersMoved)) continue;
+          throw e;
+        }
       }
     },
 
     /** One Expense with its Bills; status, Open amount, why it is open and Bill status derived on read (design D3). */
     async expense(actor: Actor, id: string) {
+      if (!mayEnter(actor)) return forbidden;
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
       const { row, bills: billStates, refunds: refundStates, state } = found;
@@ -453,6 +506,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
      * now, "Still expected" with the leftover question, and a closed-out remainder with its Undo.
      */
     async order(actor: Actor, id: string) {
+      if (!mayEnter(actor)) return forbidden;
       const [found] = await loadExpenses(db, actor, [id]);
       if (!found) return notFound;
       const { row, bills: billStates, refunds: refundStates, state } = found;

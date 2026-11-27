@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
 import { auditLog, bills, expenses, refunds, writeOffs } from "@/src/db/schema";
 import { createBooks, lockClaimant, type Result } from "./books";
-import type { Actor, LogExpense } from "./core";
+import type { Actor, Command, LogExpense } from "./core";
 
 // Scenario tests through Books' Interface against a real Postgres (DATABASE_URL), design §1.
 // Every test uses fresh Claimants, so counts are exact while other test files share the database.
@@ -107,7 +107,7 @@ describe("Transactions", () => {
     const mickey = claimant();
     const key = `taken-${randomUUID()}`;
     // Another entry already holds this key, so the audit insert fails.
-    await db.insert(auditLog).values({ actorId: randomUUID(), command: "x", event: "x", entity: "x", entityId: randomUUID(), idempotencyKey: key });
+    await db.insert(auditLog).values({ actorId: randomUUID(), ownerId: randomUUID(), command: "x", event: "x", entity: "x", entityId: randomUUID(), idempotencyKey: key });
     await expect(books.execute(mickey, logExpense("online", 100), { idempotencyKey: key })).rejects.toThrow();
     expect(await expensesOf(mickey)).toBe(0);
     expect(await auditRowsOf(mickey)).toEqual([]);
@@ -927,4 +927,334 @@ describe("The Order page", () => {
       { command: "DetachBill", event: "BillMoved", entity: "bill", entityId: billIds[0] },
     ]);
   });
+});
+
+// identity-access "Role gate" and "Admin sees everything", design D5 and D6: the Actor is the only input that decides
+// identity, and every command and query goes through the one Seam.
+describe("Authorization at the Actor Seam", () => {
+  const admin = (): Actor => ({ claimantId: randomUUID(), roles: ["claimant", "admin"], via: "session" });
+
+  // One Claimant's Order with a delivered Bill, its expected remainder and an expected Refund, so every command has a target.
+  const books3000 = async (actor: Actor) => {
+    const placed = await order(actor, 300000);
+    const split = ok(
+      await books.execute(actor, { type: "SplitExpectedBill", billId: placed.expectedBillId, amount: rupees(120000), fulfilledOn: "2026-11-21" }),
+    );
+    const added = split.events[1];
+    if (added?.type !== "BillAdded") throw new Error("expected BillAdded");
+    const expected = ok(await books.execute(actor, { type: "ExpectRefund", billId: placed.expectedBillId, amount: rupees(50000) }));
+    const refund = expected.events.find((e) => e.type === "RefundExpected");
+    if (refund?.type !== "RefundExpected") throw new Error("expected RefundExpected");
+    return { ...placed, deliveredBillId: added.billId, refundId: refund.refundId };
+  };
+  type Target = Awaited<ReturnType<typeof books3000>>;
+
+  // Every command, one each: a Command type missing here fails the typecheck, so a new operation cannot skip these tests.
+  const everyCommand = (t: Target, otherExpenseId = t.expenseId): { [T in Command["type"]]: Extract<Command, { type: T }> } => ({
+    LogExpense: logExpense("shop", 100),
+    SplitExpectedBill: { type: "SplitExpectedBill", billId: t.expectedBillId, amount: rupees(100), fulfilledOn: "2026-11-22" },
+    ExpectRefund: { type: "ExpectRefund", billId: t.expectedBillId, amount: rupees(100) },
+    CancelBill: { type: "CancelBill", billId: t.expectedBillId },
+    ReturnBill: { type: "ReturnBill", billId: t.deliveredBillId },
+    MarkRefundReceived: { type: "MarkRefundReceived", refundId: t.refundId, refundedOn: "2026-11-25" },
+    CorrectExpense: { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) },
+    CorrectBill: { type: "CorrectBill", billId: t.deliveredBillId, remarks: "Edited" },
+    ConfirmDiffers: { type: "ConfirmDiffers", billId: t.deliveredBillId },
+    CloseExpense: { type: "CloseExpense", expenseId: t.expenseId, reason: "personal", refunds: { [t.refundId]: "expected" } },
+    CloseOrder: { type: "CloseOrder", billId: t.expectedBillId, choice: "not_claiming" },
+    UndoCloseOrder: { type: "UndoCloseOrder", billId: t.expectedBillId },
+    MoveBill: { type: "MoveBill", billId: t.deliveredBillId, toExpenseId: otherExpenseId },
+    DetachBill: { type: "DetachBill", billId: t.deliveredBillId },
+  });
+  // A snapshot of a Claimant's books, read as that Claimant, to prove a refusal changed nothing.
+  const snapshot = async (owner: Actor, t: Target) => ({
+    expense: await books.expense(owner, t.expenseId),
+    audit: (await db.select({ n: count() }).from(auditLog).where(eq(auditLog.entityId, t.expenseId)))[0]!.n,
+    expenses: await expensesOf(owner),
+  });
+
+  it("Missing role and Role removed: an Actor without claimant, an admin-only one included, is forbidden from every command and query, its own data included", async () => {
+    const mickey = claimant();
+    const t = await books3000(mickey);
+    const before = await snapshot(mickey, t);
+    for (const roles of [[], ["approver"], ["admin"]]) {
+      const removed: Actor = { ...mickey, roles };
+      for (const command of Object.values(everyCommand(t))) {
+        expect(await books.execute(removed, command), command.type).toEqual({ ok: false, reason: "forbidden" });
+        expect(await books.execute(removed, command, { idempotencyKey: `k-${randomUUID()}` })).toEqual({ ok: false, reason: "forbidden" });
+      }
+      expect(await books.expense(removed, t.expenseId)).toEqual({ ok: false, reason: "forbidden" });
+      expect(await books.order(removed, t.expenseId)).toEqual({ ok: false, reason: "forbidden" });
+      // No partial access: not even whether an id exists.
+      expect(await books.expense(removed, randomUUID())).toEqual({ ok: false, reason: "forbidden" });
+    }
+    expect(await snapshot(mickey, t)).toEqual(before);
+  });
+
+  it("another Claimant's entity is not_found from every command and query, the same as one that does not exist", async () => {
+    const mickey = claimant();
+    const dexter = claimant();
+    const t = await books3000(mickey);
+    const own = await books3000(dexter);
+    const before = await snapshot(mickey, t);
+    const { LogExpense: _ownOnly, ...touching } = everyCommand(t);
+    for (const command of Object.values(touching)) {
+      expect(await books.execute(dexter, command), command.type).toEqual({ ok: false, reason: "not_found" });
+    }
+    // Dexter's own Bill into Mickey's Expense, and Mickey's Order read as Dexter.
+    expect(await books.execute(dexter, everyCommand(own, t.expenseId).MoveBill)).toEqual({ ok: false, reason: "not_found" });
+    expect(await books.expense(dexter, t.expenseId)).toEqual({ ok: false, reason: "not_found" });
+    expect(await books.order(dexter, t.expenseId)).toEqual({ ok: false, reason: "not_found" });
+    expect(await snapshot(mickey, t)).toEqual(before);
+  });
+
+  it("an admin over MCP or Intake carries only their own Claimant's scope: another Claimant's data is not_found", async () => {
+    const mickey = claimant();
+    const t = await books3000(mickey);
+    const before = await snapshot(mickey, t);
+    for (const via of ["mcp", "intake"] as const) {
+      const minnie: Actor = { ...admin(), via };
+      const { LogExpense: _ownOnly, ...touching } = everyCommand(t);
+      for (const command of Object.values(touching)) {
+        expect(await books.execute(minnie, command), `${command.type} via ${via}`).toEqual({ ok: false, reason: "not_found" });
+      }
+      expect(await books.expense(minnie, t.expenseId)).toEqual({ ok: false, reason: "not_found" });
+      expect(await books.order(minnie, t.expenseId)).toEqual({ ok: false, reason: "not_found" });
+    }
+    expect(await snapshot(mickey, t)).toEqual(before);
+  });
+
+  it("Admin change audited: an admin reads another Claimant's Expense in full and corrects ₹3,000.00 to ₹3,100.00; actor is the admin, owner the Claimant", async () => {
+    const mickey = claimant();
+    const minnie = admin();
+    const t = await books3000(mickey);
+    expect(await books.expense(minnie, t.expenseId)).toEqual(await books.expense(mickey, t.expenseId));
+    expect(await books.order(minnie, t.expenseId)).toEqual(await books.order(mickey, t.expenseId));
+
+    ok(await books.execute(minnie, { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) }));
+    expect(await read(mickey, t.expenseId)).toMatchObject({ amount: rupees(310000) });
+    expect(await auditRowsOf(minnie)).toMatchObject([
+      { command: "CorrectExpense", event: "ExpenseCorrected", entityId: t.expenseId, actorId: minnie.claimantId, ownerId: mickey.claimantId },
+      { command: "CorrectExpense", event: "ExpectedBillIncreased", entityId: t.expectedBillId, actorId: minnie.claimantId, ownerId: mickey.claimantId },
+    ]);
+    // The Claimant's own changes name the Claimant as both.
+    expect((await auditRowsOf(mickey)).every((r) => r.ownerId === mickey.claimantId)).toBe(true);
+  });
+
+  // Another writer holds these Claimants' locks mid-command until release() (design D5).
+  const holdLocks = async (...claimantIds: string[]) => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const isLocked = new Promise<void>((r) => (locked = r));
+    const writer = db.transaction(async (tx) => {
+      for (const id of claimantIds) await lockClaimant(tx, id);
+      locked();
+      await held;
+    });
+    await isLocked;
+    return async () => {
+      release();
+      await writer;
+    };
+  };
+
+  it("an admin's command on another Claimant's Expense takes that Claimant's lock, not the admin's own", async () => {
+    const mickey = claimant();
+    const minnie = admin();
+    const t = await books3000(mickey);
+    const release = await holdLocks(mickey.claimantId);
+    const correcting = books.execute(minnie, { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) });
+    expect(await settle(correcting)).toBe("waiting");
+    // The admin's own lock is free: an admin acting on their own books is not held up.
+    expect(await settle(books.execute(minnie, logExpense("shop", 100)))).toBe("done");
+    await release();
+    expect(await settle(correcting, 5000)).toBe("done");
+    expect(await read(mickey, t.expenseId)).toMatchObject({ amount: rupees(310000) });
+  });
+
+  // No spec moves a Bill between two Claimants (D5 names only Payback and duplicate resolution): refused until the owner decides.
+  it("an admin moving a Bill from one Claimant's Expense to another's is refused as invalid_transition and nothing changes", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const minnie = admin();
+    const from = await books3000(mickey);
+    const to = await books3000(dexter);
+    const before = [await snapshot(mickey, from), await snapshot(dexter, to)];
+    expect(await books.execute(minnie, { type: "MoveBill", billId: from.deliveredBillId, toExpenseId: to.expenseId })).toEqual({
+      ok: false,
+      reason: "invalid_transition",
+    });
+    expect([await snapshot(mickey, from), await snapshot(dexter, to)]).toEqual(before);
+    expect(await auditRowsOf(minnie)).toEqual([]);
+  });
+
+  // A writer holds Mickey's lock and, once released by move(), puts Mickey's delivered Bill into another Expense.
+  const holdAndMove = async (owner: Actor, billId: string, toExpenseId: string) => {
+    let go!: () => void;
+    const went = new Promise<void>((r) => (go = r));
+    let locked!: () => void;
+    const isLocked = new Promise<void>((r) => (locked = r));
+    const writer = db.transaction(async (tx) => {
+      await lockClaimant(tx, owner.claimantId);
+      locked();
+      await went;
+      // ponytail: no Books command moves a Bill between Claimants any more, so the owner change is written directly.
+      await tx.update(bills).set({ expenseId: toExpenseId }).where(eq(bills.id, billId));
+    });
+    await isLocked;
+    return async () => {
+      go();
+      await writer;
+    };
+  };
+
+  it("a move whose Bill changes owner while it waits is decided only under the new owner's lock", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const minnie = admin();
+    const from = await books3000(mickey);
+    const to = await order(mickey, 500000);
+    const elsewhere = await order(dexter, 500000);
+    const move = await holdAndMove(mickey, from.deliveredBillId, elsewhere.expenseId);
+    const moving = books.execute(minnie, { type: "MoveBill", billId: from.deliveredBillId, toExpenseId: to.expenseId });
+    expect(await settle(moving)).toBe("waiting");
+    const releaseDexter = await holdLocks(dexter.claimantId);
+    await move();
+    // The Bill is now in Dexter's books, whose lock the command never took: it reruns and waits for it.
+    expect(await settle(moving)).toBe("waiting");
+    await releaseDexter();
+    expect(await moving).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(await auditRowsOf(minnie)).toEqual([]);
+  });
+
+  it("an admin's command waiting while the Bill changes owner underneath reruns under the new owner's lock and lands there", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const minnie = admin();
+    const from = await books3000(mickey);
+    const elsewhere = await order(dexter, 500000);
+    const move = await holdAndMove(mickey, from.deliveredBillId, elsewhere.expenseId);
+    const returning = books.execute(minnie, { type: "ReturnBill", billId: from.deliveredBillId });
+    expect(await settle(returning)).toBe("waiting");
+    await move();
+    const returned = ok(await returning);
+    expect(returned.events.map((e) => ("expenseId" in e ? e.expenseId : null))).toEqual(returned.events.map(() => elsewhere.expenseId));
+    expect(await auditRowsOf(minnie)).toMatchObject(returned.events.map((e) => ({ event: e.type, ownerId: dexter.claimantId })));
+  });
+
+  // Two Claimants' locks are always taken in ID order (D5), so two commands taking both, in opposite directions, never deadlock.
+  it("two admins moving Bills between the same two Claimants in opposite directions at once never deadlock", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const [minnie, goofy] = [admin(), admin()];
+    const [m, d] = await Promise.all([books3000(mickey), books3000(dexter)]);
+    // Both commands read their owners, then queue behind a writer holding both locks, so they meet at the locks.
+    const release = await holdLocks(mickey.claimantId, dexter.claimantId);
+    const moves = [
+      books.execute(minnie, { type: "MoveBill", billId: m.deliveredBillId, toExpenseId: d.expenseId }),
+      books.execute(goofy, { type: "MoveBill", billId: d.deliveredBillId, toExpenseId: m.expenseId }),
+    ];
+    expect(await settle(Promise.all(moves))).toBe("waiting");
+    await release();
+    expect(await Promise.all(moves)).toEqual([
+      { ok: false, reason: "invalid_transition" },
+      { ok: false, reason: "invalid_transition" },
+    ]);
+  });
+
+  it("what an admin's command creates belongs to the Claimant it acts for; what an admin logs is the admin's own", async () => {
+    const mickey = claimant();
+    const minnie = admin();
+    const t = await books3000(mickey);
+    const detached = ok(await books.execute(minnie, { type: "DetachBill", billId: t.deliveredBillId }));
+    const logged = detached.events.find((e) => e.type === "ExpenseLogged");
+    if (logged?.type !== "ExpenseLogged") throw new Error("expected a new Expense");
+    expect(logged.claimantId).toBe(mickey.claimantId);
+    expect(await read(mickey, logged.expenseId)).toMatchObject({ amount: rupees(120000) });
+    expect((await auditRowsOf(minnie)).every((r) => r.ownerId === mickey.claimantId)).toBe(true);
+
+    // LogExpense takes no Claimant from its input (D6), so an admin can only log into the Actor's own books.
+    const own = expenseIdOf(await books.execute(minnie, logExpense("shop", 25000)));
+    expect(await books.expense(mickey, own)).toEqual({ ok: false, reason: "not_found" });
+    expect(await expensesOf(minnie)).toBe(1);
+  });
+
+  it("an idempotency key is its sender's: an admin's replay returns the first result; the owner sending it is refused, and the other way round", async () => {
+    const mickey = claimant();
+    const minnie = admin();
+    const t = await books3000(mickey);
+    const correct = { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) } as const;
+    const key = `k-${randomUUID()}`;
+    const first = ok(await books.execute(minnie, correct, { idempotencyKey: key }));
+    expect(await books.execute(minnie, correct, { idempotencyKey: key })).toEqual(first);
+    expect(await books.execute(mickey, correct, { idempotencyKey: key })).toEqual({ ok: false, reason: "idempotency_conflict" });
+    expect(await auditRowsOf(minnie)).toHaveLength(first.events.length);
+
+    const owners = `k-${randomUUID()}`;
+    const undo = { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(300000) } as const;
+    const mine = ok(await books.execute(mickey, undo, { idempotencyKey: owners }));
+    expect(await books.execute(minnie, undo, { idempotencyKey: owners })).toEqual({ ok: false, reason: "idempotency_conflict" });
+    expect(await books.execute(mickey, undo, { idempotencyKey: owners })).toEqual(mine);
+    expect(await read(mickey, t.expenseId)).toMatchObject({ amount: rupees(300000) });
+  });
+
+  it("an admin and the owner sending one new key at once: one is served, the other refused as idempotency_conflict, one change made", async () => {
+    const mickey = claimant();
+    const minnie = admin();
+    const t = await books3000(mickey);
+    const key = `k-${randomUUID()}`;
+    const correct = { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) } as const;
+    const results = await Promise.all([minnie, mickey].map((actor) => books.execute(actor, correct, { idempotencyKey: key })));
+    expect(results.map((r) => (r.ok ? "ok" : r.reason)).sort()).toEqual(["idempotency_conflict", "ok"]);
+    expect(
+      (await db.select({ n: count() }).from(auditLog).where(and(eq(auditLog.entityId, t.expenseId), eq(auditLog.command, "CorrectExpense"))))[0]!.n,
+    ).toBe(1);
+  });
+
+  // Property (D6), through the Interface against Postgres: for every order of every command, an admin acting on
+  // Dexter's books gets exactly what Mickey gets on his own (same results, same reads, ids aside), while another Claimant
+  // and a role-less Actor, trying the same command and reads on Mickey's books before each step, get not_found or
+  // forbidden and change nothing: no entry is written with Mickey as owner, and the two worlds never drift apart.
+  it("property: an admin acts as the owner would; another Claimant and a role-less Actor never see or change the owner's data", async () => {
+    const names = Object.keys(everyCommand({ expenseId: "x", expectedBillId: "x", deliveredBillId: "x", refundId: "x" })) as Command["type"][];
+    const ids = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\b[EBRO]-\d+\b/gi;
+    const same = (x: unknown) => JSON.stringify(x).replace(ids, "#");
+    const ownerRows = async (owner: Actor) => (await db.select({ n: count() }).from(auditLog).where(eq(auditLog.ownerId, owner.claimantId)))[0]!.n;
+    const outcomes = new Set<string>();
+    await Promise.all(
+      names.map(async (_, start) => {
+        const [mickey, dexter, minnie, courage] = [claimant(), claimant(), admin(), claimant()];
+        const roleless: Actor = { ...mickey, roles: [] };
+        const world = async (actor: Actor, owner: Actor) => ({ actor, owner, t: await books3000(owner), other: (await order(owner, 500000)).expenseId });
+        const worlds = await Promise.all([world(mickey, mickey), world(minnie, dexter)]);
+        const [own, admins] = worlds as [(typeof worlds)[number], (typeof worlds)[number]];
+        const view = (reader: Actor, w: typeof own) =>
+          Promise.all([books.expense(reader, w.t.expenseId), books.order(reader, w.t.expenseId), books.expense(reader, w.other)]);
+        for (let k = 0; k < names.length; k++) {
+          const name = names[(start + k) % names.length]!;
+          // Courage, another Claimant, or a role-less Actor first: the same command and reads on Mickey's books.
+          const [who, refused] = (start + k) % 2 ? [courage, "not_found"] : [roleless, "forbidden"];
+          const rows = await ownerRows(mickey);
+          const [tried, read, page] = await Promise.all([
+            books.execute(who, everyCommand(own.t, own.other)[name]),
+            books.expense(who, own.t.expenseId),
+            books.order(who, own.other),
+          ]);
+          if (name !== "LogExpense" || who === roleless) expect(tried, `${name} by ${refused === "forbidden" ? "a role-less Actor" : "another Claimant"}`).toEqual({ ok: false, reason: refused });
+          expect([read, page]).toEqual([{ ok: false, reason: refused }, { ok: false, reason: refused }]);
+          expect(await ownerRows(mickey)).toBe(rows);
+
+          const [byOwner, byAdmin] = await Promise.all(worlds.map((w) => books.execute(w.actor, everyCommand(w.t, w.other)[name])));
+          expect(same(byAdmin), `${name}, step ${k} from ${names[start]}`).toBe(same(byOwner));
+          outcomes.add(`${name}:${byOwner!.ok ? "ok" : byOwner!.reason}`);
+          const [mine, theirs] = await Promise.all([view(mickey, own), view(minnie, admins)]);
+          expect(same(theirs)).toBe(same(mine));
+        }
+        expect(await view(dexter, admins)).toEqual(await view(minnie, admins));
+        // Every entry the admin wrote names the admin as actor and Dexter as owner, but the admin's own LogExpense.
+        for (const row of await auditRowsOf(minnie)) expect(row.ownerId).toBe(row.command === "LogExpense" ? minnie.claimantId : dexter.claimantId);
+      }),
+    );
+    // Every command is accepted somewhere, so the comparison is never only of refusals; but CorrectBill and
+    // ConfirmDiffers, which need a Bill's document, and no command attaches one yet (Phase 2).
+    const accepted = names.filter((n) => outcomes.has(`${n}:ok`));
+    expect(accepted).toEqual(names.filter((n) => n !== "CorrectBill" && n !== "ConfirmDiffers"));
+  }, 60_000);
 });

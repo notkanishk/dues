@@ -162,7 +162,7 @@ export const owedToUniversity = pgTable(
 );
 
 // Append-only (design D2): one row per event Books decides, written before the state rows in the
-// same transaction. who = actor, what = command and event, when = at, plus from-state and to-state.
+// same transaction. who = actor, whose = owner, what = command and event, when = at, plus from-state and to-state.
 // Triggers in the migration refuse UPDATE and DELETE (platform-foundations: never edited or deleted).
 // An idempotency key, when given, is used once (design D4).
 export const auditLog = pgTable(
@@ -171,6 +171,8 @@ export const auditLog = pgTable(
     id: key(),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
     actorId: uuid("actor_id").notNull(),
+    // The Claimant whose books the entry changes: the actor, unless an admin acted on another Claimant's data (identity-access).
+    ownerId: uuid("owner_id").notNull(),
     command: text("command").notNull(),
     event: text("event").notNull(),
     entity: text("entity").notNull(),

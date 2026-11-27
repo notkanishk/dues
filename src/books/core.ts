@@ -247,6 +247,8 @@ export type RefundState = {
 };
 export type ExpenseState = {
   id: string;
+  /** The Claimant whose books it is in: who logged it, whoever acts on it later (an admin included). */
+  claimantId: string;
   draft: boolean;
   closedReason: CloseReason | null;
   kind: LogExpense["kind"] | null;
@@ -524,7 +526,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           {
             type: "ExpenseLogged",
             expenseId,
-            claimantId: actor.claimantId,
+            claimantId: expense.claimantId, // the Order's owner, whoever detaches (an admin included)
             kind: expense.kind,
             amount: bill.amount,
             // ponytail: W4's invoice-only Expense takes the bill date; until a Reading gives one, the Order's date.
@@ -544,6 +546,9 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       const target = slice.expenses[command.toExpenseId];
       if (!target) return reject("not_found"); // the loader scoped it: another Claimant's Expense is absent
       if (target.id === expense.id || target.draft || target.closedReason) return reject("invalid_transition");
+      // ponytail: a Bill never moves between two Claimants, an admin's move included; no spec allows it (D5 names only
+      // Payback and duplicate resolution). invalid_transition, not forbidden: the Actor may act on both, the move is what is refused.
+      if (target.claimantId !== expense.claimantId) return reject("invalid_transition");
       // A Bill equal to what the target still expects fulfils its expected Bill: cancelled, with no Refund (W4.3).
       const waiting = target.bills.find(isExpected);
       const into: Event[] | Rejected =
@@ -630,6 +635,7 @@ export function apply(slice: Slice, event: Event): Slice {
           ...slice.expenses,
           [event.expenseId]: {
             id: event.expenseId,
+            claimantId: event.claimantId,
             draft: false,
             closedReason: null,
             kind: event.kind,
