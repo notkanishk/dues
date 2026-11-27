@@ -163,9 +163,12 @@ async function touches(tx: Tx, command: Command): Promise<[number, string[]]> {
 async function ownersOf(tx: Tx, actor: Actor, command: Command): Promise<string[]> {
   const wanted = (await touches(tx, command))[1].filter((id) => UUID.test(id));
   const rows = wanted.length
-    ? await tx.selectDistinct({ id: expenses.claimantId }).from(expenses).where(and(inArray(expenses.id, wanted), scope(actor)))
+    ? await tx.select({ id: expenses.id, owner: expenses.claimantId }).from(expenses).where(and(inArray(expenses.id, wanted), scope(actor)))
     : [];
-  return rows.length ? rows.map((r) => r.id).sort() : [actor.claimantId];
+  // Gathered in the command's order, so the sort alone fixes the lock order, never the database's row order.
+  const owner = new Map(rows.map((r) => [r.id, r.owner]));
+  const owners = [...new Set(wanted.flatMap((id) => owner.get(id) ?? []))];
+  return owners.length ? owners.sort() : [actor.claimantId];
 }
 
 async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice> {

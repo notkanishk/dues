@@ -1126,6 +1126,39 @@ describe("Authorization at the Actor Seam", () => {
     expect(await auditRowsOf(minnie)).toEqual([]);
   });
 
+  it("an admin's command waiting while the Bill changes owner underneath reruns under the new owner's lock and lands there", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const minnie = admin();
+    const from = await books3000(mickey);
+    const elsewhere = await order(dexter, 500000);
+    const move = await holdAndMove(mickey, from.deliveredBillId, elsewhere.expenseId);
+    const returning = books.execute(minnie, { type: "ReturnBill", billId: from.deliveredBillId });
+    expect(await settle(returning)).toBe("waiting");
+    await move();
+    const returned = ok(await returning);
+    expect(returned.events.map((e) => ("expenseId" in e ? e.expenseId : null))).toEqual(returned.events.map(() => elsewhere.expenseId));
+    expect(await auditRowsOf(minnie)).toMatchObject(returned.events.map((e) => ({ event: e.type, ownerId: dexter.claimantId })));
+  });
+
+  // Two Claimants' locks are always taken in ID order (D5), so two commands taking both, in opposite directions, never deadlock.
+  it("two admins moving Bills between the same two Claimants in opposite directions at once never deadlock", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const [minnie, goofy] = [admin(), admin()];
+    const [m, d] = await Promise.all([books3000(mickey), books3000(dexter)]);
+    // Both commands read their owners, then queue behind a writer holding both locks, so they meet at the locks.
+    const release = await holdLocks(mickey.claimantId, dexter.claimantId);
+    const moves = [
+      books.execute(minnie, { type: "MoveBill", billId: m.deliveredBillId, toExpenseId: d.expenseId }),
+      books.execute(goofy, { type: "MoveBill", billId: d.deliveredBillId, toExpenseId: m.expenseId }),
+    ];
+    expect(await settle(Promise.all(moves))).toBe("waiting");
+    await release();
+    expect(await Promise.all(moves)).toEqual([
+      { ok: false, reason: "invalid_transition" },
+      { ok: false, reason: "invalid_transition" },
+    ]);
+  });
+
   it("what an admin's command creates belongs to the Claimant it acts for; what an admin logs is the admin's own", async () => {
     const mickey = claimant();
     const root = admin();
