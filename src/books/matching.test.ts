@@ -533,7 +533,7 @@ describe("propose properties", () => {
     const count = candidates.filter(candidate).length;
     return {
       /** May auto-attach: the spec's conditions, nothing more. */
-      allowed: (e: CandidateExpense) => inWindow(e) && ((exact(e) && (vendor(e) || order(e) || count === 1)) || (larger(e) && (order(e) || vendor(e)))),
+      allowed: (e: CandidateExpense) => inWindow(e) && ((exact(e) && (vendor(e) || order(e) || count === 1)) || (larger(e) && (order(e) || vendor(e)) && !candidates.some((c) => c !== e && candidate(c) && exact(c)))),
       /** Must auto-attach: exact, in the window, vendor or order number matches, and no other exact candidate. */
       strong: (e: CandidateExpense) => inWindow(e) && exact(e) && (vendor(e) || order(e)) && !candidates.some((c) => c !== e && candidate(c) && exact(c)),
     };
