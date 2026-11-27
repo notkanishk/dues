@@ -186,8 +186,8 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
       const exact = e.openAmount.paise === facts.total.paise;
       const smaller = e.kind === "online" && e.openAmount.paise > facts.total.paise;
       const order = sameRef(facts.orderRef, e.orderRef);
-      // A Payback expects a bill from any vendor: the vendor check is skipped, so it always passes (W9).
-      const fit = { e, order, vendor: e.payback || shopMatches(shop, e), exact, days, auto: false };
+      // A Payback expects a bill of its amount from any vendor (W9): the vendor check is skipped for that amount only.
+      const fit = { e, order, vendor: shopMatches(shop, e) || (e.payback && exact), exact, days, auto: false };
       // A candidate: exact amount in the window, a larger online Order in the window, or the same order number.
       return (inWindow && (exact || smaller)) || order ? { ...fit, auto: inWindow && (exact || smaller) && (order || fit.vendor) } : null;
     })
