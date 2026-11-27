@@ -123,6 +123,12 @@ describe("Auto-attach only on a strong match, anything else raises a Check", () 
       [expense("E-201", { vendor: "Sample Tools" }), expense("E-202", { vendor: "Sample Tools", paidOn: "2026-03-03" })],
       { type: "attachWithCheck", expenseId: "E-202", others: ["E-201"] },
     ],
+    [
+      "an exact amount outside the window does not lead: the exact one in the window beats an order-number match 20 days away",
+      bill({ orderRef: "ORD-5502" }),
+      [expense("E-223", { ...gateway, orderRef: "ORD-5502", paidOn: "2026-02-12" }), expense("E-224", gateway)],
+      { type: "attachWithCheck", expenseId: "E-224", others: ["E-223"] },
+    ],
   ])("%s", (_, facts, candidates, expected) => {
     expect(propose(facts, candidates)).toEqual(expected);
   });
@@ -197,7 +203,7 @@ describe("A smaller invoice splits the Order", () => {
       "an exact-amount candidate stops any split: a ₹1,180.00 Sample Tools bill, a ₹1,180.00 gateway-paid shop Expense and a ₹4,870.00 Sample Tools Order",
       bill(),
       [expense("E-408", { payee: "GatewayPay Merchant 12" }), order("E-409", { vendor: "Sample Tools" })],
-      { type: "attachWithCheck", expenseId: "E-409", others: ["E-408"] },
+      { type: "attachWithCheck", expenseId: "E-408", others: ["E-409"] },
     ],
   ])("%s", (_, facts, candidates, expected) => {
     expect(propose(facts, candidates)).toEqual(expected);
@@ -395,7 +401,7 @@ describe("Review probe rows", () => {
   const invoice = { invoiceOnly: true, vendor: "Sample Tools", openAmount: rs(0) } as const;
   it.each<[string, BillFacts | PaymentFacts, CandidateExpense[], Proposal]>([
     ["1 a ₹300.00 café bill and a ₹4,870.00 online Payback", bill({ total: rs(300), vendor: "Random Cafe" }), [expense("E-1", { ...order4870, payback: true, payee: "Dexter" })], { type: "attachWithCheck", expenseId: "E-1", others: [] }],
-    ["2 an exact gateway-paid shop Expense and a larger same-shop Order", bill(), [expense("E-1", { payee: "GatewayPay" }), expense("E-2", { ...order4870, vendor: "Sample Tools" })], { type: "attachWithCheck", expenseId: "E-2", others: ["E-1"] }],
+    ["2 an exact gateway-paid shop Expense and a larger same-shop Order", bill(), [expense("E-1", { payee: "GatewayPay" }), expense("E-2", { ...order4870, vendor: "Sample Tools" })], { type: "attachWithCheck", expenseId: "E-1", others: ["E-2"] }],
     ["3 \"The Hardware Co\" against \"Hardware Ltd\", two exact", bill({ vendor: "The Hardware Co" }), [expense("E-1", { vendor: "Hardware Ltd" }), expense("E-2", { payee: "GatewayPay", paidOn: "2026-03-04" })], { type: "attachWithCheck", expenseId: "E-2", others: ["E-1"] }],
     [
       "4 a Payback against an exact gateway-paid Expense",
