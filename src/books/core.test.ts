@@ -1182,7 +1182,7 @@ describe("CorrectExpense", () => {
   });
 
   it("Edit blocked after submission: Fund, Purpose and What for lock with the other corrected fields", () => {
-    const slice: Slice = { ...shop(100000), links: { funds: { "f-travel": true }, purposes: { "p-trip": { fundId: "f-travel" } }, fallback: { fundId: MAKERSPACE, purposeId: null } } };
+    const slice: Slice = { ...shop(100000), links: { funds: { "f-travel": true }, purposes: { "p-trip": { fundId: "f-travel" } }, paymentMethods: {}, fallback: { fundId: MAKERSPACE, purposeId: null } } };
     slice.expenses["e-1"]!.bills[0]!.claim = "submitted";
     for (const change of [{ fundId: "f-travel" }, { purposeId: "p-trip" }, { whatFor: "Bus fare" }])
       expect(run(slice, correct(change)).decision, JSON.stringify(change)).toEqual({ ok: false, reason: "locked" });
