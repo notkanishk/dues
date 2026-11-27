@@ -387,6 +387,33 @@ describe("One Payment for several invoices", () => {
   });
 });
 
+// The Opus review's probe, kept as fixed rows: each once proposed money against the wrong Expense, or none.
+describe("Review probe rows", () => {
+  const confirmation = (over: Partial<PaymentFacts> = {}) =>
+    payment({ amount: rs(1500), paidOn: "2026-03-06", payee: "Fizzy Hardware", upiRef: "6123", receivedAt: "2026-03-06T09:00:00Z", ...over });
+  const order4870 = { kind: "online", payment: rs(4870), openAmount: rs(4870) } as const;
+  const invoice = { invoiceOnly: true, vendor: "Sample Tools", openAmount: rs(0) } as const;
+  it.each<[string, BillFacts | PaymentFacts, CandidateExpense[], Proposal]>([
+    ["1 a ₹300.00 café bill and a ₹4,870.00 online Payback", bill({ total: rs(300), vendor: "Random Cafe" }), [expense("E-1", { ...order4870, payback: true, payee: "Dexter" })], { type: "attachWithCheck", expenseId: "E-1", others: [] }],
+    ["2 an exact gateway-paid shop Expense and a larger same-shop Order", bill(), [expense("E-1", { payee: "GatewayPay" }), expense("E-2", { ...order4870, vendor: "Sample Tools" })], { type: "attachWithCheck", expenseId: "E-2", others: ["E-1"] }],
+    ["3 \"The Hardware Co\" against \"Hardware Ltd\", two exact", bill({ vendor: "The Hardware Co" }), [expense("E-1", { vendor: "Hardware Ltd" }), expense("E-2", { payee: "GatewayPay", paidOn: "2026-03-04" })], { type: "attachWithCheck", expenseId: "E-2", others: ["E-1"] }],
+    [
+      "4 a Payback against an exact gateway-paid Expense",
+      bill({ total: rs(900) }),
+      [expense("E-1", { payback: true, payee: "Dexter", payment: rs(900), openAmount: rs(900) }), expense("E-2", { payee: "GatewayPay", payment: rs(900), openAmount: rs(900), paidOn: "2026-03-04" })],
+      { type: "attachWithCheck", expenseId: "E-1", others: ["E-2"] },
+    ],
+    ["5 a merge with payee Fizzy Hardware for Sample Tools invoices", confirmation(), [expense("E-1", { ...invoice, payment: rs(900) }), expense("E-2", { ...invoice, payment: rs(600) })], NEW_EXPENSE],
+    ["6 a ₹0.00 bill against a settled Expense", bill({ total: rs(0) }), [expense("E-1", { openAmount: rs(0) })], NEW_EXPENSE],
+    ["7 a confirmation fitting two identical invoice-only Expenses", confirmation({ amount: rs(1180), payee: "Sample Tools" }), [expense("E-2", invoice), expense("E-1", invoice)], NEW_EXPENSE],
+    ["8 a blank vendor with no candidate", bill({ vendor: "" }), [], { type: "newExpense", askVendor: true }],
+    ["9 an order number match for a larger bill outside the window", bill({ total: rs(9000), orderRef: "O1", billDate: "2026-06-01" }), [expense("E-1", { orderRef: "O1" })], { type: "attachWithCheck", expenseId: "E-1", others: [] }],
+    ["10 a blank reference two minutes after another", confirmation({ upiRef: "", amount: null }), [expense("E-1", { proofReceivedAt: "2026-03-06T08:58:00Z" })], { type: "samePaymentSuggestion", expenseId: "E-1" }],
+  ])("%s", (_, facts, candidates, expected) => {
+    expect(propose(facts, candidates)).toEqual(expected);
+  });
+});
+
 // Property tests: seeded random Claimant books, so a failure reproduces. Names are spelt one way each, so the
 // oracle below can compare them with plain equality, independent of how propose normalises names.
 describe("propose properties", () => {
