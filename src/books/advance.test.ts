@@ -311,3 +311,91 @@ describe("Funds on the upload prompt: the chip", () => {
     expect(await chipOf(mickey, MAKERSPACE)).toBe("Makerspace");
   });
 });
+
+// Property (expense-tracking "Advance balance"): for random command sequences across two Funds, every Advance left the
+// query returns equals the formula worked out here from the commands Books accepted, independently of how Books stores
+// or sums them: total − Σ Payments + Σ Refunds received (+ Σ Reimbursements received, none before Claims).
+describe("Advance left, for any command sequence across two Funds", () => {
+  // ponytail: a seeded generator instead of a property-testing dependency, as in core.test.ts; same seed, same runs.
+  let seed = 0xad7a;
+  const next = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (t ^ (t >>> 14)) >>> 0;
+  };
+  const pick = <T>(xs: readonly T[]) => xs[next() % xs.length]!;
+  const amount = () => 1 + (next() % 500_000); // up to ₹5,000.00
+
+  it("equals total − Σ Payments + Σ Refunds received, per Fund, after every step of 4 runs of 30 commands", async () => {
+    const kinds = new Set<string>();
+    for (let run = 0; run < 4; run++) {
+      const mickey = claimant();
+      const travel = await fund(mickey);
+      const fundIds = [MAKERSPACE, travel];
+      // Both on from the start, so most steps check a live Advance; SetAdvance turns one off a quarter of the time.
+      const total: Record<string, number | null> = { [MAKERSPACE]: 1_000_000, [travel]: 500_000 };
+      for (const fundId of fundIds) ok(await setAdvance(mickey, fundId, total[fundId]!));
+      const model: { expenseId: string; billId: string; fundId: string; paise: number; online: boolean; refunds: { id: string; paise: number; received: boolean }[] }[] = [];
+      for (let step = 0; step < 30; step++) {
+        const expense = model.length ? pick(model) : undefined;
+        const refund = expense && expense.refunds.length ? pick(expense.refunds) : undefined;
+        const roll = next() % 8;
+        let result: Result;
+        if (roll === 0) {
+          const fundId = pick(fundIds);
+          const paise = next() % 4 === 0 ? null : amount();
+          result = await setAdvance(mickey, fundId, paise);
+          if (result.ok) total[fundId] = paise;
+          kinds.add(`SetAdvance:${result.ok}`);
+        } else if (roll <= 2 || !expense) {
+          const fundId = pick(fundIds);
+          const online = next() % 2 === 0;
+          const paise = amount();
+          const made = await pay(mickey, fundId, paise, online ? "online" : "shop");
+          model.push({ ...made, fundId, paise, online, refunds: [] });
+          result = { ok: true, events: [] };
+          kinds.add("LogExpense:true");
+        } else if (roll === 3) {
+          const fundId = pick(fundIds);
+          result = await books.execute(mickey, { type: "CorrectExpense", expenseId: expense.expenseId, fundId });
+          if (result.ok) expense.fundId = fundId;
+          kinds.add(`CorrectExpense fund:${result.ok}`);
+        } else if (roll === 4) {
+          const paise = amount();
+          result = await books.execute(mickey, { type: "CorrectExpense", expenseId: expense.expenseId, amount: rupees(paise) });
+          if (result.ok) expense.paise = paise;
+          kinds.add(`CorrectExpense amount:${result.ok}`);
+        } else if (roll === 5) {
+          const paise = 1 + (next() % Math.max(1, Math.floor(expense.paise / 2)));
+          result = await books.execute(mickey, { type: "ExpectRefund", billId: expense.billId, amount: rupees(paise) });
+          const made = result.ok ? result.events.find((e) => e.type === "RefundExpected") : undefined;
+          if (made?.type === "RefundExpected") expense.refunds.push({ id: made.refundId, paise, received: false });
+          kinds.add(`ExpectRefund:${result.ok}`);
+        } else if (roll === 6 && refund) {
+          result = await books.execute(mickey, { type: "MarkRefundReceived", refundId: refund.id, refundedOn: "2026-11-27" });
+          if (result.ok) refund.received = true;
+          kinds.add(`MarkRefundReceived:${result.ok}`);
+        } else {
+          // Not claiming the rest of an Order: written off, never received.
+          result = await books.execute(mickey, { type: "CloseOrder", billId: expense.billId, choice: "not_claiming" });
+          kinds.add(`CloseOrder:${result.ok}`);
+        }
+        if (!result.ok && !["invalid_transition", "validation", "not_found"].includes(result.reason)) throw new Error(JSON.stringify(result));
+
+        const read = await blocks(mickey);
+        for (const fundId of fundIds) {
+          const t = total[fundId] ?? null;
+          const mine = model.filter((e) => e.fundId === fundId);
+          const payments = mine.reduce((s, e) => s + e.paise, 0);
+          const received = mine.flatMap((e) => e.refunds).reduce((s, r) => s + (r.received ? r.paise : 0), 0);
+          const expected = t === null ? null : rupees(t - payments + received);
+          expect(read.find((b) => b.fundId === fundId)?.left, `run ${run}, step ${step}`).toEqual(expected);
+        }
+      }
+    }
+    // The sequences reach every money path, accepted: a Refund received, a move, an amount corrected, Not claiming.
+    for (const k of ["SetAdvance:true", "CorrectExpense fund:true", "CorrectExpense amount:true", "ExpectRefund:true", "MarkRefundReceived:true", "CloseOrder:true"])
+      expect([...kinds], k).toContain(k);
+  }, 120_000);
+});
