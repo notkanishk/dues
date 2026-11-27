@@ -142,6 +142,12 @@ describe("A smaller invoice splits the Order", () => {
       [order("E-407", { payback: true, payee: "Dexter" })],
       { type: "attachWithCheck", expenseId: "E-407", others: [] },
     ],
+    [
+      "an exact-amount candidate stops any split: a ₹1,180.00 Sample Tools bill, a ₹1,180.00 gateway-paid shop Expense and a ₹4,870.00 Sample Tools Order",
+      bill(),
+      [expense("E-408", { payee: "GatewayPay Merchant 12" }), order("E-409", { vendor: "Sample Tools" })],
+      { type: "attachWithCheck", expenseId: "E-409", others: ["E-408"] },
+    ],
   ])("%s", (_, facts, candidates, expected) => {
     expect(propose(facts, candidates)).toEqual(expected);
   });
