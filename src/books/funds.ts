@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { expenses, funds, fundSettings, fundVersions, refunds } from "@/src/db/schema";
-import { type Money, sum, zero } from "@/src/money/money";
+import { type Money, money, sum, zero } from "@/src/money/money";
 import type { Tx } from "./books";
 import { type Actor, advanceLeft, advanceState, isAdmin, MAKERSPACE, own } from "./core";
 
@@ -48,7 +48,7 @@ export async function listFunds(q: Q, actor: Actor, view: "settings" | "prompt")
       archived: fund.archived,
       hidden: setting?.hidden ?? false,
       /** The Actor's own Advance total on it, null while off; never another Claimant's. */
-      advance: setting?.advancePaise == null ? null : ({ paise: setting.advancePaise, currency: "INR" } as Money),
+      advance: money(setting?.advancePaise ?? null, "INR"),
       mayEditTeam: fund.creatorId === actor.claimantId || isAdmin(actor),
       claimNamePattern: fund.claimNamePattern,
       teamVersion,
@@ -302,7 +302,7 @@ export async function loadFundSlice(tx: Tx, actor: Actor, command: FundCommand):
       fields: { ...pick(row), name: row.name, notes: row.notes, claimNamePattern: row.claimNamePattern },
       mine: version ? { ...pick(version), basedOn: version.basedOn } : null,
       hidden: setting?.hidden ?? false,
-      advance: setting?.advancePaise == null ? null : { paise: setting.advancePaise, currency: "INR" },
+      advance: money(setting?.advancePaise ?? null, "INR"),
     };
   });
   return { newId, funds: Object.fromEntries(states.map((s) => [s.id, s])) };

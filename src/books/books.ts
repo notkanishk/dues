@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { auditLog, bills, expenses, funds as fundsTable, idempotencyKeys, purposes, refunds, writeOffs } from "@/src/db/schema";
-import { type Money, sum } from "@/src/money/money";
+import { type Money, money, sum } from "@/src/money/money";
 import {
   type Actor,
   apply,
@@ -62,7 +62,6 @@ const mayEnter = (actor: Actor) => actor.roles.includes("claimant");
  */
 const scope = (actor: Actor) => (isAdmin(actor) ? undefined : eq(expenses.claimantId, actor.claimantId));
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
-const money = (paise: number | null, currency: string): Money | null => (paise === null ? null : { paise, currency: currency as "INR" });
 
 /**
  * The one place Books loads rows. Scoped to the Actor's Claimant: another Claimant's Expense is
