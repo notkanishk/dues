@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { eq, TransactionRollbackError } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { MAKERSPACE } from "@/src/books/core";
 import { db, pool } from "./index";
 import { auditLog, bills, expenseReferenceSeq, expenses, owedToUniversity, refunds, writeOffs } from "./schema";
 
@@ -13,7 +14,7 @@ const mickey = randomUUID();
 const dexter = randomUUID();
 
 const logExpense = async (claimantId: string) =>
-  (await db.insert(expenses).values({ claimantId, amountPaise: 25050 }).returning())[0]!;
+  (await db.insert(expenses).values({ claimantId, amountPaise: 25050 , fundId: MAKERSPACE }).returning())[0]!;
 
 const auditEntry = (entityId: string, idempotencyKey?: string) => ({
   actorId: mickey,
@@ -77,7 +78,7 @@ describe("Keys and References", () => {
       await pool.query("select setval($1, 9999)", [seq]);
       await db
         .transaction(async (tx) => {
-          reference = (await tx.insert(expenses).values({ claimantId: mickey, amountPaise: 100 }).returning())[0]!.reference;
+          reference = (await tx.insert(expenses).values({ claimantId: mickey, amountPaise: 100 , fundId: MAKERSPACE }).returning())[0]!.reference;
           tx.rollback();
         })
         .catch((e) => {
@@ -98,7 +99,7 @@ describe("Keys and References", () => {
 
   it("refuses a Reference supplied on insert; only the database issues them", async () => {
     // A supplied E-500 would collide later with the one the sequence issues.
-    await refusedWith(GENERATED_ALWAYS, db.insert(expenses).values({ claimantId: mickey, amountPaise: 100, reference: "E-500" }));
+    await refusedWith(GENERATED_ALWAYS, db.insert(expenses).values({ claimantId: mickey, amountPaise: 100, reference: "E-500" , fundId: MAKERSPACE }));
     const expense = await logExpense(mickey);
     await refusedWith(
       GENERATED_ALWAYS,
@@ -117,7 +118,7 @@ describe("Keys and References", () => {
   });
 
   it("never stores a padded Reference like E-0042", async () => {
-    await refusedWith(GENERATED_ALWAYS, db.insert(expenses).values({ claimantId: mickey, reference: "E-0042" }));
+    await refusedWith(GENERATED_ALWAYS, db.insert(expenses).values({ claimantId: mickey, reference: "E-0042" , fundId: MAKERSPACE }));
     const expense = await logExpense(mickey);
     await refusedAsImmutable(db.update(expenses).set({ reference: "E-0042" }).where(eq(expenses.id, expense.id)));
     expect(await db.select().from(expenses).where(eq(expenses.reference, "E-0042"))).toEqual([]);
@@ -161,7 +162,7 @@ describe("Amounts", () => {
 
   it("lets an Expense and its Payment proof Bill wait with the amount blank", async () => {
     // document-intake: a payment confirmation whose amount can't be read still makes the Expense.
-    const [expense] = await db.insert(expenses).values({ claimantId: mickey }).returning();
+    const [expense] = await db.insert(expenses).values({ claimantId: mickey , fundId: MAKERSPACE }).returning();
     const [bill] = await db.insert(bills).values({ expenseId: expense!.id, kind: "payment_proof" }).returning();
     expect(expense!.amountPaise).toBeNull();
     expect(bill!.amountPaise).toBeNull();

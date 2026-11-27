@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
 import { auditLog, expenses } from "@/src/db/schema";
@@ -228,6 +228,12 @@ describe("The Expense's Fund, Purpose and What for", () => {
     expect(await books.execute(mickey, { type: "CorrectExpense", expenseId: fare, fundId: MAKERSPACE, purposeId: trip })).toEqual({ ok: false, reason: "validation", field: "purposeId" });
     const audit = (await auditOf(fare)).filter((r) => r.event === "ExpenseCorrected");
     expect(audit.map((r) => r.payload)).toEqual([into.events[0], out.events[0]]);
+  });
+
+  it("an Expense written without a Fund is refused by the database, never put in Makerspace", async () => {
+    const mickey = claimant();
+    await expect(db.execute(sql`insert into expenses (claimant_id) values (${mickey.claimantId})`)).rejects.toMatchObject({ cause: { code: "23502", column: "fund_id" } });
+    expect(await expenseCount(mickey)).toBe(0);
   });
 
   it("an admin by session links another Claimant's Expense to that Claimant's Purpose, never to the admin's own", async () => {
