@@ -1,7 +1,7 @@
 // Funds inside Books (design §1 lists the Fund command family there): pure rules first, then the shell's loads, writes
 // and reads. Claims, Purposes and the Advance read Funds in Books' transaction, so they live under the same Actor Seam.
 import { isDeepStrictEqual } from "node:util";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { expenses, funds, fundSettings, fundVersions, refunds } from "@/src/db/schema";
 import { type Money, money, sum, zero } from "@/src/money/money";
@@ -430,10 +430,10 @@ const paise = (rows: { fundId: string; paise: string | null }[]) =>
 
 /**
  * The Actor's own Advance on each Fund they have, in their order: total, Advance left and the block's state (hidden
- * while off). Only ever the Actor's own Advance over the Actor's own Expenses: an admin by session sees no other
- * Claimant's, since an Advance is personal and never shared (identity-access), and no query takes a Claimant (D6).
+ * while off). Only ever the Actor's own Advance over the Actor's own Expenses: `mine` is Books' one Claimant filter on
+ * Expenses, never its admin-wide scope, so an admin by session sees no other Claimant's (identity-access "never shared", D6).
  */
-export async function advancesOf(q: Q, actor: Actor) {
+export async function advancesOf(q: Q, actor: Actor, mine: SQL) {
   const fundList = await listFunds(q, actor, "prompt");
   const on = fundList.flatMap((f) => (f.advance ? [f.id] : []));
   const [payments, received] = on.length
@@ -447,7 +447,7 @@ export async function advancesOf(q: Q, actor: Actor) {
           // lower Advance left? If yes, drop the draft condition.
           .where(
             and(
-              eq(expenses.claimantId, actor.claimantId),
+              mine,
               inArray(expenses.fundId, on),
               eq(expenses.draft, false),
               sql`${expenses.closedReason} is distinct from 'duplicate'`,
@@ -458,7 +458,7 @@ export async function advancesOf(q: Q, actor: Actor) {
           .select({ fundId: expenses.fundId, paise: sql<string | null>`sum(${refunds.amountPaise})` })
           .from(refunds)
           .innerJoin(expenses, eq(expenses.id, refunds.expenseId))
-          .where(and(eq(expenses.claimantId, actor.claimantId), inArray(expenses.fundId, on), sql`${refunds.refundedOn} is not null`))
+          .where(and(mine, inArray(expenses.fundId, on), sql`${refunds.refundedOn} is not null`))
           .groupBy(expenses.fundId),
       ]).then(([p, r]) => [paise(p), paise(r)])
     : [new Map<string, Money>(), new Map<string, Money>()];

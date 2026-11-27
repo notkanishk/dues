@@ -56,11 +56,13 @@ const forbidden: Rejected = { ok: false, reason: "forbidden" };
  * Anything else is forbidden from every command and query before a row is read, so not even existence leaks.
  */
 const mayEnter = (actor: Actor) => actor.roles.includes("claimant");
+/** The one Claimant filter on Expenses: the Actor's own. Alone, for what is personal to everyone, admins included (the Advance). */
+const ownExpenses = (actor: Actor) => eq(expenses.claimantId, actor.claimantId);
 /**
  * The ownership filter: an admin signed in by session passes it (D6); anyone else sees only their own Expenses. An MCP
  * token carries its issuing Claimant's scope and nothing more, and Intake acts as the document owner's Claimant.
  */
-const scope = (actor: Actor) => (isAdmin(actor) ? undefined : eq(expenses.claimantId, actor.claimantId));
+const scope = (actor: Actor) => (isAdmin(actor) ? undefined : ownExpenses(actor));
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
 
 /**
@@ -565,7 +567,8 @@ export function createBooks({ db, now, enqueue }: Deps) {
      */
     async advances(actor: Actor) {
       if (!mayEnter(actor)) return forbidden;
-      return { ok: true as const, advances: await advancesOf(db, actor) };
+      // Never another Claimant's, an admin's by session included: an Advance is personal (identity-access).
+      return { ok: true as const, advances: await advancesOf(db, actor, ownExpenses(actor)) };
     },
 
     /** Settings → Purposes: the Actor's own Purposes, active and ended (an admin's by session: every Claimant's, D6). */
