@@ -48,8 +48,12 @@ const forbidden: Rejected = { ok: false, reason: "forbidden" };
  * Anything else is forbidden from every command and query before a row is read, so not even existence leaks.
  */
 const mayEnter = (actor: Actor) => actor.roles.includes("claimant");
-/** The ownership filter: an admin passes it (D6); anyone else sees only their own Expenses. */
-const scope = (actor: Actor) => (actor.roles.includes("admin") ? undefined : eq(expenses.claimantId, actor.claimantId));
+/**
+ * The ownership filter: an admin signed in by session passes it (D6); anyone else sees only their own Expenses. An MCP
+ * token carries its issuing Claimant's scope and nothing more, and Intake acts as the document owner's Claimant.
+ */
+const scope = (actor: Actor) =>
+  actor.via === "session" && actor.roles.includes("admin") ? undefined : eq(expenses.claimantId, actor.claimantId);
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const money = (paise: number | null, currency: string): Money | null => (paise === null ? null : { paise, currency: currency as "INR" });

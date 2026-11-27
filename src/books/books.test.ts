@@ -1008,6 +1008,22 @@ describe("Authorization at the Actor Seam", () => {
     expect(await snapshot(mickey, t)).toEqual(before);
   });
 
+  it("an admin over MCP or Intake carries only their own Claimant's scope: another Claimant's data is not_found", async () => {
+    const mickey = claimant();
+    const t = await books3000(mickey);
+    const before = await snapshot(mickey, t);
+    for (const via of ["mcp", "intake"] as const) {
+      const minnie: Actor = { ...admin(), via };
+      const { LogExpense: _ownOnly, ...touching } = everyCommand(t);
+      for (const command of Object.values(touching)) {
+        expect(await books.execute(minnie, command), `${command.type} via ${via}`).toEqual({ ok: false, reason: "not_found" });
+      }
+      expect(await books.expense(minnie, t.expenseId)).toEqual({ ok: false, reason: "not_found" });
+      expect(await books.order(minnie, t.expenseId)).toEqual({ ok: false, reason: "not_found" });
+    }
+    expect(await snapshot(mickey, t)).toEqual(before);
+  });
+
   it("Admin change audited: an admin reads another Claimant's Expense in full and corrects ₹3,000.00 to ₹3,100.00; actor is the admin, owner the Claimant", async () => {
     const mickey = claimant();
     const root = admin();
