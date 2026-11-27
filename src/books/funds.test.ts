@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, pool } from "@/src/db/index";
@@ -70,6 +71,16 @@ describe("Makerspace is a Fund", () => {
       hidden: false,
       effective: { fileNamePattern: "{purpose} - {what} {kind}", claimNamePattern: "{Month}{n}" },
     });
+  });
+  it("seeding Makerspace again leaves the one Makerspace as it is", async () => {
+    const seed = readFileSync("drizzle/0007_funds.sql", "utf8").split("--> statement-breakpoint").find((s) => s.includes('INSERT INTO "funds"'))!;
+    try {
+      await db.update(funds).set({ notes: "Set in the app" }).where(eq(funds.id, MAKERSPACE));
+      await pool.query(seed);
+      expect((await listed(claimant())).filter((f) => f.id === MAKERSPACE)).toMatchObject([{ notes: "Set in the app" }]);
+    } finally {
+      await resetMakerspace();
+    }
   });
 });
 
