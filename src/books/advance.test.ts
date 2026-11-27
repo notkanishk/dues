@@ -277,3 +277,37 @@ describe("Funds and Purposes work with the Advance on or off", () => {
     expect(promptOn.preselectedFundId).toBe(promptOff.preselectedFundId);
   });
 });
+
+describe("Funds on the upload prompt: the chip", () => {
+  const chipOf = async (actor: Actor, fundId: string) => {
+    const read = await books.prompt(actor);
+    if (!read.ok) throw new Error(`expected prompt, got ${JSON.stringify(read)}`);
+    return read.funds.find((f) => f.id === fundId)?.chip;
+  };
+
+  it("Chip with the Advance: \"Makerspace\" while off, \"Makerspace · Advance\" while on, and \"Makerspace\" again once off", async () => {
+    const mickey = claimant();
+    expect(await chipOf(mickey, MAKERSPACE)).toBe("Makerspace");
+    ok(await setAdvance(mickey, MAKERSPACE, 1_000_000));
+    expect(await chipOf(mickey, MAKERSPACE)).toBe("Makerspace · Advance");
+    ok(await setAdvance(mickey, MAKERSPACE, null));
+    expect(await chipOf(mickey, MAKERSPACE)).toBe("Makerspace");
+  });
+
+  it("is the Claimant's own: another Claimant's Advance on Makerspace, an admin's included, leaves their chip \"Makerspace\"", async () => {
+    const [mickey, dexter, minnie] = [claimant(), claimant(), admin()];
+    ok(await setAdvance(mickey, MAKERSPACE, 1_000_000));
+    expect(await chipOf(dexter, MAKERSPACE)).toBe("Makerspace");
+    expect(await chipOf(minnie, MAKERSPACE)).toBe("Makerspace");
+    ok(await setAdvance(minnie, MAKERSPACE, 1_000_000));
+    expect(await chipOf(dexter, MAKERSPACE)).toBe("Makerspace");
+  });
+
+  it("names any Fund the same way: \"Travel grant · Advance\" with its Advance on", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    ok(await setAdvance(mickey, travel, 500_000));
+    expect(await chipOf(mickey, travel)).toBe("Travel grant · Advance");
+    expect(await chipOf(mickey, MAKERSPACE)).toBe("Makerspace");
+  });
+});
