@@ -294,7 +294,7 @@ export type Links = {
   /** The Funds the command names that the Expense's Claimant has (their own and every team Fund). */
   readonly funds: Readonly<Record<string, true>>;
   /** The Purposes the command names that are the Expense's Claimant's own. */
-  readonly purposes: Readonly<Record<string, { readonly fundId: string; readonly active: boolean }>>;
+  readonly purposes: Readonly<Record<string, { readonly fundId: string }>>;
   /** Where a new payment goes when the command names neither Fund nor Purpose. */
   readonly fallback: { readonly fundId: string; readonly purposeId: string | null };
 };
@@ -302,14 +302,13 @@ const NO_LINKS: Links = { funds: {}, purposes: {}, fallback: { fundId: MAKERSPAC
 
 /**
  * The one rule for an Expense's Fund and Purpose, on every path that sets them. Absent from links is not_found, so
- * another Claimant's Fund or Purpose does not leak; a Purpose of another Fund is validation. A new payment never goes
- * into an ended Purpose; an Expense already in one keeps it.
+ * another Claimant's Fund or Purpose does not leak; a Purpose of another Fund is validation. An ended Purpose is no
+ * longer anyone's default (the prompt), but an Expense may still be put in it by name.
  */
-function linkOf(links: Links, base: { fundId: string; purposeId: string | null }, command: LinkFields, isNew: boolean) {
+function linkOf(links: Links, base: { fundId: string; purposeId: string | null }, command: LinkFields) {
   const named = command.purposeId == null ? undefined : own(links.purposes, command.purposeId);
   if (command.purposeId != null && !named) return reject("not_found");
   if (command.fundId !== undefined && !own(links.funds, command.fundId)) return reject("not_found");
-  if (isNew && named && !named.active) return reject("invalid_transition");
   const fundId = command.fundId ?? named?.fundId ?? base.fundId;
   const purposeId = command.purposeId !== undefined ? command.purposeId : fundId === base.fundId ? base.purposeId : null;
   if (named && named.fundId !== fundId) return rejectField("purposeId");
@@ -334,7 +333,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (!isDate(command.paidOn)) return rejectField("paidOn");
       if (!isText(command.whatFor)) return rejectField("whatFor");
       const links = slice.links ?? NO_LINKS;
-      const link = linkOf(links, links.fallback, command, true);
+      const link = linkOf(links, links.fallback, command);
       if (!link.ok) return link;
       const [expenseId, billId] = slice.newIds as [string, string];
       return ok([
@@ -429,7 +428,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (command.amount !== undefined && !isPayment(command.amount)) return rejectField("amount");
       if (command.paidOn !== undefined && !isDate(command.paidOn)) return rejectField("paidOn");
       if (!isText(command.whatFor)) return rejectField("whatFor");
-      const link = linkOf(slice.links ?? NO_LINKS, expense, command, false);
+      const link = linkOf(slice.links ?? NO_LINKS, expense, command);
       if (!link.ok) return link;
       const changes = {
         ...changed("amount", expense.amount, command.amount),

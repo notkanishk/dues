@@ -205,7 +205,7 @@ async function linksFor(tx: Tx, claimantId: string, command: LogExpense | Correc
     : [];
   return {
     funds: fund ? { [fund.id]: true } : {},
-    purposes: purpose ? { [purpose.id]: { fundId: purpose.fundId, active: purpose.active } } : {},
+    purposes: purpose ? { [purpose.id]: { fundId: purpose.fundId } } : {},
     fallback,
   };
 }
