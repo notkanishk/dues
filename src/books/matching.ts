@@ -134,7 +134,9 @@ function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateEx
     // Two that fit equally well: attaching to either would be a guess, so fall through to the suggestions below.
     if (proof.length > 0 && (proof.length === 1 || fit(proof[0], proof[1]) < 0)) return { type: "attachProof", expenseId: proof[0].id };
 
-    const merge = mergeFor(amount, paidOn, sorted, config);
+    // W4.4: "payee ≈ vendor or a learned alias"; an unreadable payee cannot rule a vendor out.
+    const payeeFits = (e: CandidateExpense) => readable(facts.payee) === null || payeeMatches(facts, e);
+    const merge = mergeFor(amount, paidOn, sorted.filter(payeeFits), config);
     if (merge) return { type: "mergeSuggestion", expenseIds: merge };
   }
 
