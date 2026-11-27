@@ -197,14 +197,18 @@ describe("The Expense's Fund, Purpose and What for", () => {
     expect(await log(dexter, { purposeId: trip })).toEqual(notFound); // the Fund is shared, the Purpose stays Mickey's
   });
 
-  it("End trip: an ended Purpose takes no new payment, and the Expenses already in it keep it", async () => {
+  it("End trip: an ended Purpose catches no new payment by default, yet takes one named explicitly; its Expenses keep it", async () => {
     const mickey = claimant();
     const travel = await fund(mickey);
     const trip = await purpose(mickey, travel);
     const fare = await logged(mickey, { purposeId: trip });
     ok(await books.execute(mickey, { type: "EndPurpose", purposeId: trip }));
     expect(await linksOf(mickey, fare)).toMatchObject({ fundId: travel, purposeId: trip });
-    expect(await log(mickey, { purposeId: trip })).toEqual({ ok: false, reason: "invalid_transition" });
+    expect(await linksOf(mickey, await logged(mickey))).toMatchObject({ fundId: MAKERSPACE, purposeId: null });
+    expect(await linksOf(mickey, await logged(mickey, { purposeId: trip }))).toMatchObject({ fundId: travel, purposeId: trip });
+    const late = await logged(mickey);
+    ok(await books.execute(mickey, { type: "CorrectExpense", expenseId: late, purposeId: trip }));
+    expect(await linksOf(mickey, late)).toMatchObject({ fundId: travel, purposeId: trip });
   });
 
   it("CorrectExpense moves an Expense into a Purpose (its Fund follows) and out of it to another Fund, audited from and to", async () => {
