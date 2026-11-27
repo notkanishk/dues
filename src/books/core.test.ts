@@ -17,7 +17,7 @@ import {
 // Pure core: no database. Expected values are written by hand from the spec scenarios.
 const mickey: Actor = { claimantId: "00000000-0000-7000-8000-00000000000a", roles: ["claimant"], via: "session" };
 /** An admin acting on Mickey's books. */
-const root: Actor = { claimantId: "00000000-0000-7000-8000-0000000000ad", roles: ["admin"], via: "session" };
+const minnie: Actor = { claimantId: "00000000-0000-7000-8000-0000000000ad", roles: ["claimant", "admin"], via: "session" };
 const now = new Date("2026-11-20T10:00:00Z");
 const fresh: Slice = { newIds: ["e-1", "b-1"], expenses: {} };
 const rupees = (paise: number) => ({ paise, currency: "INR" as const });
@@ -566,7 +566,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
         const ids = { ...slice, newIds: [`new-${fresher++}`] };
         const decision = decide(ids, command, mickey, now);
         // Authorization is the shell's (D6): the core decides the same for the owner and an admin, and what it creates stays the owner's.
-        expect(decide(ids, command, root, now)).toEqual(decision);
+        expect(decide(ids, command, minnie, now)).toEqual(decision);
         if (decision.ok) for (const e of decision.events) if (e.type === "ExpenseLogged") expect(e.claimantId).toBe(mickey.claimantId);
         const named = "billId" in command ? command.billId : "expenseId" in command ? command.expenseId : null;
         const locks = (command.type === "CorrectExpense" || command.type === "CloseExpense") && named === "e-1" ? claimed > 0 : !!named?.startsWith("b-claimed-");
