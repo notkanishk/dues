@@ -252,6 +252,7 @@ describe("why an Expense is open", () => {
     whatFor: null,
     fundId: MAKERSPACE,
     purposeId: null,
+    paymentMethodId: null,
     bills: bills.map(bill),
     refunds: [],
     writtenOff: rupees(0),
