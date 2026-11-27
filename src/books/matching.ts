@@ -93,6 +93,9 @@ const shopMatches = (shop: string | null, e: CandidateExpense) => [e.vendor, e.p
 /** A confirmation's payee is the Expense's vendor, or a vendor that payee has stood for. */
 const payeeMatches = (facts: PaymentFacts, e: CandidateExpense) => [facts.payee, ...facts.payeeStandsFor].some((name) => sameName(name, e.vendor));
 
+/** A blank read is no read: "ask for the vendor" and "Same payment as E-x?" must still fire. */
+const readable = (s: string | null) => (s !== null && s.trim() !== "" ? s : null);
+
 const sameRef = (a: string | null, b: string | null) => a !== null && b !== null && a.trim() !== "" && a.trim() === b.trim();
 
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id, "en", { numeric: true });
@@ -136,7 +139,7 @@ function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateEx
   }
 
   // Neither of two confirmations carries a reference: offer the nearer one in time, never merge.
-  if (facts.reference === null) {
+  if (readable(facts.reference) === null) {
     const gap = (e: CandidateExpense) => Math.abs(Date.parse(facts.receivedAt) - Date.parse(e.proofReceivedAt!));
     const twin = sorted
       .filter((e) => e.references.length === 0 && e.proofReceivedAt !== null && gap(e) <= config.samePaymentMinutes * MINUTE_MS)
@@ -181,7 +184,9 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
   const named = candidates.find((e) => sameRef(facts.expenseId, e.id));
   if (named) return { type: "attach", expenseId: named.id };
 
-  const shop = facts.platform ?? facts.vendor; // a marketplace's seller is detail
+  const newExpense = { type: "newExpense", askVendor: readable(facts.vendor) === null } as const;
+  if (facts.total.paise <= 0) return newExpense; // a ₹0.00 bill pays for nothing, so it belongs to no Expense
+  const shop = readable(facts.platform) ?? readable(facts.vendor); // a marketplace's seller is detail
   const fits = candidates
     .map((e) => {
       const days = daysApart(e.paidOn, facts.billDate);
@@ -198,7 +203,7 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
     })
     .filter((f): f is Fit => f !== null)
     .sort(betterFit);
-  if (fits.length === 0) return { type: "newExpense", askVendor: facts.vendor === null };
+  if (fits.length === 0) return newExpense;
 
   // "Exactly one candidate" counts every candidate, larger Orders included. An exact-amount candidate anywhere means
   // no other Expense is split: the bill may be that one, so a Check decides.
