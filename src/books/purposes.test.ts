@@ -209,9 +209,9 @@ describe("The Expense's Fund, Purpose and What for", () => {
 
   it("CorrectExpense moves an Expense into a Purpose (its Fund follows) and out of it to another Fund, audited from and to", async () => {
     const mickey = claimant();
+    const fare = await logged(mickey);
     const travel = await fund(mickey);
     const trip = await purpose(mickey, travel);
-    const fare = await logged(mickey);
     const into = ok(await books.execute(mickey, { type: "CorrectExpense", expenseId: fare, purposeId: trip, whatFor: "Bus to the robotics meet" }));
     expect(into.events).toEqual([
       {
@@ -232,8 +232,8 @@ describe("The Expense's Fund, Purpose and What for", () => {
 
   it("an admin by session links another Claimant's Expense to that Claimant's Purpose, never to the admin's own", async () => {
     const [mickey, minnie] = [claimant(), admin()];
-    const trip = await purpose(mickey, await fund(mickey));
     const fare = await logged(mickey);
+    const trip = await purpose(mickey, await fund(mickey));
     const hers = await fund(minnie, "Minnie's grant");
     const herTrip = await purpose(minnie, hers, "Minnie's trip");
     expect(await books.execute(minnie, { type: "CorrectExpense", expenseId: fare, fundId: hers })).toEqual({ ok: false, reason: "not_found" });

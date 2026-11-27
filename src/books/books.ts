@@ -33,7 +33,7 @@ import {
   type Slice,
 } from "./core";
 import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, templatesOf, UUID, visible, writeFund } from "./funds";
-import { decidePurpose, isPurposeCommand, listPurposes, loadPurposeSlice, type PurposeCommand, type PurposeEvent, purposeEntries, purposeOwners, writePurpose } from "./purposes";
+import { decidePurpose, isPurposeCommand, listPurposes, promptOf, loadPurposeSlice, type PurposeCommand, type PurposeEvent, purposeEntries, purposeOwners, writePurpose } from "./purposes";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
 export type Result = { readonly ok: true; readonly events: readonly (Event | FundEvent | PurposeEvent)[] } | Rejected;
@@ -186,12 +186,16 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
   const expenses = Object.fromEntries(loaded.map((e) => [e.state.id, e.state]));
   // What the Expense's Claimant may link it to: a new one is the Actor's; a corrected one stays its owner's (an admin's included).
   const owner = command.type === "LogExpense" ? actor.claimantId : command.type === "CorrectExpense" ? expenses[command.expenseId]?.claimantId : undefined;
-  const links = owner ? await linksFor(tx, owner, command as LogExpense | CorrectExpense) : undefined;
+  // A new payment that names neither goes where the Actor's prompt preselects.
+  const fallback = command.type === "LogExpense" ? await promptOf(tx, actor) : undefined;
+  const links = owner
+    ? await linksFor(tx, owner, command as LogExpense | CorrectExpense, fallback ? { fundId: fallback.preselectedFundId, purposeId: fallback.preselectedPurposeId } : undefined)
+    : undefined;
   return { newIds: rows.map((r) => r.id), expenses, ...(links && { links }) };
 }
 
 /** The Fund and Purpose the command names, if the Expense's Claimant has them (else absent: not_found), and the default. */
-async function linksFor(tx: Tx, claimantId: string, command: LogExpense | CorrectExpense): Promise<Links> {
+async function linksFor(tx: Tx, claimantId: string, command: LogExpense | CorrectExpense, fallback: Links["fallback"] = { fundId: MAKERSPACE, purposeId: null }): Promise<Links> {
   const [fund] = typeof command.fundId === "string" && UUID.test(command.fundId)
     ? await tx.select({ id: fundsTable.id }).from(fundsTable).where(and(eq(fundsTable.id, command.fundId), visible({ claimantId })))
     : [];
@@ -201,7 +205,7 @@ async function linksFor(tx: Tx, claimantId: string, command: LogExpense | Correc
   return {
     funds: fund ? { [fund.id]: true } : {},
     purposes: purpose ? { [purpose.id]: { fundId: purpose.fundId, active: purpose.active } } : {},
-    fallback: { fundId: MAKERSPACE, purposeId: null },
+    fallback,
   };
 }
 
@@ -543,13 +547,13 @@ export function createBooks({ db, now, enqueue }: Deps) {
     },
 
     /**
-     * The Funds offered on the upload and payment prompt (expense-tracking, "Funds on the upload prompt"): the Actor's
-     * order, none they hid, none archived, each with the "What for?" hint in effect for them.
+     * The upload and payment prompt (expense-tracking "Funds on the upload prompt", "Purpose"): the Funds in the Actor's
+     * order, none hidden or archived, each with its "What for?" hint in effect; the Actor's active Purposes; and what is
+     * preselected, which is where LogExpense puts a payment that names neither.
      */
-    async promptFunds(actor: Actor) {
+    async prompt(actor: Actor) {
       if (!mayEnter(actor)) return forbidden;
-      const offered = (await listFunds(db, actor, "prompt")).filter((f) => !f.hidden && !f.archived);
-      return { ok: true as const, funds: offered.map((f) => ({ id: f.id, name: f.name, whatForHint: f.effective.whatForHint })) };
+      return { ok: true as const, ...(await promptOf(db, actor)) };
     },
 
     /** Settings → Purposes: the Actor's own Purposes, active and ended (an admin's by session: every Claimant's, D6). */

@@ -4,8 +4,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { funds, purposes } from "@/src/db/schema";
 import type { Tx } from "./books";
-import { type Actor, isAdmin } from "./core";
-import { UUID, visible } from "./funds";
+import { type Actor, isAdmin, MAKERSPACE } from "./core";
+import { listFunds, UUID, visible } from "./funds";
 
 /**
  * A new Purpose of the Actor's own, active, in the Fund named. The Fund is always given: which Fund a new Purpose
@@ -99,4 +99,42 @@ export async function listPurposes(q: Q, actor: Actor) {
     .from(purposes)
     .where(scope(actor))
     .orderBy(purposes.id);
+}
+
+// ---- The upload and payment prompt (expense-tracking "Purpose", "Funds on the upload prompt"; FUNCTIONAL W1 step 5) ----
+
+/**
+ * Pure: what the prompt preselects, and so where a payment goes when nobody answers. The one active Purpose, in its
+ * Fund; else the Fund every active Purpose is in; else Makerspace (or, hidden, the Claimant's first Fund).
+ */
+// ponytail: two or more active Purposes in different Funds preselect Makerspace, and an ordered list still preselects
+// Makerspace; the spec states neither (listed for the owner).
+export function preselect(fundIds: readonly string[], active: readonly { readonly id: string; readonly fundId: string }[]) {
+  const inFunds = [...new Set(active.map((p) => p.fundId))];
+  const fundId = inFunds.length === 1 ? inFunds[0]! : fundIds.includes(MAKERSPACE) ? MAKERSPACE : (fundIds[0] ?? MAKERSPACE);
+  return { fundId, purposeId: active.length === 1 ? active[0]!.id : null };
+}
+
+/**
+ * The prompt for the Actor's own payments: the Funds they are offered, in their order, with the hint in effect for
+ * them; their own active Purposes in those Funds (none: no Purpose step; any: None is always a choice); what is preselected.
+ * An admin's is their own: no other Claimant's Purpose or private Fund.
+ */
+export async function promptOf(q: Q, actor: Actor) {
+  const offered = (await listFunds(q, actor, "prompt")).filter((f) => !f.hidden && !f.archived);
+  const fundIds = offered.map((f) => f.id);
+  const active = (
+    await q
+      .select({ id: purposes.id, name: purposes.name, fundId: purposes.fundId })
+      .from(purposes)
+      .where(and(eq(purposes.claimantId, actor.claimantId), eq(purposes.active, true)))
+      .orderBy(purposes.id)
+  ).filter((p) => fundIds.includes(p.fundId));
+  const chosen = preselect(fundIds, active);
+  return {
+    funds: offered.map((f) => ({ id: f.id, name: f.name, whatForHint: f.effective.whatForHint })),
+    purposes: active,
+    preselectedFundId: chosen.fundId,
+    preselectedPurposeId: chosen.purposeId,
+  };
 }
