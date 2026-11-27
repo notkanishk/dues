@@ -40,4 +40,4 @@ ALTER TABLE "fund_versions" ADD CONSTRAINT "fund_versions_fund_id_funds_id_fk" F
 -- every Claimant, seeded here because no first sign-in exists yet to make it. No creator: only an admin edits its team
 -- version. Its patterns are FUNCTIONAL §2's defaults; its To, CC and form file are set in the app (real data stays out).
 INSERT INTO "funds" ("id", "name", "file_name_pattern", "claim_name_pattern", "team")
-	VALUES ('00000000-0000-7000-8000-000000000001', 'Makerspace', '{purpose} - {what} {kind}', '{Month}{n}', true);
+	VALUES ('00000000-0000-7000-8000-000000000001', 'Makerspace', '{purpose} - {what} {kind}', '{Month}{n}', true) ON CONFLICT ("id") DO NOTHING;
