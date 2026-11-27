@@ -2,7 +2,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { auditLog, bills, expenses, funds as fundsTable, idempotencyKeys, purposes, refunds, writeOffs } from "@/src/db/schema";
+import { auditLog, bills, expenses, funds as fundsTable, idempotencyKeys, paymentMethods, purposes, refunds, writeOffs } from "@/src/db/schema";
 import { type Money, money, sum } from "@/src/money/money";
 import {
   type Actor,
@@ -139,6 +139,7 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       whatFor: row.whatFor,
       fundId: row.fundId,
       purposeId: row.purposeId,
+      paymentMethodId: row.paymentMethodId,
       bills: ownBills,
       refunds: ownRefunds,
       writtenOff: sum(ownWriteOffs), // Σ written off (FUNCTIONAL §1), every row summed
@@ -210,7 +211,7 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
   return { newIds: rows.map((r) => r.id), expenses, ...(links && { links }) };
 }
 
-/** The Fund and Purpose the command names, if the Expense's Claimant has them (else absent: not_found), and the default. */
+/** The Fund, Purpose and Payment method the command names, if the Expense's Claimant has them (else absent: not_found), and the default. */
 async function linksFor(tx: Tx, claimantId: string, command: LogExpense | CorrectExpense, fallback = NO_LINKS.fallback): Promise<Links> {
   const [fund] = isUuid(command.fundId)
     ? await tx.select({ id: fundsTable.id }).from(fundsTable).where(and(eq(fundsTable.id, command.fundId), visible({ claimantId })))
@@ -218,9 +219,17 @@ async function linksFor(tx: Tx, claimantId: string, command: LogExpense | Correc
   const [purpose] = isUuid(command.purposeId)
     ? await tx.select().from(purposes).where(and(eq(purposes.id, command.purposeId), eq(purposes.claimantId, claimantId)))
     : [];
+  // The Expense's Claimant's own, an admin's correction included: never the admin's.
+  const [method] = isUuid(command.paymentMethodId)
+    ? await tx
+        .select({ id: paymentMethods.id, archived: paymentMethods.archived })
+        .from(paymentMethods)
+        .where(and(eq(paymentMethods.id, command.paymentMethodId), eq(paymentMethods.claimantId, claimantId)))
+    : [];
   return {
     funds: fund ? { [fund.id]: true } : {},
     purposes: purpose ? { [purpose.id]: { fundId: purpose.fundId } } : {},
+    paymentMethods: method ? { [method.id]: { archived: method.archived } } : {},
     fallback,
   };
 }
@@ -300,6 +309,7 @@ async function write(tx: Tx, event: Event, at: Date) {
         whatFor: event.whatFor,
         fundId: event.fundId,
         purposeId: event.purposeId,
+        paymentMethodId: event.paymentMethodId,
         upiRef: event.upiRef,
         notes: event.notes,
         source: event.source,
@@ -401,7 +411,7 @@ async function write(tx: Tx, event: Event, at: Date) {
       await tx.update(expenses).set({ closedReason: event.reason }).where(eq(expenses.id, event.expenseId));
       return;
     case "ExpenseCorrected": {
-      const { amount, payee, paidOn, fundId, purposeId, whatFor } = event.changes;
+      const { amount, payee, paidOn, fundId, purposeId, paymentMethodId, whatFor } = event.changes;
       await tx
         .update(expenses)
         .set({
@@ -410,6 +420,7 @@ async function write(tx: Tx, event: Event, at: Date) {
           ...(paidOn && { paidOn: paidOn.to }),
           ...(fundId && { fundId: fundId.to }),
           ...(purposeId && { purposeId: purposeId.to }),
+          ...(paymentMethodId && { paymentMethodId: paymentMethodId.to }),
           ...(whatFor && { whatFor: whatFor.to }),
         })
         .where(eq(expenses.id, event.expenseId));
@@ -649,6 +660,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
           whatFor: row.whatFor,
           fundId: row.fundId,
           purposeId: row.purposeId,
+          paymentMethodId: row.paymentMethodId,
           upiRef: row.upiRef,
           notes: row.notes,
           source: row.source,

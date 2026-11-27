@@ -23,9 +23,11 @@ type LinkFields = {
   readonly fundId?: string;
   /** null: no Purpose. Omitted: kept while the Fund stays, else none (LogExpense: the default). */
   readonly purposeId?: string | null;
+  /** One of the Expense's Claimant's own Payment methods; null: none ("not recorded"). Omitted: kept (LogExpense: none). */
+  readonly paymentMethodId?: string | null;
 };
 
-// Payment method and Orderer arrive with those entities (task 2.7).
+// The Orderer arrives with People (identity-access "People for Orderers and Payback payees").
 export type LogExpense = LinkFields & {
   readonly type: "LogExpense";
   readonly kind: "online" | "shop" | "service";
@@ -59,8 +61,8 @@ export type ReturnBill = { readonly type: "ReturnBill"; readonly billId: string 
 /** The money is back (W2.4): the expected Refund is received on its refunded-on date. */
 export type MarkRefundReceived = { readonly type: "MarkRefundReceived"; readonly refundId: string; readonly refundedOn: string };
 /**
- * Corrects an Expense's amount, payee, paid-on date, Fund, Purpose or What for (expense-tracking, Expense corrections):
- * only the fields given change. Payment method arrives with that entity.
+ * Corrects an Expense's amount, payee, paid-on date, Payment method, Fund, Purpose or What for (expense-tracking,
+ * Expense corrections): only the fields given change.
  */
 export type CorrectExpense = LinkFields & {
   readonly type: "CorrectExpense";
@@ -176,6 +178,7 @@ export type Event =
       readonly whatFor: string | null;
       readonly fundId: string;
       readonly purposeId: string | null;
+      readonly paymentMethodId: string | null;
       readonly upiRef: string | null;
       readonly notes: string | null;
       readonly source: "manual";
@@ -216,6 +219,7 @@ export type Event =
         readonly paidOn?: Change<string | null>;
         readonly fundId?: Change<string>;
         readonly purposeId?: Change<string | null>;
+        readonly paymentMethodId?: Change<string | null>;
         readonly whatFor?: Change<string | null>;
       };
     }
@@ -305,6 +309,7 @@ export type ExpenseState = {
   whatFor: string | null;
   fundId: string;
   purposeId: string | null;
+  paymentMethodId: string | null;
   bills: BillState[];
   refunds: RefundState[];
   /** Σ written off: Refunds written off on closing, and remainders "Not claiming" closed out (W2.9). */
@@ -320,6 +325,8 @@ export type Links = {
   readonly funds: Readonly<Record<string, true>>;
   /** The Purposes the command names that are the Expense's Claimant's own. */
   readonly purposes: Readonly<Record<string, { readonly fundId: string }>>;
+  /** The Payment method the command names, if it is the Expense's Claimant's own. */
+  readonly paymentMethods?: Readonly<Record<string, { readonly archived: boolean }>>;
   /** Where a new payment goes when the command names neither Fund nor Purpose. */
   readonly fallback: { readonly fundId: string; readonly purposeId: string | null };
 };
@@ -339,6 +346,17 @@ function linkOf(links: Links, base: { fundId: string; purposeId: string | null }
   const purposeId = command.purposeId !== undefined ? command.purposeId : fundId === base.fundId ? base.purposeId : null;
   if (named && named.fundId !== fundId) return rejectField("purposeId");
   return { ok: true as const, fundId, purposeId };
+}
+/**
+ * The one rule for an Expense's Payment method, on every path that sets it: one not the Claimant's own is not_found (no
+ * leak); an archived one is no longer offered (validation), though an Expense that has it keeps it.
+ */
+function methodOf(links: Links, current: string | null, named: string | null | undefined) {
+  if (named === undefined || named === null || named === current) return { ok: true as const, paymentMethodId: named === undefined ? current : named };
+  const method = typeof named === "string" ? own(links.paymentMethods ?? {}, named) : undefined;
+  if (!method) return reject("not_found");
+  if (method.archived) return rejectField("paymentMethodId");
+  return { ok: true as const, paymentMethodId: named };
 }
 const isText = (v: unknown) => v === undefined || v === null || typeof v === "string";
 
@@ -361,6 +379,8 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       const links = slice.links ?? NO_LINKS;
       const link = linkOf(links, links.fallback, command);
       if (!link.ok) return link;
+      const method = methodOf(links, null, command.paymentMethodId);
+      if (!method.ok) return method;
       const [expenseId, billId] = slice.newIds as [string, string];
       return ok([
         {
@@ -377,6 +397,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           whatFor: command.whatFor ?? null,
           fundId: link.fundId,
           purposeId: link.purposeId,
+          paymentMethodId: method.paymentMethodId,
           upiRef: command.upiRef ?? null,
           notes: command.notes ?? null,
           source: "manual",
@@ -456,12 +477,15 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (!isText(command.whatFor)) return rejectField("whatFor");
       const link = linkOf(slice.links ?? NO_LINKS, expense, command);
       if (!link.ok) return link;
+      const method = methodOf(slice.links ?? NO_LINKS, expense.paymentMethodId, command.paymentMethodId);
+      if (!method.ok) return method;
       const changes = {
         ...changed("amount", expense.amount, command.amount),
         ...changed("payee", expense.payee, command.payee),
         ...changed("paidOn", expense.paidOn, command.paidOn),
         ...changed("fundId", expense.fundId, link.fundId),
         ...changed("purposeId", expense.purposeId, link.purposeId),
+        ...changed("paymentMethodId", expense.paymentMethodId, method.paymentMethodId),
         ...changed("whatFor", expense.whatFor, command.whatFor),
       };
       // Keeping a value changes nothing and writes nothing.
@@ -628,6 +652,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
             whatFor: null,
             fundId: expense.fundId,
             purposeId: expense.purposeId,
+            paymentMethodId: null, // W4: an invoice-only Expense's Payment method is "not recorded"
             upiRef: null,
             notes: null,
             source: "manual",
@@ -737,6 +762,7 @@ export function apply(slice: Slice, event: Event): Slice {
             whatFor: event.whatFor,
             fundId: event.fundId,
             purposeId: event.purposeId,
+            paymentMethodId: event.paymentMethodId,
             bills: [],
             refunds: [],
             writtenOff: zero,
