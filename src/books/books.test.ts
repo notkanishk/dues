@@ -1073,29 +1073,19 @@ describe("Authorization at the Actor Seam", () => {
     expect(await read(mickey, t.expenseId)).toMatchObject({ amount: rupees(310000) });
   });
 
-  it("an admin moving a Bill between two Claimants takes both locks, and the Bill lands in the second's books", async () => {
-    const [first, second] = [claimant(), claimant()].sort((a, b) => a.claimantId.localeCompare(b.claimantId));
-    const root = admin();
-    const from = await books3000(second);
-    const to = await books3000(first);
-    for (const held of [first!.claimantId, second!.claimantId]) {
-      const release = await holdLocks(held);
-      const moving = books.execute(root, { type: "MoveBill", billId: from.deliveredBillId, toExpenseId: to.expenseId });
-      expect(await settle(moving), `held ${held === first!.claimantId ? "first" : "second"}`).toBe("waiting");
-      await release();
-      const moved = await moving;
-      if (moved.ok) {
-        expect((await read(first!, to.expenseId)).bills.map((b) => b.id)).toContain(from.deliveredBillId);
-        // Each entry's owner is the owner of the Expense it changes: the Bill and the shrunk Order are the first's, the regrown Order the second's.
-        const ownerOf = (e: (typeof moved.events)[number]) => (("expenseId" in e ? e.expenseId : e.toExpenseId) === to.expenseId ? first : second)!.claimantId;
-        expect((await auditRowsOf(root)).slice(-moved.events.length)).toMatchObject(
-          moved.events.map((e) => ({ event: e.type, actorId: root.claimantId, ownerId: ownerOf(e) })),
-        );
-        expect(new Set(moved.events.map(ownerOf)).size).toBe(2);
-        // Moved back for the second round.
-        ok(await books.execute(root, { type: "MoveBill", billId: from.deliveredBillId, toExpenseId: from.expenseId }));
-      } else throw new Error(`refused: ${moved.reason}`);
-    }
+  // No spec moves a Bill between two Claimants (D5 names only Payback and duplicate resolution): refused until the owner decides.
+  it("an admin moving a Bill from one Claimant's Expense to another's is refused as invalid_transition and nothing changes", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const minnie = admin();
+    const from = await books3000(mickey);
+    const to = await books3000(dexter);
+    const before = [await snapshot(mickey, from), await snapshot(dexter, to)];
+    expect(await books.execute(minnie, { type: "MoveBill", billId: from.deliveredBillId, toExpenseId: to.expenseId })).toEqual({
+      ok: false,
+      reason: "invalid_transition",
+    });
+    expect([await snapshot(mickey, from), await snapshot(dexter, to)]).toEqual(before);
+    expect(await auditRowsOf(minnie)).toEqual([]);
   });
 
   it("what an admin's command creates belongs to the Claimant it acts for; what an admin logs is the admin's own", async () => {

@@ -546,6 +546,9 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       const target = slice.expenses[command.toExpenseId];
       if (!target) return reject("not_found"); // the loader scoped it: another Claimant's Expense is absent
       if (target.id === expense.id || target.draft || target.closedReason) return reject("invalid_transition");
+      // ponytail: a Bill never moves between two Claimants, an admin's move included; no spec allows it (D5 names only
+      // Payback and duplicate resolution). invalid_transition, not forbidden: the Actor may act on both, the move is what is refused.
+      if (target.claimantId !== expense.claimantId) return reject("invalid_transition");
       // A Bill equal to what the target still expects fulfils its expected Bill: cancelled, with no Refund (W4.3).
       const waiting = target.bills.find(isExpected);
       const into: Event[] | Rejected =

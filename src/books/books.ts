@@ -133,7 +133,8 @@ async function touches(tx: Tx, command: Command): Promise<[number, string[]]> {
     case "LogExpense":
       return [2, []];
     case "MoveBill":
-      // Both Expenses load under their owners' locks (design D5): a Claimant owns both or it is not_found; an admin's may be two Claimants.
+      // Both Expenses load under their owners' locks (design D5): a Claimant owns both or it is not_found. An admin's may be
+      // two Claimants; the core refuses that move, but only after loading both, so both are locked.
       return [0, [...(await expenseOf(tx, bills, command.billId)), command.toExpenseId]];
     case "DetachBill":
     case "SplitExpectedBill":
