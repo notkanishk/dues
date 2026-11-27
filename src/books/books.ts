@@ -490,6 +490,16 @@ export function createBooks({ db, now, enqueue }: Deps) {
       return { ok: true as const, funds: await listFunds(db, actor) };
     },
 
+    /**
+     * The Funds offered on the upload and payment prompt (expense-tracking, "Funds on the upload prompt"): the Actor's
+     * order, none they hid, none archived, each with the "What for?" hint in effect for them.
+     */
+    async promptFunds(actor: Actor) {
+      if (!mayEnter(actor)) return forbidden;
+      const offered = (await listFunds(db, actor)).filter((f) => !f.hidden && !f.archived);
+      return { ok: true as const, funds: offered.map((f) => ({ id: f.id, name: f.name, whatForHint: f.effective.whatForHint })) };
+    },
+
     /** The Actor's effective templates for a Claim of this Fund (design §6); never its notes. */
     async fundTemplates(actor: Actor, fundId: string) {
       if (!mayEnter(actor)) return forbidden;

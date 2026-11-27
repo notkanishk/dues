@@ -295,3 +295,75 @@ describe("Fund fields", () => {
     }
   });
 });
+
+describe("Funds on the upload prompt", () => {
+  const offered = async (actor: Actor, ids: string[]) => {
+    const read = await books.promptFunds(actor);
+    if (!read.ok) throw new Error("expected prompt");
+    return only(ids, read.funds);
+  };
+
+  it("Default order: a Claimant who has not ordered their Funds gets Makerspace first, then their Funds oldest first", async () => {
+    const mickey = claimant();
+    const [first, second] = [await created(mickey, { name: "Travel grant" }), await created(mickey, { name: "Robotics club" })];
+    const read = await books.promptFunds(mickey);
+    if (!read.ok) throw new Error("expected prompt");
+    expect(read.funds[0]?.id).toBe(MAKERSPACE);
+    expect(only([MAKERSPACE, first, second], read.funds)).toEqual([MAKERSPACE, first, second]);
+  });
+
+  it("Own order: moving Travel grant above Makerspace changes this Claimant's prompt and Settings only", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const travel = await created(mickey);
+    ok(await books.execute(mickey, { type: "ShareFund", fundId: travel }));
+    ok(await books.execute(mickey, { type: "OrderFunds", fundIds: [travel, MAKERSPACE] }));
+
+    expect(await offered(mickey, [travel, MAKERSPACE])).toEqual([travel, MAKERSPACE]);
+    expect(only([travel, MAKERSPACE], await listed(mickey))).toEqual([travel, MAKERSPACE]);
+    expect(await offered(dexter, [travel, MAKERSPACE])).toEqual([MAKERSPACE, travel]);
+    expect((await auditOf(mickey.claimantId))[0]).toMatchObject({ event: "FundsOrdered", entity: "fund_order", ownerId: mickey.claimantId });
+  });
+
+  it("ordering a Fund the Claimant cannot see is not_found, and naming one twice is refused", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const secret = await created(dexter);
+    expect(await books.execute(mickey, { type: "OrderFunds", fundIds: [secret, MAKERSPACE] })).toEqual({ ok: false, reason: "not_found" });
+    expect(await books.execute(mickey, { type: "OrderFunds", fundIds: [MAKERSPACE, MAKERSPACE] })).toEqual({ ok: false, reason: "validation", field: "fundIds" });
+  });
+
+  it("Hidden Fund: a hidden Fund is not offered on that Claimant's prompt, other Claimants still see it, and it can be shown again", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const travel = await created(mickey);
+    ok(await books.execute(mickey, { type: "ShareFund", fundId: travel }));
+    ok(await books.execute(mickey, { type: "HideFund", fundId: travel, hidden: true }));
+
+    expect(await offered(mickey, [travel])).toEqual([]);
+    expect((await listed(mickey)).find((f) => f.id === travel)?.hidden).toBe(true); // still in Settings
+    expect(await offered(dexter, [travel])).toEqual([travel]);
+    ok(await books.execute(mickey, { type: "HideFund", fundId: travel, hidden: false }));
+    expect(await offered(mickey, [travel])).toEqual([travel]);
+  });
+
+  it("Archive: an archived Fund is no longer offered on anyone's prompt and stays in Settings", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const travel = await created(mickey);
+    ok(await books.execute(mickey, { type: "ShareFund", fundId: travel }));
+    ok(await books.execute(mickey, { type: "ArchiveFund", fundId: travel }));
+    expect(await offered(mickey, [travel])).toEqual([]);
+    expect(await offered(dexter, [travel])).toEqual([]);
+    expect((await listed(dexter)).find((f) => f.id === travel)).toMatchObject({ archived: true });
+  });
+
+  it("Hint: the prompt carries the Fund's What for? hint, the Claimant's own when they made one", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const travel = await created(mickey, { whatForHint: "e.g. soldering supplies" });
+    ok(await books.execute(mickey, { type: "ShareFund", fundId: travel }));
+    ok(await books.execute(dexter, { type: "SetPersonalVersion", fundId: travel, whatForHint: "e.g. bus fare" }));
+    const hint = async (actor: Actor) => {
+      const read = await books.promptFunds(actor);
+      return read.ok ? read.funds.find((f) => f.id === travel) : undefined;
+    };
+    expect(await hint(mickey)).toEqual({ id: travel, name: "Travel grant", whatForHint: "e.g. soldering supplies" });
+    expect(await hint(dexter)).toEqual({ id: travel, name: "Travel grant", whatForHint: "e.g. bus fare" });
+  });
+});
