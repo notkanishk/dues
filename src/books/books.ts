@@ -26,14 +26,14 @@ import {
   type Links,
   type LogExpense,
   type CorrectExpense,
-  MAKERSPACE,
+  NO_LINKS,
   own,
   type RefundReason,
   type RefundStatus,
   type Rejected,
   type Slice,
 } from "./core";
-import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, templatesOf, UUID, visible, writeFund } from "./funds";
+import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, isUuid, templatesOf, visible, writeFund } from "./funds";
 import { decidePurpose, isPurposeCommand, listPurposes, promptOf, loadPurposeSlice, type PurposeCommand, type PurposeEvent, purposeEntries, purposeOwners, writePurpose } from "./purposes";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
@@ -69,7 +69,7 @@ const money = (paise: number | null, currency: string): Money | null => (paise =
  * simply absent, so callers answer not_found and existence does not leak (design D6). An admin's scope is everyone's.
  */
 async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly string[]) {
-  const wanted = ids.filter((id) => UUID.test(id));
+  const wanted = ids.filter(isUuid);
   if (wanted.length === 0) return [];
   const rows = await q
     .select()
@@ -169,7 +169,7 @@ async function touches(tx: Tx, command: Command): Promise<[number, string[]]> {
  * anything else is not_found. Read before the lock, so `attempt` checks it again under the lock.
  */
 async function ownersOf(tx: Tx, actor: Actor, command: Command): Promise<string[]> {
-  const wanted = (await touches(tx, command))[1].filter((id) => UUID.test(id));
+  const wanted = (await touches(tx, command))[1].filter(isUuid);
   const rows = wanted.length
     ? await tx.select({ id: expenses.id, owner: expenses.claimantId }).from(expenses).where(and(inArray(expenses.id, wanted), scope(actor)))
     : [];
@@ -185,22 +185,25 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
   const { rows } = await tx.execute<{ id: string }>(sql`select uuidv7() as id from generate_series(1, ${count})`);
   const loaded = await loadExpenses(tx, actor, expenseIds);
   const expenses = Object.fromEntries(loaded.map((e) => [e.state.id, e.state]));
-  // What the Expense's Claimant may link it to: a new one is the Actor's; a corrected one stays its owner's (an admin's included).
-  const owner = command.type === "LogExpense" ? actor.claimantId : command.type === "CorrectExpense" ? own(expenses, command.expenseId)?.claimantId : undefined;
-  // A new payment that names neither goes where the Actor's prompt preselects.
-  const fallback = command.type === "LogExpense" ? await promptOf(tx, actor) : undefined;
-  const links = owner
-    ? await linksFor(tx, owner, command as LogExpense | CorrectExpense, fallback ? { fundId: fallback.preselectedFundId, purposeId: fallback.preselectedPurposeId } : undefined)
-    : undefined;
+  // What the Expense's Claimant may link it to: a new one is the Actor's, and goes where the Actor's prompt preselects
+  // when it names neither; a corrected one stays its owner's (an admin's included).
+  let links: Links | undefined;
+  if (command.type === "LogExpense") {
+    const prompt = await promptOf(tx, actor);
+    links = await linksFor(tx, actor.claimantId, command, { fundId: prompt.preselectedFundId, purposeId: prompt.preselectedPurposeId });
+  } else if (command.type === "CorrectExpense") {
+    const owner = own(expenses, command.expenseId)?.claimantId;
+    if (owner) links = await linksFor(tx, owner, command);
+  }
   return { newIds: rows.map((r) => r.id), expenses, ...(links && { links }) };
 }
 
 /** The Fund and Purpose the command names, if the Expense's Claimant has them (else absent: not_found), and the default. */
-async function linksFor(tx: Tx, claimantId: string, command: LogExpense | CorrectExpense, fallback: Links["fallback"] = { fundId: MAKERSPACE, purposeId: null }): Promise<Links> {
-  const [fund] = typeof command.fundId === "string" && UUID.test(command.fundId)
+async function linksFor(tx: Tx, claimantId: string, command: LogExpense | CorrectExpense, fallback = NO_LINKS.fallback): Promise<Links> {
+  const [fund] = isUuid(command.fundId)
     ? await tx.select({ id: fundsTable.id }).from(fundsTable).where(and(eq(fundsTable.id, command.fundId), visible({ claimantId })))
     : [];
-  const [purpose] = typeof command.purposeId === "string" && UUID.test(command.purposeId)
+  const [purpose] = isUuid(command.purposeId)
     ? await tx.select().from(purposes).where(and(eq(purposes.id, command.purposeId), eq(purposes.claimantId, claimantId)))
     : [];
   return {
@@ -212,7 +215,7 @@ async function linksFor(tx: Tx, claimantId: string, command: LogExpense | Correc
 
 // Unscoped on purpose: loadExpenses applies the Actor's scope next, so another Claimant's Bill or Refund loads nothing.
 async function expenseOf(tx: Tx, table: typeof bills | typeof refunds, id: string) {
-  if (!UUID.test(id)) return [];
+  if (!isUuid(id)) return [];
   return (await tx.select({ id: table.expenseId }).from(table).where(eq(table.id, id))).map((r) => r.id);
 }
 

@@ -4,8 +4,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { funds, purposes } from "@/src/db/schema";
 import type { Tx } from "./books";
-import { type Actor, isAdmin, MAKERSPACE, own } from "./core";
-import { listFunds, UUID, visible } from "./funds";
+import { type Actor, isAdmin, MAKERSPACE, own, type Rejected, reject, rejectField } from "./core";
+import { isUuid, listFunds, visible } from "./funds";
 
 /**
  * A new Purpose of the Actor's own, active, in the Fund named. The Fund is always given: which Fund a new Purpose
@@ -27,19 +27,18 @@ export type PurposeEvent =
 type PurposeState = { readonly id: string; readonly claimantId: string; readonly active: boolean };
 /** newId for a new Purpose; the Funds named that the Actor has; the Purposes named that the Actor reaches. */
 export type PurposeSlice = { readonly newId: string | null; readonly fundIds: readonly string[]; readonly purposes: Readonly<Record<string, PurposeState>> };
-type Rejection = { readonly ok: false; readonly reason: "not_found" | "invalid_transition" | "validation"; readonly field?: string };
-export type PurposeDecision = { readonly ok: true; readonly events: readonly PurposeEvent[] } | Rejection;
+export type PurposeDecision = { readonly ok: true; readonly events: readonly PurposeEvent[] } | Rejected;
 
 /** Pure: what a Purpose command does, given what the Actor reaches (absent = not_found, so existence does not leak). */
 export function decidePurpose(slice: PurposeSlice, command: PurposeCommand, actor: Actor): PurposeDecision {
   if (command.type === "CreatePurpose") {
-    if (typeof command.name !== "string" || !command.name.trim()) return { ok: false, reason: "validation", field: "name" };
-    if (!slice.fundIds.includes(command.fundId)) return { ok: false, reason: "not_found" };
+    if (typeof command.name !== "string" || !command.name.trim()) return rejectField("name");
+    if (!slice.fundIds.includes(command.fundId)) return reject("not_found");
     return { ok: true, events: [{ type: "PurposeCreated", purposeId: slice.newId!, claimantId: actor.claimantId, fundId: command.fundId, name: command.name.trim() }] };
   }
   const purpose = own(slice.purposes, command.purposeId);
-  if (!purpose) return { ok: false, reason: "not_found" };
-  if (!purpose.active) return { ok: false, reason: "invalid_transition" };
+  if (!purpose) return reject("not_found");
+  if (!purpose.active) return reject("invalid_transition");
   return { ok: true, events: [{ type: "PurposeEnded", purposeId: purpose.id }] };
 }
 
@@ -50,7 +49,7 @@ type Q = Pick<NodePgDatabase, "select">;
 const scope = (actor: Actor) => (isAdmin(actor) ? undefined : eq(purposes.claimantId, actor.claimantId));
 
 const reached = (q: Q, actor: Actor, ids: readonly string[]) => {
-  const wanted = ids.filter((id) => typeof id === "string" && UUID.test(id));
+  const wanted = ids.filter(isUuid);
   return wanted.length ? q.select().from(purposes).where(and(inArray(purposes.id, wanted), scope(actor))) : Promise.resolve([]);
 };
 
@@ -64,7 +63,7 @@ export async function purposeOwners(tx: Tx, actor: Actor, command: PurposeComman
 export async function loadPurposeSlice(tx: Tx, actor: Actor, command: PurposeCommand): Promise<PurposeSlice> {
   if (command.type === "CreatePurpose") {
     const newId = (await tx.execute<{ id: string }>(sql`select uuidv7() as id`)).rows[0]!.id;
-    const fundIds = UUID.test(command.fundId ?? "")
+    const fundIds = isUuid(command.fundId)
       ? (await tx.select({ id: funds.id }).from(funds).where(and(eq(funds.id, command.fundId), visible(actor)))).map((r) => r.id)
       : [];
     return { newId, fundIds, purposes: {} };

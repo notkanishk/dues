@@ -59,8 +59,8 @@ export type ReturnBill = { readonly type: "ReturnBill"; readonly billId: string 
 /** The money is back (W2.4): the expected Refund is received on its refunded-on date. */
 export type MarkRefundReceived = { readonly type: "MarkRefundReceived"; readonly refundId: string; readonly refundedOn: string };
 /**
- * Corrects an Expense's amount, payee or paid-on date (expense-tracking, Expense corrections): only the fields given
- * change. Payment method arrives with that entity (task 2.21).
+ * Corrects an Expense's amount, payee, paid-on date, Fund, Purpose or What for (expense-tracking, Expense corrections):
+ * only the fields given change. Payment method arrives with that entity.
  */
 export type CorrectExpense = LinkFields & {
   readonly type: "CorrectExpense";
@@ -298,7 +298,8 @@ export type Links = {
   /** Where a new payment goes when the command names neither Fund nor Purpose. */
   readonly fallback: { readonly fundId: string; readonly purposeId: string | null };
 };
-const NO_LINKS: Links = { funds: {}, purposes: {}, fallback: { fundId: MAKERSPACE, purposeId: null } };
+/** Nothing named is had; a new payment goes into Makerspace with no Purpose. */
+export const NO_LINKS: Links = { funds: {}, purposes: {}, fallback: { fundId: MAKERSPACE, purposeId: null } };
 
 /**
  * The one rule for an Expense's Fund and Purpose, on every path that sets them. Absent from links is not_found, so
@@ -650,7 +651,7 @@ function changed<K extends string, T>(field: K, from: T, to: T | undefined): { [
   if (to === undefined || isDeepStrictEqual(from, to)) return {};
   return { [field]: { from, to } } as { [P in K]?: Change<T> };
 }
-const reject = (reason: Rejected["reason"]): Rejected => ({ ok: false, reason });
+export const reject = (reason: Rejected["reason"]): Rejected => ({ ok: false, reason });
 
 /**
  * The Bill and its open Expense (not draft, not closed), or not_found when it is not in the Actor's slice (the loader
@@ -690,7 +691,7 @@ function moveExpected(expense: ExpenseState, by: number): Event[] | Rejected {
   return [{ type: by < 0 ? "ExpectedBillReduced" : "ExpectedBillIncreased", billId: bill.id, expenseId: expense.id, amount }];
 }
 
-const rejectField = (field: string): Rejected => ({ ok: false, reason: "validation", field });
+export const rejectField = (field: string): Rejected => ({ ok: false, reason: "validation", field });
 
 export function apply(slice: Slice, event: Event): Slice {
   switch (event.type) {

@@ -229,11 +229,11 @@ export function decideFund(slice: FundSlice, command: FundCommand, actor: Actor)
 
 // ---- Shell: whose lock, the load, the writes ----------------------------------------------------------------------
 
-export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The one key check before a lookup: anything else is never in the database, so it loads nothing (not_found). */
+export const isUuid = (id: unknown): id is string => typeof id === "string" && UUID.test(id);
 const idsOf = (command: FundCommand) =>
-  (command.type === "CreateFund" ? [] : command.type === "OrderFunds" ? (Array.isArray(command.fundIds) ? command.fundIds : []) : [command.fundId]).filter(
-    (id) => typeof id === "string" && UUID.test(id),
-  );
+  (command.type === "CreateFund" ? [] : command.type === "OrderFunds" ? (Array.isArray(command.fundIds) ? command.fundIds : []) : [command.fundId]).filter(isUuid);
 
 /**
  * Whose lock a Fund command takes (D5): the Fund's creator for a change to the Fund itself, so the creator's and an
@@ -351,7 +351,7 @@ export async function writeFund(tx: Tx, event: FundEvent, at: Date) {
  */
 export type FundTemplates = Pick<TeamFields, "mail" | "formTemplate" | "fileNamePattern" | "claimNamePattern">;
 export async function templatesOf(q: Q, actor: Actor, fundId: string): Promise<FundTemplates | null> {
-  if (!UUID.test(fundId)) return null;
+  if (!isUuid(fundId)) return null;
   const [row] = await q
     .select({
       team: { mail: funds.mail, formTemplate: funds.formTemplate, fileNamePattern: funds.fileNamePattern, claimNamePattern: funds.claimNamePattern },
