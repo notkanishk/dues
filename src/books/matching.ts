@@ -195,8 +195,10 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
     .sort(betterFit);
   if (fits.length === 0) return { type: "newExpense", askVendor: facts.vendor === null };
 
-  // "Exactly one candidate" counts every candidate, larger Orders included.
-  const auto = fits.filter((f) => f.auto || (fits.length === 1 && f.exact && f.days <= config.billWindowDays));
+  // "Exactly one candidate" counts every candidate, larger Orders included. An exact-amount candidate anywhere means
+  // no other Expense is split: the bill may be that one, so a Check decides.
+  const anyExact = fits.some((f) => f.exact);
+  const auto = fits.filter((f) => (f.auto && (f.exact || !anyExact)) || (fits.length === 1 && f.exact && f.days <= config.billWindowDays));
   const byOrder = auto.filter((f) => f.order);
   const chosen = byOrder.length === 1 ? byOrder[0] : auto.length === 1 ? auto[0] : null;
   if (chosen) return { type: "attach", expenseId: chosen.e.id };
