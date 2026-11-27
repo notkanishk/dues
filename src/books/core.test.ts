@@ -630,6 +630,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
   // returned Bill stays cancelled (only undo reopens a closed-out one), a received or written-off Refund stays so, a
   // closed Expense stays closed. A Bill on a submitted Claim is refused as locked, and locks its Expense too; the other
   // Expense changes only when a Bill moves into it.
+  // A quarter of the first Expenses are entries without a bill (W1): a corrected Payment carries their No bill with it.
   it("hold for 2,000 random sequences of Order, Bill, correction and closing commands across Expenses; refusals are typed, never thrown", () => {
     const types = [
       "CancelBill",
@@ -646,16 +647,20 @@ describe("Open amount and settled invariants, for any generated slice", () => {
       "SplitExpectedBill",
       "UndoCloseOrder",
     ];
-    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0, locked: 0, closed: 0, writtenOff: 0, movedExpected: 0, moved: 0, movedEqual: 0, undone: 0 };
+    const seen = { accepted: new Set<string>(), refused: new Set<string>(), settled: 0, locked: 0, closed: 0, writtenOff: 0, movedExpected: 0, moved: 0, movedEqual: 0, undone: 0, entries: 0, entryCarried: 0 };
     for (let n = 0; n < 2000; n++) {
       const first = paise() + 1;
-      const logged = decide(fresh, logExpense(pick(["online", "online", "shop"] as const), first), mickey, now);
+      const entry = next() % 4 === 0;
+      const logged = entry
+        ? decide(fresh, { type: "LogNoBillEntry", kind: pick(["service", "shop", "online"] as const), amount: rupees(first), paidOn: "2026-11-19", whatFor: "Auto to hardware market" }, mickey, now)
+        : decide(fresh, logExpense(pick(["online", "online", "shop"] as const), first), mickey, now);
+      if (entry) seen.entries++;
       // Now and then the other Order expects what the first paid, so a Bill can move in equal to its remainder (W4.3).
       const other = decide({ ...fresh, newIds: ["e-2", "b-foreign"] }, logExpense("online", pick([paise() + 1, first])), mickey, now);
       if (!logged.ok || !other.ok) throw new Error("expected Ok");
       let slice = [...logged.events, ...other.events].reduce(apply, fresh);
       // Half the time the first Bill has its Invoice document, so it can be corrected (no command attaches one yet).
-      if (next() % 2) Object.assign(slice.expenses["e-1"]!.bills[0]!, { paperlessId: 7, kind: "invoice" });
+      if (next() % 2 && !entry) Object.assign(slice.expenses["e-1"]!.bills[0]!, { paperlessId: 7, kind: "invoice" });
       // Up to two Bills already on a submitted Claim, paid for by the same Payment so the Open amount stays zero.
       const claimed = next() % 3;
       for (let k = claimed; k > 0; k--) {
@@ -773,6 +778,14 @@ describe("Open amount and settled invariants, for any generated slice", () => {
           for (const [id, was] of Object.entries(before.expenses))
             if (was.bills.some((b) => !b.cancelled && !b.fulfilledOn && !b.claim))
               expect(deriveExpense(slice.expenses[id]!).openAmount).toEqual(deriveExpense(was).openAmount);
+        // An entry's corrected Payment carries its No bill: the Open amount stays where it was, and the entry stays one amount.
+        const wasEntry = e1Before.bills.filter((b) => !b.cancelled).length === 1 && e1Before.bills.some((b) => !b.cancelled && b.kind === "no_bill" && !b.fromBillId && b.amount!.paise === e1Before.amount!.paise);
+        if (wasEntry && command.type === "CorrectExpense" && command.expenseId === "e-1" && decision.events.length) {
+          const after = slice.expenses["e-1"]!;
+          expect(deriveExpense(after).openAmount).toEqual(deriveExpense(e1Before).openAmount);
+          expect(after.bills.find((b) => !b.cancelled)!.amount).toEqual(after.amount);
+          seen.entryCarried++;
+        }
         // Closing an Order never moves its Open amount: the remainder is covered three ways.
         if (command.type === "CloseOrder") expect(deriveExpense(slice.expenses["e-1"]!).openAmount).toEqual(deriveExpense(e1Before).openAmount);
         if (command.type === "CloseExpense") seen.closed++;
@@ -793,6 +806,8 @@ describe("Open amount and settled invariants, for any generated slice", () => {
     expect(seen.moved).toBeGreaterThan(20);
     expect(seen.undone).toBeGreaterThan(20);
     expect(seen.movedEqual).toBeGreaterThan(10);
+    expect(seen.entries).toBeGreaterThan(300);
+    expect(seen.entryCarried).toBeGreaterThan(10);
   });
 });
 
