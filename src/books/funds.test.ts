@@ -157,10 +157,14 @@ describe("Fund sharing and edit rights", () => {
     });
   });
 
-  it("an admin reaches another Claimant's private Fund by id and edits it, audited as actor, while their list holds only their own and team Funds", async () => {
+  it("an admin sees another Claimant's private Fund in Settings, never on their own prompt, and edits it by id, audited as actor", async () => {
     const [mickey, minnie] = [claimant(), admin()];
     const fundId = await created(mickey);
-    expect((await listed(minnie)).map((f) => f.id)).not.toContain(fundId);
+    expect((await listed(minnie)).find((f) => f.id === fundId)).toMatchObject({ sharing: "private", mayEditTeam: true });
+    const prompt = await books.promptFunds(minnie);
+    expect(prompt.ok && prompt.funds.map((f) => f.id)).not.toContain(fundId);
+    // Over MCP an admin's Settings hold only their own scope (D6).
+    expect((await listed({ ...minnie, via: "mcp" })).map((f) => f.id)).not.toContain(fundId);
     ok(await books.execute(minnie, { type: "EditFund", fundId, notes: "Checked by the office" }));
     expect((await listed(mickey)).find((f) => f.id === fundId)?.notes).toBe("Checked by the office");
     expect((await auditOf(fundId)).at(-1)).toMatchObject({ actorId: minnie.claimantId, ownerId: mickey.claimantId, toState: "private" });
