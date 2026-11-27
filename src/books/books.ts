@@ -35,9 +35,20 @@ import {
 } from "./core";
 import { advancesOf, decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, isUuid, templatesOf, visible, writeFund } from "./funds";
 import { decidePurpose, isPurposeCommand, listPurposes, promptOf, loadPurposeSlice, type PurposeCommand, type PurposeEvent, purposeEntries, purposeOwners, writePurpose } from "./purposes";
+import {
+  decidePaymentMethod,
+  isPaymentMethodCommand,
+  listPaymentMethods,
+  loadPaymentMethodSlice,
+  type PaymentMethodCommand,
+  type PaymentMethodEvent,
+  paymentMethodEntries,
+  paymentMethodOwners,
+  writePaymentMethod,
+} from "./payment-methods";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
-export type Result = { readonly ok: true; readonly events: readonly (Event | FundEvent | PurposeEvent)[] } | Rejected;
+export type Result = { readonly ok: true; readonly events: readonly (Event | FundEvent | PurposeEvent | PaymentMethodEvent)[] } | Rejected;
 export type Deps = {
   readonly db: NodePgDatabase;
   readonly now: () => Date;
@@ -418,7 +429,7 @@ const isKeyRace = (e: unknown) => {
 type Staged =
   | {
       readonly ok: true;
-      readonly events: readonly (Event | FundEvent | PurposeEvent)[];
+      readonly events: readonly (Event | FundEvent | PurposeEvent | PaymentMethodEvent)[];
       readonly entries: readonly Omit<typeof auditLog.$inferInsert, "at" | "actorId" | "command" | "idempotencyKey">[];
       readonly commit: () => Promise<void>;
     }
@@ -488,9 +499,29 @@ async function stagePurpose(tx: Tx, actor: Actor, command: PurposeCommand, at: D
   };
 }
 
-type AnyCommand = Command | FundCommand | PurposeCommand;
+async function stagePaymentMethod(tx: Tx, actor: Actor, command: PaymentMethodCommand, at: Date): Promise<Staged> {
+  const slice = await loadPaymentMethodSlice(tx, actor, command);
+  const decision = decidePaymentMethod(slice, command, actor);
+  if (!decision.ok) return decision;
+  return {
+    ok: true,
+    events: decision.events,
+    entries: paymentMethodEntries(slice, decision.events),
+    commit: async () => {
+      for (const event of decision.events) await writePaymentMethod(tx, event, at);
+    },
+  };
+}
+
+type AnyCommand = Command | FundCommand | PurposeCommand | PaymentMethodCommand;
 const ownersFor = (tx: Tx, actor: Actor, command: AnyCommand) =>
-  isFundCommand(command) ? fundOwners(tx, actor, command) : isPurposeCommand(command) ? purposeOwners(tx, actor, command) : ownersOf(tx, actor, command);
+  isFundCommand(command)
+    ? fundOwners(tx, actor, command)
+    : isPurposeCommand(command)
+      ? purposeOwners(tx, actor, command)
+      : isPaymentMethodCommand(command)
+        ? paymentMethodOwners(tx, actor, command)
+        : ownersOf(tx, actor, command);
 
 export function createBooks({ db, now, enqueue }: Deps) {
   async function attempt(actor: Actor, command: AnyCommand, key: string | undefined): Promise<Result> {
@@ -512,7 +543,9 @@ export function createBooks({ db, now, enqueue }: Deps) {
         ? await stageFund(tx, actor, command, at)
         : isPurposeCommand(command)
           ? await stagePurpose(tx, actor, command, at)
-          : await stageExpense(tx, actor, command, owners, at, enqueue);
+          : isPaymentMethodCommand(command)
+            ? await stagePaymentMethod(tx, actor, command, at)
+            : await stageExpense(tx, actor, command, owners, at, enqueue);
       if (!staged.ok) return staged; // a rejected command changes nothing
 
       // Audit rows first (design D2). The audit log holds a key once (schema), so the command's first entry carries it.
@@ -575,6 +608,12 @@ export function createBooks({ db, now, enqueue }: Deps) {
     async purposes(actor: Actor) {
       if (!mayEnter(actor)) return forbidden;
       return { ok: true as const, purposes: await listPurposes(db, actor) };
+    },
+
+    /** Settings → Payment methods: the Actor's own, archived included, with their hints (an admin's by session: every Claimant's, D6). */
+    async paymentMethods(actor: Actor) {
+      if (!mayEnter(actor)) return forbidden;
+      return { ok: true as const, paymentMethods: await listPaymentMethods(db, actor) };
     },
 
     /** The Actor's effective templates for a Claim of this Fund (design §6); never its notes. */

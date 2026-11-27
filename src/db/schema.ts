@@ -277,3 +277,23 @@ export const purposes = pgTable(
   },
   (t) => [unique("purposes_link_target").on(t.id, t.fundId, t.claimantId), index("purposes_claimant_id_idx").on(t.claimantId)],
 );
+
+// Payment methods (identity-access "Claimant-defined Payment methods"): one Claimant's own labels, none hard-coded, each
+// with optional match hints for reading a payment confirmation. Archived: no longer offered; Expenses that used it keep it.
+export const paymentMethods = pgTable(
+  "payment_methods",
+  {
+    id: key(),
+    claimantId: uuid("claimant_id").notNull(),
+    label: text("label").notNull(),
+    hintBank: text("hint_bank"),
+    hintCardLast4: text("hint_card_last4"),
+    hintUpiHandle: text("hint_upi_handle"),
+    archived: boolean("archived").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("payment_methods_card_last4", sql`${t.hintCardLast4} ~ '^[0-9]{4}$'`),
+    index("payment_methods_claimant_id_idx").on(t.claimantId),
+  ],
+);
