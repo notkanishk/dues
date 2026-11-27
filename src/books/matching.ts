@@ -1,6 +1,7 @@
 // Matching (design §2): which Expense a document belongs to. Pure: no database, no clock, no I/O.
 // Only caller: Books, inside LogDocument, under the Claimant's lock (D5). Candidates are the Claimant's own.
 import { type Money, minus, sum } from "../money/money";
+import type { LogExpense } from "./core";
 
 /** Matching thresholds, named in one place (design §1 Config). */
 export const MATCHING = {
@@ -38,7 +39,7 @@ export type PaymentFacts = {
   readonly paidOn: string | null;
   readonly payee: string | null;
   readonly payeeStandsFor: readonly string[]; // learned aliases: vendors this payee has stood for
-  readonly reference: string | null; // UPI reference, UTR or transaction ID; null: none readable
+  readonly upiRef: string | null; // UPI reference, UTR or transaction ID; null: none readable
   readonly receivedAt: string; // ISO instant the confirmation arrived (the "now" of this decision)
 };
 
@@ -47,7 +48,7 @@ export type DocumentFacts = BillFacts | PaymentFacts;
 /** The slice of one of the Claimant's Expenses that matching reads. */
 export type CandidateExpense = {
   readonly id: string;
-  readonly kind: "online" | "shop" | "service";
+  readonly kind: LogExpense["kind"];
   readonly paidOn: string;
   readonly payment: Money | null;
   readonly openAmount: Money;
@@ -57,7 +58,7 @@ export type CandidateExpense = {
   readonly orderRef: string | null;
   readonly payback: boolean;
   readonly invoiceOnly: boolean; // logged from an invoice; no Payment proof yet
-  readonly references: readonly string[]; // transaction references of its Payment proofs
+  readonly upiRefs: readonly string[]; // UPI references, UTRs or transaction IDs of its Payment proofs
   readonly proofReceivedAt: string | null; // ISO instant its reference-less confirmation arrived
 };
 
@@ -96,7 +97,8 @@ const payeeMatches = (facts: PaymentFacts, e: CandidateExpense) => [facts.payee,
 /** A blank read is no read: "ask for the vendor" and "Same payment as E-x?" must still fire. */
 const readable = (s: string | null) => (s !== null && s.trim() !== "" ? s : null);
 
-const sameRef = (a: string | null, b: string | null) => a !== null && b !== null && a.trim() !== "" && a.trim() === b.trim();
+/** The same UPI reference, order number or Expense ID; a blank one never matches. */
+const sameId = (a: string | null, b: string | null) => a !== null && b !== null && a.trim() !== "" && a.trim() === b.trim();
 
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id, "en", { numeric: true });
 
@@ -120,7 +122,7 @@ const MINUTE_MS = 60_000;
 function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateExpense[], config: MatchingConfig): Proposal {
   const sorted = [...candidates].sort(byId);
   // The same transaction reference is the same Payment.
-  const same = sorted.find((e) => e.references.some((r) => sameRef(facts.reference, r)));
+  const same = sorted.find((e) => e.upiRefs.some((r) => sameId(facts.upiRef, r)));
   if (same) return { type: "attachProof", expenseId: same.id };
 
   // Invoice before payment: a late confirmation completes an invoice-only Expense.
@@ -141,10 +143,10 @@ function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateEx
   }
 
   // Neither of two confirmations carries a reference: offer the nearer one in time, never merge.
-  if (readable(facts.reference) === null) {
+  if (readable(facts.upiRef) === null) {
     const gap = (e: CandidateExpense) => Math.abs(Date.parse(facts.receivedAt) - Date.parse(e.proofReceivedAt!));
     const twin = sorted
-      .filter((e) => e.references.length === 0 && e.proofReceivedAt !== null && gap(e) <= config.samePaymentMinutes * MINUTE_MS)
+      .filter((e) => e.upiRefs.length === 0 && e.proofReceivedAt !== null && gap(e) <= config.samePaymentMinutes * MINUTE_MS)
       .sort((a, b) => gap(a) - gap(b));
     if (twin.length > 0) return { type: "samePaymentSuggestion", expenseId: twin[0].id };
   }
@@ -183,7 +185,7 @@ function mergeFor(amount: Money, paidOn: string, sorted: readonly CandidateExpen
 
 function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[], config: MatchingConfig): Proposal {
   // An exact Expense ID needs no matching (FUNCTIONAL W2.4).
-  const named = candidates.find((e) => sameRef(facts.expenseId, e.id));
+  const named = candidates.find((e) => sameId(facts.expenseId, e.id));
   if (named) return { type: "attach", expenseId: named.id };
 
   const newExpense = { type: "newExpense", askVendor: readable(facts.vendor) === null } as const;
@@ -194,14 +196,14 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
       const days = daysApart(e.paidOn, facts.billDate);
       const inWindow = days <= config.billWindowDays;
       const exact = e.openAmount.paise === facts.total.paise;
-      const smaller = e.kind === "online" && e.openAmount.paise > facts.total.paise;
-      const order = sameRef(facts.orderRef, e.orderRef);
+      const larger = e.kind === "online" && e.openAmount.paise > facts.total.paise;
+      const order = sameId(facts.orderRef, e.orderRef);
       const shopMatched = shopMatches(shop, e);
       // A Payback expects a bill of its amount from any vendor (W9): the vendor check is skipped for that amount only.
       // Skipped is not passed: it ranks the Payback, but never auto-attaches it.
       const fit = { e, order, vendor: shopMatched || (e.payback && exact), exact, days, auto: false };
       // A candidate: exact amount in the window, a larger online Order in the window, or the same order number.
-      return (inWindow && (exact || smaller)) || order ? { ...fit, auto: inWindow && (exact || smaller) && (order || shopMatched) } : null;
+      return (inWindow && (exact || larger)) || order ? { ...fit, auto: inWindow && (exact || larger) && (order || shopMatched) } : null;
     })
     .filter((f): f is Fit => f !== null)
     .sort(betterFit);
