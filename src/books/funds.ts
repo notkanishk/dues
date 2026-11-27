@@ -43,7 +43,7 @@ export async function listFunds(q: Q, actor: Actor, view: "settings" | "prompt")
     return {
       id: fund.id,
       name: fund.name,
-      notes: fund.notes, // shown to Dues users here; never in fundTemplates
+      notes: fund.notes, // shown to Claimants in Dues; never in fundTemplates
       sharing: fund.team ? ("team" as const) : ("private" as const),
       archived: fund.archived,
       hidden: setting?.hidden ?? false,
@@ -279,7 +279,9 @@ export async function loadFundSlice(tx: Tx, actor: Actor, command: FundCommand):
 
 const stateOf = (f: { team: boolean; archived: boolean } | undefined) => (!f ? null : f.archived ? "archived" : f.team ? "team" : "private");
 
-/** Audit entries for a Fund command (D2): the Fund's creator owns a change to the Fund, the Actor their own settings. */
+/** Audit entries for a Fund command (D2): the Fund's creator owns a change to the Fund (the acting admin, for one with no creator), the Actor their own settings. */
+// ponytail: no apply for Funds (deferred): each event's after-state is derived here; add apply when a Fund command emits
+// several events whose later ones read earlier ones' effect.
 export function fundEntries(slice: FundSlice, events: readonly FundEvent[], actor: Actor) {
   return events.map((event) => {
     if (event.type === "FundsOrdered")
