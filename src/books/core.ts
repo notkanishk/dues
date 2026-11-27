@@ -8,6 +8,8 @@ export type Actor = {
   readonly roles: readonly string[];
   readonly via: "session" | "mcp" | "intake";
 };
+/** The one admin-scope test (design D6): an admin signed in by session reaches every Claimant's rows; by MCP or Intake, only their own. */
+export const isAdmin = (actor: Actor) => actor.via === "session" && actor.roles.includes("admin");
 
 // Fund, Purpose, Payment method and Orderer arrive with those entities (tasks 2.7, 2.19b, 2.21).
 export type LogExpense = {

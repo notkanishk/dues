@@ -4,7 +4,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { funds, fundSettings, fundVersions } from "@/src/db/schema";
 import type { Tx } from "./books";
-import type { Actor } from "./core";
+import { type Actor, isAdmin } from "./core";
 
 /** Seeded by migration 0007: the one Fund every Claimant has from the start. */
 export const MAKERSPACE = "00000000-0000-7000-8000-000000000001";
@@ -20,18 +20,22 @@ export type Overridable = {
 const OVERRIDABLE = ["mail", "formTemplate", "fileNamePattern", "whatForHint"] as const satisfies readonly (keyof Overridable)[];
 
 type Q = Pick<NodePgDatabase, "select">;
-/** An admin signed in by session reaches every Fund by id (design D6); lists still show only their own and team Funds. */
-export const isAdmin = (actor: Actor) => actor.via === "session" && actor.roles.includes("admin");
+/** The Funds a Claimant has: their own and every team Fund. */
 const visible = (actor: Actor) => or(eq(funds.team, true), eq(funds.creatorId, actor.claimantId));
+/** An admin reaches every Fund (D6); anyone else the Funds they have. */
+const reachable = (actor: Actor) => (isAdmin(actor) ? undefined : visible(actor));
 
-/** Every Fund the Actor can use, their own private ones and every team Fund, in the Actor's order (Settings → Funds). */
-export async function listFunds(q: Q, actor: Actor) {
+/**
+ * Every Fund the Actor can use, their own private ones and every team Fund, in the Actor's order. In Settings an admin
+ * also sees every other Claimant's private Fund (D6); the prompt offers an admin only the Funds they have.
+ */
+export async function listFunds(q: Q, actor: Actor, view: "settings" | "prompt") {
   const rows = await q
     .select({ fund: funds, mine: fundVersions, setting: fundSettings })
     .from(funds)
     .leftJoin(fundVersions, and(eq(fundVersions.fundId, funds.id), eq(fundVersions.claimantId, actor.claimantId)))
     .leftJoin(fundSettings, and(eq(fundSettings.fundId, funds.id), eq(fundSettings.claimantId, actor.claimantId)))
-    .where(visible(actor));
+    .where(view === "settings" ? reachable(actor) : visible(actor));
   return rows.sort(byOrder).map(({ fund, mine, setting }) => {
     const teamVersion = pick(fund);
     const myVersion = mine && (Object.fromEntries(OVERRIDABLE.flatMap((k) => (mine[k] === null ? [] : [[k, mine[k]]]))) as Partial<Overridable>);
@@ -221,8 +225,6 @@ const idsOf = (command: FundCommand) =>
   (command.type === "CreateFund" ? [] : command.type === "OrderFunds" ? (Array.isArray(command.fundIds) ? command.fundIds : []) : [command.fundId]).filter(
     (id) => typeof id === "string" && UUID.test(id),
   );
-/** By id an admin reaches every Fund (D6); anyone else their own and the team's. */
-const reachable = (actor: Actor) => (isAdmin(actor) ? undefined : visible(actor));
 
 /**
  * Whose lock a Fund command takes (D5): the Fund's creator for a change to the Fund itself, so the creator's and an

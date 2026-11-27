@@ -19,6 +19,7 @@ import {
   deriveExpense,
   deriveRefund,
   type Event,
+  isAdmin,
   type ExpenseState,
   type ExpenseStatus,
   type Job,
@@ -53,8 +54,7 @@ const mayEnter = (actor: Actor) => actor.roles.includes("claimant");
  * The ownership filter: an admin signed in by session passes it (D6); anyone else sees only their own Expenses. An MCP
  * token carries its issuing Claimant's scope and nothing more, and Intake acts as the document owner's Claimant.
  */
-const scope = (actor: Actor) =>
-  actor.via === "session" && actor.roles.includes("admin") ? undefined : eq(expenses.claimantId, actor.claimantId);
+const scope = (actor: Actor) => (isAdmin(actor) ? undefined : eq(expenses.claimantId, actor.claimantId));
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const money = (paise: number | null, currency: string): Money | null => (paise === null ? null : { paise, currency: currency as "INR" });
@@ -484,10 +484,10 @@ export function createBooks({ db, now, enqueue }: Deps) {
       }
     },
 
-    /** Settings → Funds: every Fund the Actor can use, in their order, with the team version, theirs and what is in effect. */
+    /** Settings → Funds: every Fund the Actor can use (an admin's: every Fund), in their order, with the team version, theirs and what is in effect. */
     async funds(actor: Actor) {
       if (!mayEnter(actor)) return forbidden;
-      return { ok: true as const, funds: await listFunds(db, actor) };
+      return { ok: true as const, funds: await listFunds(db, actor, "settings") };
     },
 
     /**
@@ -496,7 +496,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
      */
     async promptFunds(actor: Actor) {
       if (!mayEnter(actor)) return forbidden;
-      const offered = (await listFunds(db, actor)).filter((f) => !f.hidden && !f.archived);
+      const offered = (await listFunds(db, actor, "prompt")).filter((f) => !f.hidden && !f.archived);
       return { ok: true as const, funds: offered.map((f) => ({ id: f.id, name: f.name, whatForHint: f.effective.whatForHint })) };
     },
 
