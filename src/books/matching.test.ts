@@ -174,3 +174,19 @@ describe("An exact Expense ID short-circuits matching", () => {
     expect(propose(bill({ expenseId: "E-999" }), [expense("E-601")])).toEqual({ type: "attach", expenseId: "E-601" });
   });
 });
+
+describe("Bill for a Payback matches on amount and date", () => {
+  it("a ₹900.00 bill from any vendor 2 days after a ₹900.00 Payback matches it with no vendor comparison", () => {
+    const facts = bill({ total: rs(900), billDate: "2026-03-03" });
+    const candidates = [
+      expense("E-701", { paidOn: "2026-03-01", payment: rs(900), openAmount: rs(900), payee: "Dexter", vendor: "Fizzy Hardware", payback: true }),
+      expense("E-702", { paidOn: "2026-03-03", payment: rs(900), openAmount: rs(900), payee: "GatewayPay Merchant 12" }),
+    ];
+    expect(propose(facts, candidates)).toEqual({ type: "attach", expenseId: "E-701" });
+  });
+
+  it("a Payback 11 days away is no candidate", () => {
+    const facts = bill({ total: rs(900), billDate: "2026-03-12" });
+    expect(propose(facts, [expense("E-701", { payment: rs(900), openAmount: rs(900), payee: "Dexter", payback: true })])).toEqual({ type: "newExpense", askVendor: false });
+  });
+});
