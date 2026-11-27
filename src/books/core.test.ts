@@ -145,6 +145,12 @@ describe("decide LogNoBillEntry", () => {
     expect(run(cashLinks, { ...cashRide, remarks: 7 } as never, ["e-1", "b-1"]).decision).toEqual({ ok: false, reason: "validation", field: "remarks" });
   });
 
+  it("the Vendor is the payee unless Payback, when there is none (FUNCTIONAL §1)", () => {
+    expect(run(cashLinks, { ...cashRide, payee: "Auto" }, ["e-1", "b-1"]).decision).toMatchObject({ ok: true, events: [{ payee: "Auto", vendor: "Auto" }, {}] });
+    expect(run(cashLinks, { ...cashRide, payee: "Auto", payback: true }, ["e-1", "b-1"]).decision).toMatchObject({ ok: true, events: [{ payee: "Auto", vendor: null }, {}] });
+    expect(run(cashLinks, cashRide, ["e-1", "b-1"]).decision).toMatchObject({ ok: true, events: [{ payee: null, vendor: null }, {}] });
+  });
+
   it("Nothing to match or review: a bill number, GSTIN, order reference, UPI reference or document sent with it is never recorded", () => {
     const smuggled = { ...cashRide, billNo: "INV-7", gstin: "22AAAAA0000A1Z5", orderRef: "402-1", upiRef: "123456789012", paperlessId: 7 } as never;
     const { decision, slice } = run(cashLinks, smuggled, ["e-1", "b-1"]);
