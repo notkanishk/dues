@@ -27,10 +27,10 @@ import {
   type Rejected,
   type Slice,
 } from "./core";
-import { listFunds } from "./funds";
+import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, templatesOf, writeFund } from "./funds";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
-export type Result = { readonly ok: true; readonly events: readonly Event[] } | Rejected;
+export type Result = { readonly ok: true; readonly events: readonly (Event | FundEvent)[] } | Rejected;
 export type Deps = {
   readonly db: NodePgDatabase;
   readonly now: () => Date;
@@ -375,10 +375,70 @@ const isKeyRace = (e: unknown) => {
   return cause?.code === "23505" && KEY_CONSTRAINTS.includes(cause.constraint ?? "");
 };
 
+/** What a command will do once its audit rows are in: the events, their audit entries and the writes, or a rejection. */
+type Staged =
+  | {
+      readonly ok: true;
+      readonly events: readonly (Event | FundEvent)[];
+      readonly entries: readonly Omit<typeof auditLog.$inferInsert, "at" | "actorId" | "command" | "idempotencyKey">[];
+      readonly commit: () => Promise<void>;
+    }
+  | Rejected;
+
+async function stageExpense(tx: Tx, actor: Actor, command: Command, owners: string[], at: Date, enqueue: Deps["enqueue"]): Promise<Staged> {
+  const slice = await loadSlice(tx, actor, command);
+  // Nothing is decided on a Claimant whose lock is not held: a Bill changed owner after the owners were read. Rerun.
+  if (Object.values(slice.expenses).some((e) => !owners.includes(e.claimantId))) throw new OwnersMoved();
+  const decision = decide(slice, command, actor, at);
+  if (!decision.ok) return decision; // a rejected command changes nothing
+
+  // One audit entry per event, with the states before and after it.
+  let state = slice;
+  const entries = decision.events.map((event) => {
+    const [entity, entityId] = entityOf(event);
+    const fromState = stateOf(state, entity, entityId);
+    state = apply(state, event);
+    return {
+      ownerId: state.expenses[expenseOfEvent(event)]!.claimantId,
+      event: event.type,
+      entity,
+      entityId,
+      fromState,
+      toState: stateOf(state, entity, entityId),
+      payload: event,
+    };
+  });
+  // And nothing is written to one: what a command creates is the Actor's or a locked owner's (checked, not assumed).
+  if (entries.some((e) => !owners.includes(e.ownerId))) throw new OwnersMoved();
+  return {
+    ok: true,
+    events: decision.events,
+    entries,
+    commit: async () => {
+      for (const event of decision.events) await write(tx, event, at);
+      for (const job of decision.jobs) await enqueue(tx, job);
+    },
+  };
+}
+
+async function stageFund(tx: Tx, actor: Actor, command: FundCommand, at: Date): Promise<Staged> {
+  const slice = await loadFundSlice(tx, actor, command);
+  const decision = decideFund(slice, command, actor);
+  if (!decision.ok) return decision;
+  return {
+    ok: true,
+    events: decision.events,
+    entries: fundEntries(slice, decision.events, actor),
+    commit: async () => {
+      for (const event of decision.events) await writeFund(tx, event, at);
+    },
+  };
+}
+
 export function createBooks({ db, now, enqueue }: Deps) {
-  async function attempt(actor: Actor, command: Command, key: string | undefined): Promise<Result> {
+  async function attempt(actor: Actor, command: Command | FundCommand, key: string | undefined): Promise<Result> {
     return db.transaction(async (tx) => {
-      const owners = await ownersOf(tx, actor, command);
+      const owners = isFundCommand(command) ? await fundOwners(tx, actor, command) : await ownersOf(tx, actor, command);
       for (const owner of owners) await lockClaimant(tx, owner);
 
       // A key is the requester's (the Actor's), not the owner's: the same key from anyone else is a conflict.
@@ -390,41 +450,16 @@ export function createBooks({ db, now, enqueue }: Deps) {
         }
       }
 
-      const slice = await loadSlice(tx, actor, command);
-      // Nothing is decided on a Claimant whose lock is not held: a Bill changed owner after the owners were read. Rerun.
-      if (Object.values(slice.expenses).some((e) => !owners.includes(e.claimantId))) throw new OwnersMoved();
       const at = now();
-      const decision = decide(slice, command, actor, at);
-      if (!decision.ok) return decision; // a rejected command changes nothing
+      const staged = isFundCommand(command) ? await stageFund(tx, actor, command, at) : await stageExpense(tx, actor, command, owners, at, enqueue);
+      if (!staged.ok) return staged; // a rejected command changes nothing
 
-      // Audit rows first (design D2): one per event, with the states before and after it.
-      let state = slice;
-      const entries = decision.events.map((event, i) => {
-        const [entity, entityId] = entityOf(event);
-        const fromState = stateOf(state, entity, entityId);
-        state = apply(state, event);
-        return {
-          at,
-          actorId: actor.claimantId,
-          ownerId: state.expenses[expenseOfEvent(event)]!.claimantId,
-          command: command.type,
-          event: event.type,
-          entity,
-          entityId,
-          fromState,
-          toState: stateOf(state, entity, entityId),
-          payload: event,
-          // The audit log holds a key once (schema), so the command's first entry carries it.
-          idempotencyKey: i === 0 ? (key ?? null) : null,
-        };
-      });
-      // And nothing is written to one: what a command creates is the Actor's or a locked owner's (checked, not assumed).
-      if (entries.some((e) => !owners.includes(e.ownerId))) throw new OwnersMoved();
-      if (entries.length) await tx.insert(auditLog).values(entries); // a correction that keeps every value writes nothing
-      for (const event of decision.events) await write(tx, event, at);
-      for (const job of decision.jobs) await enqueue(tx, job);
+      // Audit rows first (design D2). The audit log holds a key once (schema), so the command's first entry carries it.
+      const entries = staged.entries.map((e, i) => ({ ...e, at, actorId: actor.claimantId, command: command.type, idempotencyKey: i === 0 ? (key ?? null) : null }));
+      if (entries.length) await tx.insert(auditLog).values(entries); // a command that changes nothing writes nothing
+      await staged.commit();
 
-      const result: Result = { ok: true, events: decision.events };
+      const result: Result = { ok: true, events: staged.events };
       if (key !== undefined) await tx.insert(idempotencyKeys).values({ key, claimantId: actor.claimantId, command, result, at });
       return result;
     });
@@ -435,7 +470,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
      * Every write. Typed rejections; throws when the database fails, or with OwnersMoved when owners still moved under it
      * after 3 tries, and then nothing is written.
      */
-    async execute(actor: Actor, command: Command, opts: { idempotencyKey?: string } = {}): Promise<Result> {
+    async execute(actor: Actor, command: Command | FundCommand, opts: { idempotencyKey?: string } = {}): Promise<Result> {
       if (!mayEnter(actor)) return forbidden;
       for (let tries = 1; ; tries++) {
         try {
@@ -453,6 +488,13 @@ export function createBooks({ db, now, enqueue }: Deps) {
     async funds(actor: Actor) {
       if (!mayEnter(actor)) return forbidden;
       return { ok: true as const, funds: await listFunds(db, actor) };
+    },
+
+    /** The Actor's effective templates for a Claim of this Fund (design §6); never its notes. */
+    async fundTemplates(actor: Actor, fundId: string) {
+      if (!mayEnter(actor)) return forbidden;
+      const templates = await templatesOf(db, actor, fundId);
+      return templates ? { ok: true as const, templates } : notFound;
     },
 
     /** One Expense with its Bills; status, Open amount, why it is open and Bill status derived on read (design D3). */
