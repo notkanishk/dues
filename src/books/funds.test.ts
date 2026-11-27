@@ -458,6 +458,20 @@ describe("Fund access, Actor by Fund state", () => {
     if (!want.ok) expect((await auditOf(fundId)).length, label).toBe(rows);
     if (result.ok && ["EditFund", "ShareFund", "ArchiveFund"].includes(op))
       expect((await auditOf(fundId)).at(-1), label).toMatchObject({ actorId: actor.claimantId, ownerId: owner.claimantId, command: op });
+    if (!want.ok) return;
+    // A cell that succeeds also did what it says, seen through the Actor's own Settings or templates.
+    const mine = await listed(actor);
+    const changed: Record<string, unknown> = {
+      EditFund: { name: "Renamed" },
+      ShareFund: { sharing: "team" },
+      ArchiveFund: { archived: true },
+      SetPersonalVersion: { myVersion: { whatForHint: "e.g. mine" } },
+      ResetToTeamVersion: { myVersion: null },
+      HideFund: { hidden: true },
+    };
+    if (op === "fundTemplates") expect(result, label).toMatchObject({ templates: { claimNamePattern: state === "makerspace" ? "{Month}{n}" : "Travel{n}" } });
+    else if (op === "OrderFunds") expect(mine[0]?.id, label).toBe(fundId);
+    else expect(mine.find((f) => f.id === fundId), label).toMatchObject(changed[op]!);
   };
   const cellsOf = (states: State[]) =>
     Object.entries(expected).flatMap(([op, byState]) =>
