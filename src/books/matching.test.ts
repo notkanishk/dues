@@ -188,13 +188,24 @@ describe("An exact Expense ID short-circuits matching", () => {
 });
 
 describe("Bill for a Payback matches on amount and date", () => {
-  it("a ₹900.00 bill from any vendor 2 days after a ₹900.00 Payback matches it with no vendor comparison", () => {
+  const payback = (id: string, over: Partial<CandidateExpense> = {}) =>
+    expense(id, { paidOn: "2026-03-01", payment: rs(900), openAmount: rs(900), payee: "Dexter", vendor: "Fizzy Hardware", payback: true, ...over });
+  const gatewayPaid = (id: string, over: Partial<CandidateExpense> = {}) =>
+    expense(id, { paidOn: "2026-03-03", payment: rs(900), openAmount: rs(900), payee: "GatewayPay Merchant 12", ...over });
+
+  it("a ₹900.00 bill from any vendor 2 days after a ₹900.00 Payback, its only candidate, matches it with no vendor comparison", () => {
+    expect(propose(bill({ total: rs(900), billDate: "2026-03-03" }), [payback("E-701")])).toEqual({ type: "attach", expenseId: "E-701" });
+  });
+
+  it("skipping the vendor check is not passing it: beside an equally exact gateway-paid Expense, a Check, the Payback first", () => {
     const facts = bill({ total: rs(900), billDate: "2026-03-03" });
-    const candidates = [
-      expense("E-701", { paidOn: "2026-03-01", payment: rs(900), openAmount: rs(900), payee: "Dexter", vendor: "Fizzy Hardware", payback: true }),
-      expense("E-702", { paidOn: "2026-03-03", payment: rs(900), openAmount: rs(900), payee: "GatewayPay Merchant 12" }),
-    ];
-    expect(propose(facts, candidates)).toEqual({ type: "attach", expenseId: "E-701" });
+    expect(propose(facts, [payback("E-701"), gatewayPaid("E-702")])).toEqual({ type: "attachWithCheck", expenseId: "E-701", others: ["E-702"] });
+  });
+
+  it("a Payback beside a vendor-matched Expense of the same amount still raises a Check", () => {
+    const facts = bill({ total: rs(900), billDate: "2026-03-03" });
+    const candidates = [payback("E-711"), gatewayPaid("E-712", { vendor: "Sample Tools" })];
+    expect(propose(facts, candidates)).toEqual({ type: "attachWithCheck", expenseId: "E-712", others: ["E-711"] });
   });
 
   it("a Payback 11 days away is no candidate", () => {
