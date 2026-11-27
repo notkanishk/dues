@@ -234,6 +234,17 @@ describe("The Expense's Fund, Purpose and What for", () => {
     expect(audit.map((r) => r.payload)).toEqual([into.events[0], out.events[0]]);
   });
 
+  it("an archived Fund still takes an Expense named into it, by LogExpense and CorrectExpense", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    const trip = await purpose(mickey, travel);
+    ok(await books.execute(mickey, { type: "ArchiveFund", fundId: travel }));
+    expect(await linksOf(mickey, await logged(mickey, { fundId: travel }))).toMatchObject({ fundId: travel, purposeId: null });
+    const fare = await logged(mickey, { fundId: MAKERSPACE });
+    ok(await books.execute(mickey, { type: "CorrectExpense", expenseId: fare, purposeId: trip }));
+    expect(await linksOf(mickey, fare)).toMatchObject({ fundId: travel, purposeId: trip });
+  });
+
   it("an Expense written without a Fund is refused by the database, never put in Makerspace", async () => {
     const mickey = claimant();
     await expect(db.execute(sql`insert into expenses (claimant_id) values (${mickey.claimantId})`)).rejects.toMatchObject({ cause: { code: "23502", column: "fund_id" } });
@@ -328,6 +339,18 @@ describe("The prompt (prompt query): Funds in the Claimant's order, and the What
     ]);
     expect(mine.preselectedFundId).toBe(MAKERSPACE);
     expect((await promptOf(dexter)).funds[0]?.id).toBe(MAKERSPACE);
+  });
+
+  it("a hidden or archived Fund's Purposes stay off the prompt, and the payment does not go into them", async () => {
+    const mickey = claimant();
+    const hidden = await fund(mickey, "Science fair grant");
+    const archived = await fund(mickey);
+    await purpose(mickey, hidden, "Science fair");
+    await purpose(mickey, archived);
+    ok(await books.execute(mickey, { type: "HideFund", fundId: hidden, hidden: true }));
+    ok(await books.execute(mickey, { type: "ArchiveFund", fundId: archived }));
+    expect(await promptOf(mickey)).toMatchObject({ preselectedFundId: MAKERSPACE, purposes: [], preselectedPurposeId: null });
+    expect(await linksOf(mickey, await logged(mickey))).toMatchObject({ fundId: MAKERSPACE, purposeId: null });
   });
 
   it("only the Claimant's own Purposes are on their prompt, an admin's included", async () => {
