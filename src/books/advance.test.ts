@@ -151,6 +151,13 @@ describe("Advance is a personal amount on a Fund", () => {
   });
 });
 
+describe("The Advance's storage", () => {
+  it("is one total in paise per Claimant and Fund, with no currency column of its own: Dues reads every Advance as INR", async () => {
+    const { rows } = await pool.query("select column_name from information_schema.columns where table_name = 'fund_settings' and column_name like 'advance%'");
+    expect(rows.map((r) => r.column_name)).toEqual(["advance_paise"]);
+  });
+});
+
 describe("Advance balance", () => {
   it("Payment lowers it: ₹10,000.00 total and a ₹2,500.00 Payment in Makerspace leave ₹7,500.00", async () => {
     const mickey = claimant();
