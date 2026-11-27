@@ -124,10 +124,10 @@ describe("Auto-attach only on a strong match, anything else raises a Check", () 
       { type: "attachWithCheck", expenseId: "E-202", others: ["E-201"] },
     ],
     [
-      "an exact amount outside the window does not lead: the exact one in the window beats an order-number match 20 days away",
+      "an order number leads the Check even 20 days away: ahead of the exact one in the window",
       bill({ orderRef: "ORD-5502" }),
       [expense("E-223", { ...gateway, orderRef: "ORD-5502", paidOn: "2026-02-12" }), expense("E-224", gateway)],
-      { type: "attachWithCheck", expenseId: "E-224", others: ["E-223"] },
+      { type: "attachWithCheck", expenseId: "E-223", others: ["E-224"] },
     ],
   ])("%s", (_, facts, candidates, expected) => {
     expect(propose(facts, candidates)).toEqual(expected);
@@ -204,6 +204,12 @@ describe("A smaller invoice splits the Order", () => {
       bill(),
       [expense("E-408", { payee: "GatewayPay Merchant 12" }), order("E-409", { vendor: "Sample Tools" })],
       { type: "attachWithCheck", expenseId: "E-408", others: ["E-409"] },
+    ],
+    [
+      "an order number leads the Check: a ₹2,100.00 bill for ORD-4870 beside an unrelated ₹2,100.00 café Expense",
+      invoice({ orderRef: "ORD-4870" }),
+      [order("E-414", { orderRef: "ORD-4870", vendor: "Sample Tools" }), expense("E-415", { payee: "Courage Cafe", payment: rs(2100), openAmount: rs(2100), paidOn: "2026-03-04" })],
+      { type: "attachWithCheck", expenseId: "E-414", others: ["E-415"] },
     ],
   ])("%s", (_, facts, candidates, expected) => {
     expect(propose(facts, candidates)).toEqual(expected);
