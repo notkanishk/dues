@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
 import { auditLog, expenses } from "@/src/db/schema";
 import { createBooks, type Result } from "./books";
-import type { Actor } from "./core";
+import { type Actor, MAKERSPACE } from "./core";
 
 // Purpose scenarios through Books' Interface against a real Postgres (DATABASE_URL): expense-tracking "Purpose",
 // "Funds on the upload prompt", "Expense ownership and fields". Fresh Claimants in every test.
@@ -61,10 +61,10 @@ describe("Purpose", () => {
     expect(await purposesOf(mickey)).toEqual([]);
     const travel = await fund(mickey);
     const trip = await purpose(mickey, travel);
-    const week = await purpose(mickey, "00000000-0000-7000-8000-000000000001", "O-week stall");
+    const week = await purpose(mickey, MAKERSPACE, "O-week stall");
     expect(await purposesOf(mickey)).toEqual([
       { id: trip, name: "Robotics trip", fundId: travel, active: true },
-      { id: week, name: "O-week stall", fundId: "00000000-0000-7000-8000-000000000001", active: true },
+      { id: week, name: "O-week stall", fundId: MAKERSPACE, active: true },
     ]);
   });
 
@@ -127,13 +127,12 @@ describe("Purpose access", () => {
   it("a role-less Actor is forbidden from every Purpose command and query", async () => {
     const roleless: Actor = { claimantId: randomUUID(), roles: ["admin"], via: "session" };
     const forbidden = { ok: false, reason: "forbidden" };
-    expect(await books.execute(roleless, { type: "CreatePurpose", name: "Robotics trip", fundId: "00000000-0000-7000-8000-000000000001" })).toEqual(forbidden);
+    expect(await books.execute(roleless, { type: "CreatePurpose", name: "Robotics trip", fundId: MAKERSPACE })).toEqual(forbidden);
     expect(await books.execute(roleless, { type: "EndPurpose", purposeId: randomUUID() })).toEqual(forbidden);
     expect(await books.purposes(roleless)).toEqual(forbidden);
   });
 });
 
-const MAKERSPACE = "00000000-0000-7000-8000-000000000001";
 const rupees = (paise: number) => ({ paise, currency: "INR" as const });
 type Links = { fundId?: string; purposeId?: string | null; whatFor?: string };
 const log = (actor: Actor, links: Links = {}) =>
