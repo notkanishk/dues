@@ -150,3 +150,81 @@ describe("Payment method access", () => {
     expect(await books.paymentMethods(roleless)).toEqual(forbidden);
   });
 });
+
+const rupees = (paise: number) => ({ paise, currency: "INR" as const });
+const pay = async (actor: Actor, extra: { paymentMethodId?: string } = {}) => {
+  const event = ok(await books.execute(actor, { type: "LogExpense", kind: "shop", amount: rupees(25000), paidOn: "2026-11-26", payee: "Gizmo Parts Bazaar", ...extra })).events[0];
+  if (event?.type !== "ExpenseLogged") throw new Error("expected ExpenseLogged");
+  return event.expenseId;
+};
+const methodOfExpense = async (actor: Actor, expenseId: string) => {
+  const read = await books.expense(actor, expenseId);
+  if (!read.ok) throw new Error(`expected the Expense, got ${JSON.stringify(read)}`);
+  return read.expense.paymentMethodId;
+};
+
+describe("The Expense's Payment method", () => {
+  it("a Payment records the Claimant's method named; one naming none has none (\"not recorded\")", async () => {
+    const mickey = claimant();
+    const card = await method(mickey);
+    expect(await methodOfExpense(mickey, await pay(mickey, { paymentMethodId: card }))).toBe(card);
+    expect(await methodOfExpense(mickey, await pay(mickey))).toBeNull();
+  });
+
+  it("Payment method correction: CorrectExpense changes it under the same lock, audited from and to", async () => {
+    const mickey = claimant();
+    const [cash, card] = [await method(mickey, "Cash"), await method(mickey)];
+    const expenseId = await pay(mickey, { paymentMethodId: cash });
+    expect(ok(await books.execute(mickey, { type: "CorrectExpense", expenseId, paymentMethodId: card })).events).toEqual([
+      { type: "ExpenseCorrected", expenseId, changes: { paymentMethodId: { from: cash, to: card } } },
+    ]);
+    expect(await methodOfExpense(mickey, expenseId)).toBe(card);
+    expect((await auditOf(expenseId)).at(-1)).toMatchObject({ command: "CorrectExpense", event: "ExpenseCorrected", payload: { changes: { paymentMethodId: { from: cash, to: card } } } });
+  });
+
+  it("Archived method: no longer taken by a new Payment or a correction; an Expense that used it keeps it", async () => {
+    const mickey = claimant();
+    const card = await method(mickey);
+    const expenseId = await pay(mickey, { paymentMethodId: card });
+    ok(await books.execute(mickey, { type: "ArchivePaymentMethod", paymentMethodId: card }));
+    expect(await methodOfExpense(mickey, expenseId)).toBe(card);
+    const refused = { ok: false, reason: "validation", field: "paymentMethodId" };
+    expect(await books.execute(mickey, { type: "LogExpense", kind: "shop", amount: rupees(100), paidOn: "2026-11-26", paymentMethodId: card })).toEqual(refused);
+    const other = await pay(mickey);
+    expect(await books.execute(mickey, { type: "CorrectExpense", expenseId: other, paymentMethodId: card })).toEqual(refused);
+    // Correcting something else keeps the archived method on the Expense.
+    ok(await books.execute(mickey, { type: "CorrectExpense", expenseId, payee: "Courage Hardware" }));
+    expect(await methodOfExpense(mickey, expenseId)).toBe(card);
+  });
+
+  it("another Claimant's method cannot be linked and does not leak: not_found, the same as one that does not exist", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const theirs = await method(dexter);
+    const expenseId = await pay(mickey);
+    const audit = (await auditOf(expenseId)).length;
+    for (const paymentMethodId of [theirs, randomUUID(), "not-a-uuid", "constructor", "__proto__", "toString"]) {
+      expect(await books.execute(mickey, { type: "LogExpense", kind: "shop", amount: rupees(100), paidOn: "2026-11-26", paymentMethodId }), paymentMethodId).toEqual({ ok: false, reason: "not_found" });
+      expect(await books.execute(mickey, { type: "CorrectExpense", expenseId, paymentMethodId }), paymentMethodId).toEqual({ ok: false, reason: "not_found" });
+    }
+    expect(await methodOfExpense(mickey, expenseId)).toBeNull();
+    expect(await auditOf(expenseId)).toHaveLength(audit);
+  });
+
+  it("an admin by session correcting another Claimant's Expense links only that Claimant's own method, never the admin's", async () => {
+    const [mickey, minnie] = [claimant(), admin()];
+    const [card, adminsOwn] = [await method(mickey), await method(minnie, "Admin card")];
+    const expenseId = await pay(mickey);
+    expect(await books.execute(minnie, { type: "CorrectExpense", expenseId, paymentMethodId: adminsOwn })).toEqual({ ok: false, reason: "not_found" });
+    ok(await books.execute(minnie, { type: "CorrectExpense", expenseId, paymentMethodId: card }));
+    expect(await methodOfExpense(mickey, expenseId)).toBe(card);
+  });
+});
+
+describe("The Payment method link's storage", () => {
+  it("is refused by the database itself for another Claimant's method", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const theirs = await method(dexter);
+    const expenseId = await pay(mickey);
+    await expect(pool.query("update expenses set payment_method_id = $1 where id = $2", [theirs, expenseId])).rejects.toThrow(/expenses_payment_method_fk/);
+  });
+});

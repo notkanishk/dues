@@ -467,6 +467,7 @@ describe("Open amount and settled invariants, for any generated slice", () => {
         whatFor: null,
         fundId: MAKERSPACE,
         purposeId: null,
+        paymentMethodId: null,
         amount,
         payee: null,
         paidOn: "2026-11-19",
@@ -1030,6 +1031,50 @@ describe("CorrectExpense", () => {
       expect(run(slice, correct(change)).decision, JSON.stringify(change)).toEqual({ ok: false, reason: "locked" });
     slice.expenses["e-1"]!.bills[0]!.claim = "draft";
     expect(run(slice, correct({ purposeId: "p-trip", whatFor: "Bus fare" })).slice.expenses["e-1"]).toMatchObject({ fundId: "f-travel", purposeId: "p-trip", whatFor: "Bus fare" });
+  });
+
+  // Payment method (expense-tracking "Expense corrections and their lock"; identity-access "Claimant-defined Payment methods").
+  const withMethods = (): Slice => ({
+    ...shop(100000),
+    links: { funds: {}, purposes: {}, paymentMethods: { "pm-card": { archived: false }, "pm-old": { archived: true } }, fallback: { fundId: MAKERSPACE, purposeId: null } },
+  });
+
+  it("Payment method: none corrected to the Claimant's own \"Travel card\", with from and to; null takes it off again", () => {
+    const { decision, slice } = run(withMethods(), correct({ paymentMethodId: "pm-card" }));
+    expect(decision).toEqual({ ok: true, jobs: [], events: [{ type: "ExpenseCorrected", expenseId: "e-1", changes: { paymentMethodId: { from: null, to: "pm-card" } } }] });
+    expect(slice.expenses["e-1"]!.paymentMethodId).toBe("pm-card");
+    expect(run(slice, correct({ paymentMethodId: null })).slice.expenses["e-1"]!.paymentMethodId).toBeNull();
+  });
+
+  it("Edit blocked after submission: the Payment method locks with the amount, payee and date; back in draft it is editable", () => {
+    const slice = withMethods();
+    slice.expenses["e-1"]!.bills[0]!.claim = "submitted";
+    expect(run(slice, correct({ paymentMethodId: "pm-card" })).decision).toEqual({ ok: false, reason: "locked" });
+    slice.expenses["e-1"]!.bills[0]!.claim = "draft";
+    expect(run(slice, correct({ paymentMethodId: "pm-card" })).slice.expenses["e-1"]!.paymentMethodId).toBe("pm-card");
+  });
+
+  it("Archived method: it is not offered, so naming it is validation; an Expense that has it keeps it", () => {
+    expect(run(withMethods(), correct({ paymentMethodId: "pm-old" })).decision).toEqual({ ok: false, reason: "validation", field: "paymentMethodId" });
+    const slice = withMethods();
+    slice.expenses["e-1"]!.paymentMethodId = "pm-old";
+    expect(run(slice, correct({ paymentMethodId: "pm-old", payee: "Courage Hardware" })).slice.expenses["e-1"]).toMatchObject({ paymentMethodId: "pm-old", payee: "Courage Hardware" });
+  });
+
+  it("a method outside the Claimant's own is not_found, a built-in name included", () => {
+    for (const paymentMethodId of ["pm-theirs", "constructor", "__proto__"])
+      expect(run(withMethods(), correct({ paymentMethodId })).decision, paymentMethodId).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("LogExpense records the method named, or none (\"not recorded\") when it names none", () => {
+    const named = decide({ ...withMethods(), newIds: ["e-2", "b-2"] }, { ...logExpense("shop", 100), paymentMethodId: "pm-card" }, mickey, now);
+    expect(named).toMatchObject({ ok: true, events: [{ type: "ExpenseLogged", paymentMethodId: "pm-card" }, { type: "BillAdded" }] });
+    expect(decide(fresh, logExpense("shop", 100), mickey, now)).toMatchObject({ ok: true, events: [{ type: "ExpenseLogged", paymentMethodId: null }, { type: "BillAdded" }] });
+    expect(decide({ ...withMethods(), newIds: ["e-2", "b-2"] }, { ...logExpense("shop", 100), paymentMethodId: "pm-old" }, mickey, now)).toEqual({
+      ok: false,
+      reason: "validation",
+      field: "paymentMethodId",
+    });
   });
 
   it("Unlocked by recall: the only Claim holding its Bill back in draft, the amount is editable again", () => {
