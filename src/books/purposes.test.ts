@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
-import { auditLog } from "@/src/db/schema";
+import { auditLog, expenses } from "@/src/db/schema";
 import { createBooks, type Result } from "./books";
 import type { Actor } from "./core";
 
@@ -130,5 +130,116 @@ describe("Purpose access", () => {
     expect(await books.execute(roleless, { type: "CreatePurpose", name: "Robotics trip", fundId: "00000000-0000-7000-8000-000000000001" })).toEqual(forbidden);
     expect(await books.execute(roleless, { type: "EndPurpose", purposeId: randomUUID() })).toEqual(forbidden);
     expect(await books.purposes(roleless)).toEqual(forbidden);
+  });
+});
+
+const MAKERSPACE = "00000000-0000-7000-8000-000000000001";
+const rupees = (paise: number) => ({ paise, currency: "INR" as const });
+type Links = { fundId?: string; purposeId?: string | null; whatFor?: string };
+const log = (actor: Actor, links: Links = {}) =>
+  books.execute(actor, { type: "LogExpense", kind: "shop", amount: rupees(45000), paidOn: "2026-11-26", payee: "Bus depot", ...links });
+const logged = async (actor: Actor, links: Links = {}) => {
+  const event = ok(await log(actor, links)).events[0];
+  if (event?.type !== "ExpenseLogged") throw new Error("expected ExpenseLogged");
+  return event.expenseId;
+};
+const linksOf = async (actor: Actor, id: string) => {
+  const read = await books.expense(actor, id);
+  if (!read.ok) throw new Error(`expected the Expense, got ${JSON.stringify(read)}`);
+  return { fundId: read.expense.fundId, purposeId: read.expense.purposeId, whatFor: read.expense.whatFor };
+};
+const expenseCount = async (actor: Actor) => (await db.select().from(expenses).where(eq(expenses.claimantId, actor.claimantId))).length;
+
+describe("The Expense's Fund, Purpose and What for", () => {
+  it("No Purpose: a ₹450.00 bus fare logged into \"Travel grant\" sits in that Fund with no group, its What for kept", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    const result = ok(await log(mickey, { fundId: travel, whatFor: "Bus to the robotics meet" }));
+    expect(result.events[0]).toMatchObject({ type: "ExpenseLogged", fundId: travel, purposeId: null, whatFor: "Bus to the robotics meet" });
+    expect(await linksOf(mickey, (result.events[0] as { expenseId: string }).expenseId)).toEqual({ fundId: travel, purposeId: null, whatFor: "Bus to the robotics meet" });
+  });
+
+  it("a payment logged into \"Robotics trip\" is in that Purpose and its Fund \"Travel grant\"", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    const trip = await purpose(mickey, travel);
+    expect(await linksOf(mickey, await logged(mickey, { purposeId: trip }))).toEqual({ fundId: travel, purposeId: trip, whatFor: null });
+    expect(await linksOf(mickey, await logged(mickey, { fundId: travel, purposeId: trip }))).toMatchObject({ fundId: travel, purposeId: trip });
+  });
+
+  it("with no Fund named and no Purpose active, the payment is in Makerspace with no Purpose", async () => {
+    const mickey = claimant();
+    expect(await linksOf(mickey, await logged(mickey))).toEqual({ fundId: MAKERSPACE, purposeId: null, whatFor: null });
+  });
+
+  it("refuses a Purpose of another Fund as validation, and writes nothing", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    const trip = await purpose(mickey, travel);
+    const rows = await expenseCount(mickey);
+    expect(await log(mickey, { fundId: MAKERSPACE, purposeId: trip })).toEqual({ ok: false, reason: "validation", field: "purposeId" });
+    expect(await expenseCount(mickey)).toBe(rows);
+  });
+
+  it("another Claimant's private Fund or Purpose is not_found, the same as one that does not exist; a team Fund anyone may use", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const travel = await fund(mickey);
+    const trip = await purpose(mickey, travel);
+    const notFound = { ok: false, reason: "not_found" };
+    for (const links of [{ fundId: travel }, { fundId: randomUUID() }, { fundId: "not-a-uuid" }, { purposeId: trip }, { purposeId: randomUUID() }, { fundId: travel, purposeId: trip }])
+      expect(await log(dexter, links), JSON.stringify(links)).toEqual(notFound);
+    const own = await logged(dexter);
+    for (const links of [{ fundId: travel }, { fundId: randomUUID() }, { purposeId: trip }, { purposeId: randomUUID() }])
+      expect(await books.execute(dexter, { type: "CorrectExpense", expenseId: own, ...links }), JSON.stringify(links)).toEqual(notFound);
+    expect(await expenseCount(dexter)).toBe(1);
+    ok(await books.execute(mickey, { type: "ShareFund", fundId: travel }));
+    expect(await linksOf(dexter, await logged(dexter, { fundId: travel }))).toMatchObject({ fundId: travel, purposeId: null });
+    expect(await log(dexter, { purposeId: trip })).toEqual(notFound); // the Fund is shared, the Purpose stays Mickey's
+  });
+
+  it("End trip: an ended Purpose takes no new payment, and the Expenses already in it keep it", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    const trip = await purpose(mickey, travel);
+    const fare = await logged(mickey, { purposeId: trip });
+    ok(await books.execute(mickey, { type: "EndPurpose", purposeId: trip }));
+    expect(await linksOf(mickey, fare)).toMatchObject({ fundId: travel, purposeId: trip });
+    expect(await log(mickey, { purposeId: trip })).toEqual({ ok: false, reason: "invalid_transition" });
+  });
+
+  it("CorrectExpense moves an Expense into a Purpose (its Fund follows) and out of it to another Fund, audited from and to", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    const trip = await purpose(mickey, travel);
+    const fare = await logged(mickey);
+    const into = ok(await books.execute(mickey, { type: "CorrectExpense", expenseId: fare, purposeId: trip, whatFor: "Bus to the robotics meet" }));
+    expect(into.events).toEqual([
+      {
+        type: "ExpenseCorrected",
+        expenseId: fare,
+        changes: { fundId: { from: MAKERSPACE, to: travel }, purposeId: { from: null, to: trip }, whatFor: { from: null, to: "Bus to the robotics meet" } },
+      },
+    ]);
+    expect(await linksOf(mickey, fare)).toEqual({ fundId: travel, purposeId: trip, whatFor: "Bus to the robotics meet" });
+    // A Purpose is inside its Fund: moving the Expense to Makerspace takes it out of "Robotics trip".
+    const out = ok(await books.execute(mickey, { type: "CorrectExpense", expenseId: fare, fundId: MAKERSPACE }));
+    expect(out.events).toEqual([{ type: "ExpenseCorrected", expenseId: fare, changes: { fundId: { from: travel, to: MAKERSPACE }, purposeId: { from: trip, to: null } } }]);
+    expect(await linksOf(mickey, fare)).toMatchObject({ fundId: MAKERSPACE, purposeId: null });
+    expect(await books.execute(mickey, { type: "CorrectExpense", expenseId: fare, fundId: MAKERSPACE, purposeId: trip })).toEqual({ ok: false, reason: "validation", field: "purposeId" });
+    const audit = (await auditOf(fare)).filter((r) => r.event === "ExpenseCorrected");
+    expect(audit.map((r) => r.payload)).toEqual([into.events[0], out.events[0]]);
+  });
+
+  it("an admin by session links another Claimant's Expense to that Claimant's Purpose, never to the admin's own", async () => {
+    const [mickey, minnie] = [claimant(), admin()];
+    const trip = await purpose(mickey, await fund(mickey));
+    const fare = await logged(mickey);
+    const hers = await fund(minnie, "Minnie's grant");
+    const herTrip = await purpose(minnie, hers, "Minnie's trip");
+    expect(await books.execute(minnie, { type: "CorrectExpense", expenseId: fare, fundId: hers })).toEqual({ ok: false, reason: "not_found" });
+    expect(await books.execute(minnie, { type: "CorrectExpense", expenseId: fare, purposeId: herTrip })).toEqual({ ok: false, reason: "not_found" });
+    ok(await books.execute(minnie, { type: "CorrectExpense", expenseId: fare, purposeId: trip }));
+    expect(await linksOf(mickey, fare)).toMatchObject({ purposeId: trip });
+    expect((await auditOf(fare)).at(-1)).toMatchObject({ command: "CorrectExpense", actorId: minnie.claimantId, ownerId: mickey.claimantId });
   });
 });
