@@ -91,10 +91,10 @@ export async function writePurpose(tx: Tx, event: PurposeEvent, at: Date) {
   else await tx.update(purposes).set({ active: false }).where(eq(purposes.id, event.purposeId));
 }
 
-/** The Actor's Purposes, oldest first (keys are UUIDv7); an admin's by session, everyone's (D6). */
+/** The Actor's Purposes, oldest first (keys are UUIDv7); an admin's by session, everyone's (D6), each with its Claimant. */
 export async function listPurposes(q: Q, actor: Actor) {
   return q
-    .select({ id: purposes.id, name: purposes.name, fundId: purposes.fundId, active: purposes.active })
+    .select({ id: purposes.id, claimantId: purposes.claimantId, name: purposes.name, fundId: purposes.fundId, active: purposes.active })
     .from(purposes)
     .where(scope(actor))
     .orderBy(purposes.id);

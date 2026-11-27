@@ -25,9 +25,13 @@ const fund = async (actor: Actor, name = "Travel grant") => {
   if (event?.type !== "FundCreated") throw new Error("expected FundCreated");
   return event.fundId;
 };
-/** A Payment in a Fund: a shop Expense, or an online Order. Returns the Expense and its first Bill. */
-const pay = async (actor: Actor, fundId: string, paise: number, kind: LogExpense["kind"] = "shop") => {
-  const events = ok(await books.execute(actor, { type: "LogExpense", kind, amount: rupees(paise), paidOn: "2026-11-26", payee: "Gizmo Parts Bazaar", fundId })).events;
+/** A Payment in a Fund: a shop Expense, an online Order, or an entry without a bill. Returns the Expense and its first Bill. */
+const pay = async (actor: Actor, fundId: string, paise: number, kind: LogExpense["kind"] | "entry" = "shop") => {
+  const command =
+    kind === "entry"
+      ? ({ type: "LogNoBillEntry", kind: "service", amount: rupees(paise), paidOn: "2026-11-26", whatFor: "Auto to hardware market", fundId } as const)
+      : ({ type: "LogExpense", kind, amount: rupees(paise), paidOn: "2026-11-26", payee: "Gizmo Parts Bazaar", fundId } as const);
+  const events = ok(await books.execute(actor, command)).events;
   const [logged, bill] = events;
   if (logged?.type !== "ExpenseLogged" || bill?.type !== "BillAdded") throw new Error("expected ExpenseLogged and BillAdded");
   return { expenseId: logged.expenseId, billId: bill.billId };
@@ -393,6 +397,8 @@ describe("Advance left, for any command sequence across two Funds", () => {
         paise: number;
         /** An Order whose expected Bill is still there: a Refund can come from it. */
         awaiting: boolean;
+        /** An entry without a bill: its corrected Payment carries its No bill, and the Payment is what the Advance counts. */
+        entry: boolean;
         closed: CloseReason | null;
         refunds: { id: string; paise: number; received: boolean }[];
       }[] = [];
@@ -411,12 +417,12 @@ describe("Advance left, for any command sequence across two Funds", () => {
           kinds.add(`SetAdvance:${result.ok}`);
         } else if (roll <= 2 || !expense) {
           const fundId = pick(fundIds);
-          const online = next() % 2 === 0;
+          const kind = pick(["online", "shop", "entry"] as const);
           const paise = amount();
-          const made = await pay(mickey, fundId, paise, online ? "online" : "shop");
-          model.push({ ...made, fundId, paise, awaiting: online, closed: null, refunds: [] });
+          const made = await pay(mickey, fundId, paise, kind);
+          model.push({ ...made, fundId, paise, awaiting: kind === "online", entry: kind === "entry", closed: null, refunds: [] });
           result = { ok: true, events: [] };
-          kinds.add("LogExpense:true");
+          kinds.add(kind === "entry" ? "LogNoBillEntry:true" : "LogExpense:true");
         } else if (roll === 3) {
           const fundId = pick(fundIds);
           result = await books.execute(mickey, { type: "CorrectExpense", expenseId: expense.expenseId, fundId });
@@ -426,7 +432,7 @@ describe("Advance left, for any command sequence across two Funds", () => {
           const paise = amount();
           result = await books.execute(mickey, { type: "CorrectExpense", expenseId: expense.expenseId, amount: rupees(paise) });
           if (result.ok) expense.paise = paise;
-          kinds.add(`CorrectExpense amount:${result.ok}`);
+          kinds.add(`CorrectExpense ${expense.entry ? "entry " : ""}amount:${result.ok}`);
         } else if (roll === 5) {
           // An open Order when there is one: closing would otherwise leave few Bills a Refund can come from.
           const open = model.filter((e) => e.awaiting && !e.closed);
@@ -467,7 +473,7 @@ describe("Advance left, for any command sequence across two Funds", () => {
       }
     }
     // The sequences reach every money path, accepted: a Refund received, a move, an amount corrected, Not claiming.
-    for (const k of ["SetAdvance:true", "CorrectExpense fund:true", "CorrectExpense amount:true", "ExpectRefund:true", "MarkRefundReceived:true", "CloseOrder:true", "CloseExpense duplicate:true", "CloseExpense personal:true", "CloseExpense written_off:true"])
+    for (const k of ["SetAdvance:true", "LogNoBillEntry:true", "CorrectExpense entry amount:true", "CorrectExpense fund:true", "CorrectExpense amount:true", "ExpectRefund:true", "MarkRefundReceived:true", "CloseOrder:true", "CloseExpense duplicate:true", "CloseExpense personal:true", "CloseExpense written_off:true"])
       expect([...kinds], k).toContain(k);
   }, 120_000);
 });

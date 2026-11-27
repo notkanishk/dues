@@ -25,7 +25,7 @@ const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull(
 export const expenseReferenceSeq = pgSequence("expense_reference_seq");
 
 // Facts only; status, Open amount and "why it's open" are derived on read (design D3).
-// Fund, Purpose, Payment method and Orderer links arrive with those entities.
+// The Orderer link arrives with People (identity-access "People for Orderers and Payback payees").
 export const expenses = pgTable(
   "expenses",
   {
@@ -48,6 +48,8 @@ export const expenses = pgTable(
       .references((): AnyPgColumn => funds.id),
     // Optional; a Purpose of the same Fund and the same Claimant (expenses_purpose_fk).
     purposeId: uuid("purpose_id"),
+    // Optional ("not recorded"); one of the same Claimant's own Payment methods (expenses_payment_method_fk).
+    paymentMethodId: uuid("payment_method_id"),
     upiRef: text("upi_ref"),
     source: text("source"),
     notes: text("notes"),
@@ -64,6 +66,11 @@ export const expenses = pgTable(
       name: "expenses_purpose_fk",
       columns: [t.purposeId, t.fundId, t.claimantId],
       foreignColumns: [purposes.id, purposes.fundId, purposes.claimantId],
+    }),
+    foreignKey({
+      name: "expenses_payment_method_fk",
+      columns: [t.paymentMethodId, t.claimantId],
+      foreignColumns: [paymentMethods.id, paymentMethods.claimantId],
     }),
   ],
 );
@@ -276,4 +283,25 @@ export const purposes = pgTable(
     createdAt: createdAt(),
   },
   (t) => [unique("purposes_link_target").on(t.id, t.fundId, t.claimantId), index("purposes_claimant_id_idx").on(t.claimantId)],
+);
+
+// Payment methods (identity-access "Claimant-defined Payment methods"): one Claimant's own labels, none hard-coded, each
+// with optional match hints for reading a payment confirmation. Archived: no longer offered; Expenses that used it keep it.
+export const paymentMethods = pgTable(
+  "payment_methods",
+  {
+    id: key(),
+    claimantId: uuid("claimant_id").notNull(),
+    label: text("label").notNull(),
+    hintBank: text("hint_bank"),
+    hintCardLast4: text("hint_card_last4"),
+    hintUpiHandle: text("hint_upi_handle"),
+    archived: boolean("archived").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("payment_methods_card_last4", sql`${t.hintCardLast4} ~ '^[0-9]{4}$'`),
+    unique("payment_methods_link_target").on(t.id, t.claimantId), // so the database refuses another Claimant's method on an Expense
+    index("payment_methods_claimant_id_idx").on(t.claimantId),
+  ],
 );

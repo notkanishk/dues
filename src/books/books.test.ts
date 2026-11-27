@@ -955,6 +955,7 @@ describe("Authorization at the Actor Seam", () => {
   // Every command, one each: a Command type missing here fails the typecheck, so a new operation cannot skip these tests.
   const everyCommand = (t: Target, otherExpenseId = t.expenseId): { [T in Command["type"]]: Extract<Command, { type: T }> } => ({
     LogExpense: logExpense("shop", 100),
+    LogNoBillEntry: { type: "LogNoBillEntry", kind: "service", amount: rupees(6000), paidOn: "2026-11-20", whatFor: "Auto to hardware market" },
     SplitExpectedBill: { type: "SplitExpectedBill", billId: t.expectedBillId, amount: rupees(100), fulfilledOn: "2026-11-22" },
     ExpectRefund: { type: "ExpectRefund", billId: t.expectedBillId, amount: rupees(100) },
     CancelBill: { type: "CancelBill", billId: t.expectedBillId },
@@ -1000,7 +1001,7 @@ describe("Authorization at the Actor Seam", () => {
     const t = await books3000(mickey);
     const own = await books3000(dexter);
     const before = await snapshot(mickey, t);
-    const { LogExpense: _ownOnly, ...touching } = everyCommand(t);
+    const { LogExpense: _ownOnly, LogNoBillEntry: _alsoOwn, ...touching } = everyCommand(t);
     for (const command of Object.values(touching)) {
       expect(await books.execute(dexter, command), command.type).toEqual({ ok: false, reason: "not_found" });
     }
@@ -1017,7 +1018,7 @@ describe("Authorization at the Actor Seam", () => {
     const before = await snapshot(mickey, t);
     for (const via of ["mcp", "intake"] as const) {
       const minnie: Actor = { ...admin(), via };
-      const { LogExpense: _ownOnly, ...touching } = everyCommand(t);
+      const { LogExpense: _ownOnly, LogNoBillEntry: _alsoOwn, ...touching } = everyCommand(t);
       for (const command of Object.values(touching)) {
         expect(await books.execute(minnie, command), `${command.type} via ${via}`).toEqual({ ok: false, reason: "not_found" });
       }
@@ -1244,7 +1245,7 @@ describe("Authorization at the Actor Seam", () => {
             books.expense(who, own.t.expenseId),
             books.order(who, own.other),
           ]);
-          if (name !== "LogExpense" || who === roleless) expect(tried, `${name} by ${refused === "forbidden" ? "a role-less Actor" : "another Claimant"}`).toEqual({ ok: false, reason: refused });
+          if ((name !== "LogExpense" && name !== "LogNoBillEntry") || who === roleless) expect(tried, `${name} by ${refused === "forbidden" ? "a role-less Actor" : "another Claimant"}`).toEqual({ ok: false, reason: refused });
           expect([read, page]).toEqual([{ ok: false, reason: refused }, { ok: false, reason: refused }]);
           expect(await ownerRows(mickey)).toBe(rows);
 
@@ -1256,7 +1257,7 @@ describe("Authorization at the Actor Seam", () => {
         }
         expect(await view(dexter, admins)).toEqual(await view(minnie, admins));
         // Every entry the admin wrote names the admin as actor and Dexter as owner, but the admin's own LogExpense and Purpose.
-        for (const row of await auditRowsOf(minnie)) expect(row.ownerId).toBe(["LogExpense", "CreatePurpose"].includes(row.command) ? minnie.claimantId : dexter.claimantId);
+        for (const row of await auditRowsOf(minnie)) expect(row.ownerId).toBe(["LogExpense", "LogNoBillEntry", "CreatePurpose"].includes(row.command) ? minnie.claimantId : dexter.claimantId);
       }),
     );
     // Every command is accepted somewhere, so the comparison is never only of refusals; but CorrectBill and
@@ -1277,6 +1278,13 @@ describe("Authorization at the Actor Seam", () => {
         { ...all.CloseExpense, refunds: { [id]: "expected" as const } },
         logExpense("shop", 100, { fundId: id }),
         logExpense("shop", 100, { purposeId: id }),
+        logExpense("shop", 100, { paymentMethodId: id }),
+        { ...all.LogNoBillEntry, fundId: id },
+        { ...all.LogNoBillEntry, purposeId: id },
+        { ...all.LogNoBillEntry, paymentMethodId: id },
+        { type: "CorrectExpense" as const, expenseId: t.expenseId, paymentMethodId: id },
+        { type: "EditPaymentMethod" as const, paymentMethodId: id, label: "Cash" },
+        { type: "ArchivePaymentMethod" as const, paymentMethodId: id },
         { type: "CorrectExpense" as const, expenseId: t.expenseId, fundId: id },
         { type: "CorrectExpense" as const, expenseId: t.expenseId, purposeId: id },
         { type: "EditFund" as const, fundId: id, name: "Travel grant" },
@@ -1288,8 +1296,8 @@ describe("Authorization at the Actor Seam", () => {
         { type: "EndPurpose" as const, purposeId: id },
       ];
       for (const command of commands) {
-        // LogExpense with every id real is the one command here that may go through.
-        if (command.type === "LogExpense" && !("fundId" in command) && !("purposeId" in command)) continue;
+        // LogExpense and LogNoBillEntry with every id real are the commands here that may go through.
+        if ((command.type === "LogExpense" || command.type === "LogNoBillEntry") && !("fundId" in command) && !("purposeId" in command) && !("paymentMethodId" in command)) continue;
         const result = await books.execute(mickey, command);
         expect(result.ok ? "ok" : result.reason, `${command.type} ${JSON.stringify(command)}`).toMatch(/^(not_found|validation)$/);
       }

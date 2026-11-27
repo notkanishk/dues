@@ -50,7 +50,7 @@ describe("Purpose", () => {
       { type: "PurposeCreated", purposeId: expect.any(String), claimantId: mickey.claimantId, fundId: travel, name: "Robotics trip" },
     ]);
     const id = (result.events[0] as { purposeId: string }).purposeId;
-    expect(await purposesOf(mickey)).toEqual([{ id, name: "Robotics trip", fundId: travel, active: true }]);
+    expect(await purposesOf(mickey)).toEqual([{ id, claimantId: mickey.claimantId, name: "Robotics trip", fundId: travel, active: true }]);
     expect(await auditOf(id)).toMatchObject([
       { command: "CreatePurpose", event: "PurposeCreated", entity: "purpose", actorId: mickey.claimantId, ownerId: mickey.claimantId, fromState: null, toState: "active" },
     ]);
@@ -63,8 +63,8 @@ describe("Purpose", () => {
     const trip = await purpose(mickey, travel);
     const week = await purpose(mickey, MAKERSPACE, "O-week stall");
     expect(await purposesOf(mickey)).toEqual([
-      { id: trip, name: "Robotics trip", fundId: travel, active: true },
-      { id: week, name: "O-week stall", fundId: MAKERSPACE, active: true },
+      { id: trip, claimantId: mickey.claimantId, name: "Robotics trip", fundId: travel, active: true },
+      { id: week, claimantId: mickey.claimantId, name: "O-week stall", fundId: MAKERSPACE, active: true },
     ]);
   });
 
@@ -118,7 +118,7 @@ describe("Purpose access", () => {
       expect((await books.purposes(remote)).ok && (await purposesOf(remote)).some((p) => p.id === trip)).toBe(false);
       expect(await books.execute(remote, { type: "EndPurpose", purposeId: trip })).toEqual({ ok: false, reason: "not_found" });
     }
-    expect((await purposesOf(minnie)).find((p) => p.id === trip)).toEqual({ id: trip, name: "Robotics trip", fundId: expect.any(String), active: true });
+    expect((await purposesOf(minnie)).find((p) => p.id === trip)).toEqual({ id: trip, claimantId: mickey.claimantId, name: "Robotics trip", fundId: expect.any(String), active: true });
     ok(await books.execute(minnie, { type: "EndPurpose", purposeId: trip }));
     expect(await purposesOf(mickey)).toMatchObject([{ id: trip, active: false }]);
     expect((await auditOf(trip)).at(-1)).toMatchObject({ command: "EndPurpose", actorId: minnie.claimantId, ownerId: mickey.claimantId });
