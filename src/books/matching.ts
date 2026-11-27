@@ -11,7 +11,7 @@ export const MATCHING = {
   proofTolerancePaise: 100,
   /** …and its date from the Expense's paid-on date by this many days. */
   proofWindowDays: 10,
-  /** Two reference-less confirmations this many minutes apart are offered as the same payment. */
+  /** Two confirmations without a UPI ref this many minutes apart are offered as the same payment. */
   samePaymentMinutes: 10,
   /** One Payment for several invoices: 2 up to this many invoice-only Expenses from one vendor… */
   mergeMaxInvoices: 3,
@@ -59,7 +59,7 @@ export type CandidateExpense = {
   readonly payback: boolean;
   readonly invoiceOnly: boolean; // logged from an invoice; no Payment proof yet
   readonly upiRefs: readonly string[]; // UPI references, UTRs or transaction IDs of its Payment proofs
-  readonly proofReceivedAt: string | null; // ISO instant its reference-less confirmation arrived
+  readonly proofReceivedAt: string | null; // ISO instant its confirmation without a UPI ref arrived
 };
 
 export type Proposal =
@@ -121,7 +121,7 @@ const MINUTE_MS = 60_000;
 
 function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateExpense[], config: MatchingConfig): Proposal {
   const sorted = [...candidates].sort(byId);
-  // The same transaction reference is the same Payment.
+  // The same UPI ref is the same Payment.
   const same = sorted.find((e) => e.upiRefs.some((r) => sameId(facts.upiRef, r)));
   if (same) return { type: "attachProof", expenseId: same.id };
 
@@ -142,7 +142,7 @@ function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateEx
     if (merge) return { type: "mergeSuggestion", expenseIds: merge };
   }
 
-  // Neither of two confirmations carries a reference: offer the nearer one in time, never merge.
+  // Neither of two confirmations carries a UPI ref: offer the nearer one in time, never merge.
   if (readable(facts.upiRef) === null) {
     const gap = (e: CandidateExpense) => Math.abs(Date.parse(facts.receivedAt) - Date.parse(e.proofReceivedAt!));
     const twin = sorted
