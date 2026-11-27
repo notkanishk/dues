@@ -209,6 +209,33 @@ describe("Personal versions", () => {
     }
   });
 
+  it("an empty version is no version: setting no field, or every field back to the team's, leaves the Claimant on the team version", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const fundId = await sharedBy(mickey);
+    const versionOf = async () => (await listed(dexter)).find((f) => f.id === fundId)?.myVersion;
+    ok(await books.execute(dexter, { type: "SetPersonalVersion", fundId }));
+    ok(await books.execute(dexter, { type: "SetPersonalVersion", fundId, mail: null, whatForHint: null }));
+    expect(await versionOf()).toBeNull();
+
+    ok(await books.execute(dexter, { type: "SetPersonalVersion", fundId, fileNamePattern: "{n}", whatForHint: "e.g. bus" }));
+    ok(await books.execute(dexter, { type: "SetPersonalVersion", fundId, fileNamePattern: null, whatForHint: null }));
+    expect(await versionOf()).toBeNull();
+    expect(await books.execute(dexter, { type: "ResetToTeamVersion", fundId })).toEqual({ ok: false, reason: "invalid_transition" });
+  });
+
+  it("Keep mine: saving an unchanged version after a team edit acknowledges Team version updated and keeps the version", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const fundId = await sharedBy(mickey);
+    ok(await books.execute(dexter, { type: "SetPersonalVersion", fundId, mail: mail("dexter@lab.example.org") }));
+    ok(await books.execute(mickey, { type: "EditFund", fundId, mail: mail("office@toontown.example.org") }));
+    expect((await listed(dexter)).find((f) => f.id === fundId)?.teamUpdated).toBe(true);
+
+    ok(await books.execute(dexter, { type: "SetPersonalVersion", fundId, mail: mail("dexter@lab.example.org") }));
+    expect((await listed(dexter)).find((f) => f.id === fundId)).toMatchObject({ teamUpdated: false, myVersion: { mail: mail("dexter@lab.example.org") } });
+    // Once acknowledged, saving it again writes nothing.
+    expect(ok(await books.execute(dexter, { type: "SetPersonalVersion", fundId, mail: mail("dexter@lab.example.org") })).events).toEqual([]);
+  });
+
   it("a private Fund has no personal version: its creator edits it", async () => {
     const mickey = claimant();
     const fundId = await created(mickey);
