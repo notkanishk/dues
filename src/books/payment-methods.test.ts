@@ -55,7 +55,7 @@ describe("Claimant-defined Payment methods", () => {
       },
     ]);
     const id = (result.events[0] as { paymentMethodId: string }).paymentMethodId;
-    expect(await methodsOf(mickey)).toEqual([{ id, label: "Travel card", hints: { bank: null, cardLast4: "1234", upiHandle: null }, archived: false }]);
+    expect(await methodsOf(mickey)).toEqual([{ id, claimantId: mickey.claimantId, label: "Travel card", hints: { bank: null, cardLast4: "1234", upiHandle: null }, archived: false }]);
     expect(await auditOf(id)).toMatchObject([
       { command: "CreatePaymentMethod", event: "PaymentMethodCreated", entity: "payment_method", actorId: mickey.claimantId, ownerId: mickey.claimantId, fromState: null, toState: "active" },
     ]);
@@ -66,8 +66,8 @@ describe("Claimant-defined Payment methods", () => {
     const cash = await method(mickey, "Cash");
     const savings = await method(mickey, "Savings account", { bank: "Acme Bank", upiHandle: "mickey@acme" });
     expect(await methodsOf(mickey)).toEqual([
-      { id: cash, label: "Cash", hints: NO_HINTS, archived: false },
-      { id: savings, label: "Savings account", hints: { bank: "Acme Bank", cardLast4: null, upiHandle: "mickey@acme" }, archived: false },
+      { id: cash, claimantId: mickey.claimantId, label: "Cash", hints: NO_HINTS, archived: false },
+      { id: savings, claimantId: mickey.claimantId, label: "Savings account", hints: { bank: "Acme Bank", cardLast4: null, upiHandle: "mickey@acme" }, archived: false },
     ]);
   });
 
@@ -85,7 +85,7 @@ describe("Claimant-defined Payment methods", () => {
         },
       },
     ]);
-    expect(await methodsOf(mickey)).toEqual([{ id, label: "Travel credit card", hints: { bank: null, cardLast4: "5678", upiHandle: null }, archived: false }]);
+    expect(await methodsOf(mickey)).toEqual([{ id, claimantId: mickey.claimantId, label: "Travel credit card", hints: { bank: null, cardLast4: "5678", upiHandle: null }, archived: false }]);
     expect((await auditOf(id)).at(-1)).toMatchObject({ command: "EditPaymentMethod", event: "PaymentMethodEdited", fromState: "active", toState: "active" });
     expect(await books.execute(mickey, { type: "EditPaymentMethod", paymentMethodId: id, label: "Travel credit card" })).toEqual({ ok: true, events: [] });
     expect(await auditOf(id)).toHaveLength(2);
@@ -133,7 +133,7 @@ describe("Payment method access", () => {
       expect(await books.execute(dexter, { type: "EditPaymentMethod", paymentMethodId, label: "Mine now" }), paymentMethodId).toEqual({ ok: false, reason: "not_found" });
       expect(await books.execute(dexter, { type: "ArchivePaymentMethod", paymentMethodId }), paymentMethodId).toEqual({ ok: false, reason: "not_found" });
     }
-    expect(await methodsOf(mickey)).toEqual([{ id, label: "Travel card", hints: NO_HINTS, archived: false }]);
+    expect(await methodsOf(mickey)).toEqual([{ id, claimantId: mickey.claimantId, label: "Travel card", hints: NO_HINTS, archived: false }]);
     expect(await auditOf(id)).toHaveLength(1);
   });
 
@@ -145,7 +145,7 @@ describe("Payment method access", () => {
       expect((await methodsOf(remote)).some((m) => m.id === id)).toBe(false);
       expect(await books.execute(remote, { type: "ArchivePaymentMethod", paymentMethodId: id })).toEqual({ ok: false, reason: "not_found" });
     }
-    expect((await methodsOf(minnie)).find((m) => m.id === id)).toEqual({ id, label: "Travel card", hints: NO_HINTS, archived: false });
+    expect((await methodsOf(minnie)).find((m) => m.id === id)).toEqual({ id, claimantId: mickey.claimantId, label: "Travel card", hints: NO_HINTS, archived: false });
     ok(await books.execute(minnie, { type: "ArchivePaymentMethod", paymentMethodId: id }));
     expect(await methodsOf(mickey)).toMatchObject([{ id, archived: true }]);
     expect((await auditOf(id)).at(-1)).toMatchObject({ command: "ArchivePaymentMethod", actorId: minnie.claimantId, ownerId: mickey.claimantId });
