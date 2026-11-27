@@ -17,7 +17,7 @@ The person who placed the order with the vendor: the Claimant or a colleague. Tr
 _Avoid_: Buyer, placed by, requester
 
 **Owner**:
-The Claimant whose Expense a change touches. Not always the person making the change: an admin acting on a Claimant's books changes that Claimant's data, and the Claimant stays the Owner.
+The Claimant whose Expense a change touches. Not always the person making the change: an admin acting on a Claimant's books changes that Claimant's data, and the Claimant stays the Owner. For a change to a Fund itself, the Owner is the Fund's creator; a Fund no Claimant created, such as Makerspace, is owned by the admin making the change. A Claimant's own version, order or hiding of a Fund is that Claimant's.
 _Avoid_: Holder, account owner, the actor
 
 ## Money out
