@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { type AnyPgColumn, bigint, boolean, char, check, date, foreignKey, index, integer, jsonb, pgSequence, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, bigint, boolean, char, check, date, foreignKey, index, integer, jsonb, pgSequence, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // Keys and References (ADR 0005). The key is a UUIDv7 from Postgres's own uuidv7(), so every
 // writer (app, psql, imports) gets the same time-ordered key without app code.
@@ -194,3 +194,55 @@ export const idempotencyKeys = pgTable("idempotency_keys", {
   result: jsonb("result").notNull(),
   at: timestamp("at", { withTimezone: true }).notNull(),
 });
+
+// Funds (claims "Funds define how a Claim is made", identity-access "Fund sharing and edit rights"). A Fund's row is its
+// team version; a private Fund is one whose team flag is off. No creator only for Makerspace, which the migration seeds.
+// mail is {to: string[], cc: string[], subject, body}. Notes stay here: no template query selects them.
+export const funds = pgTable(
+  "funds",
+  {
+    id: key(),
+    creatorId: uuid("creator_id"),
+    name: text("name").notNull(),
+    mail: jsonb("mail"),
+    notes: text("notes"),
+    formTemplate: text("form_template"),
+    fileNamePattern: text("file_name_pattern"),
+    claimNamePattern: text("claim_name_pattern"),
+    whatForHint: text("what_for_hint"),
+    team: boolean("team").notNull().default(false),
+    archived: boolean("archived").notNull().default(false),
+    // Goes up when a field "my version" can override changes, so a personal version can tell it is behind.
+    teamVersion: integer("team_version").notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [check("funds_creator_or_team", sql`${t.creatorId} is not null or ${t.team}`)],
+);
+
+// "My version": one Claimant's override of a team Fund's mail, form, file-name pattern or hint. Null = the team's.
+export const fundVersions = pgTable(
+  "fund_versions",
+  {
+    fundId: uuid("fund_id").notNull().references(() => funds.id),
+    claimantId: uuid("claimant_id").notNull(),
+    mail: jsonb("mail"),
+    formTemplate: text("form_template"),
+    fileNamePattern: text("file_name_pattern"),
+    whatForHint: text("what_for_hint"),
+    // The team version this one was last set against; behind it means "Team version updated. Compare".
+    basedOn: integer("based_on").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.fundId, t.claimantId] })],
+);
+
+// Each Claimant's own order and hiding of Funds (expense-tracking, "Funds on the upload prompt").
+export const fundSettings = pgTable(
+  "fund_settings",
+  {
+    claimantId: uuid("claimant_id").notNull(),
+    fundId: uuid("fund_id").notNull().references(() => funds.id),
+    position: integer("position"),
+    hidden: boolean("hidden").notNull().default(false),
+  },
+  (t) => [primaryKey({ columns: [t.claimantId, t.fundId] })],
+);

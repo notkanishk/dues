@@ -50,6 +50,13 @@
       "when": 1795736678166,
       "tag": "0006_audit_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795739809828,
+      "tag": "0007_funds",
+      "breakpoints": true
     }
   ]
 }

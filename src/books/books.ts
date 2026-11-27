@@ -27,6 +27,7 @@ import {
   type Rejected,
   type Slice,
 } from "./core";
+import { listFunds } from "./funds";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
 export type Result = { readonly ok: true; readonly events: readonly Event[] } | Rejected;
@@ -446,6 +447,12 @@ export function createBooks({ db, now, enqueue }: Deps) {
           throw e;
         }
       }
+    },
+
+    /** Settings → Funds: every Fund the Actor can use, in their order, with the team version, theirs and what is in effect. */
+    async funds(actor: Actor) {
+      if (!mayEnter(actor)) return forbidden;
+      return { ok: true as const, funds: await listFunds(db, actor) };
     },
 
     /** One Expense with its Bills; status, Open amount, why it is open and Bill status derived on read (design D3). */
