@@ -280,6 +280,12 @@ describe("Late payment confirmation attaches to the Expense", () => {
       [invoiceOnly("E-802", { payment: rs(1179) }), invoiceOnly("E-803", { payment: rs(1181) })],
       { type: "attachProof", expenseId: "E-803" },
     ],
+    [
+      "two identical invoice-only Expenses tie: attached to neither, a new Expense",
+      payment(),
+      [invoiceOnly("E-805"), invoiceOnly("E-804")],
+      NEW_EXPENSE,
+    ],
   ])("%s", (_, facts, candidates, expected) => {
     expect(propose(facts, candidates)).toEqual(expected);
   });
