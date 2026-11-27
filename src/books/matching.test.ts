@@ -16,7 +16,7 @@ const expense = (id: string, over: Partial<CandidateExpense> = {}): CandidateExp
   orderRef: null,
   payback: false,
   invoiceOnly: false,
-  references: [],
+  upiRefs: [],
   proofReceivedAt: null,
   ...over,
 });
@@ -273,7 +273,7 @@ const payment = (over: Partial<PaymentFacts> = {}): PaymentFacts => ({
   paidOn: "2026-03-06",
   payee: "Sample Tools",
   payeeStandsFor: [],
-  reference: "612345678901",
+  upiRef: "612345678901",
   receivedAt: "2026-03-06T09:14:10Z",
   ...over,
 });
@@ -284,7 +284,7 @@ const invoiceOnly = (id: string, over: Partial<CandidateExpense> = {}) =>
 
 describe("Same reference means same Payment", () => {
   it("a second confirmation with the same UPI reference attaches as Payment proof, whatever it reads", () => {
-    const candidates = [expense("E-801", { references: ["612345678901"], payee: "Fizzy Hardware" })];
+    const candidates = [expense("E-801", { upiRefs: ["612345678901"], payee: "Fizzy Hardware" })];
     expect(propose(payment({ amount: null, payee: null }), candidates)).toEqual({ type: "attachProof", expenseId: "E-801" });
   });
 });
@@ -325,27 +325,27 @@ describe("Late payment confirmation attaches to the Expense", () => {
 });
 
 describe("\"Same payment as E-x?\" without a reference", () => {
-  const unreadable = (id: string, receivedAt: string) => expense(id, { references: [], proofReceivedAt: receivedAt, payee: "Fizzy Hardware" });
-  const second = payment({ reference: null, amount: null, payee: null, receivedAt: "2026-03-06T09:14:10Z" });
+  const unreadable = (id: string, receivedAt: string) => expense(id, { upiRefs: [], proofReceivedAt: receivedAt, payee: "Fizzy Hardware" });
+  const second = payment({ upiRef: null, amount: null, payee: null, receivedAt: "2026-03-06T09:14:10Z" });
 
   it.each<[string, CandidateExpense[], Proposal]>([
     ["6 minutes apart: offered", [unreadable("E-901", "2026-03-06T09:08:10Z")], { type: "samePaymentSuggestion", expenseId: "E-901" }],
     ["10 minutes apart: offered", [unreadable("E-901", "2026-03-06T09:04:10Z")], { type: "samePaymentSuggestion", expenseId: "E-901" }],
     ["11 minutes apart: no offer", [unreadable("E-901", "2026-03-06T09:03:10Z")], { type: "newExpense", askVendor: false }],
     [
-      "an earlier confirmation that had a reference: no offer",
-      [expense("E-902", { references: ["612345678901"], proofReceivedAt: "2026-03-06T09:10:10Z" })],
+      "an earlier confirmation that had a UPI reference: no offer",
+      [expense("E-902", { upiRefs: ["612345678901"], proofReceivedAt: "2026-03-06T09:10:10Z" })],
       { type: "newExpense", askVendor: false },
     ],
   ])("%s", (_, candidates, expected) => {
     expect(propose(second, candidates)).toEqual(expected);
   });
 
-  it("a blank reference is no reference: offered", () => {
-    expect(propose({ ...second, reference: " " }, [unreadable("E-901", "2026-03-06T09:08:10Z")])).toEqual({ type: "samePaymentSuggestion", expenseId: "E-901" });
+  it("a blank UPI reference is no reference: offered", () => {
+    expect(propose({ ...second, upiRef: " " }, [unreadable("E-901", "2026-03-06T09:08:10Z")])).toEqual({ type: "samePaymentSuggestion", expenseId: "E-901" });
   });
 
-  it("a confirmation with a readable reference gets no offer", () => {
+  it("a confirmation with a readable UPI reference gets no offer", () => {
     expect(propose(payment({ amount: null }), [unreadable("E-901", "2026-03-06T09:08:10Z")])).toEqual({ type: "newExpense", askVendor: false });
   });
 });
@@ -422,7 +422,7 @@ describe("propose properties", () => {
         orderRef: pick(["ORD-1", "ORD-2", null, null]),
         payback: r() < 0.15,
         invoiceOnly: r() < 0.4,
-        references: r() < 0.3 ? [pick(["611111111111", "622222222222"])] : [],
+        upiRefs: r() < 0.3 ? [pick(["611111111111", "622222222222"])] : [],
         proofReceivedAt: r() < 0.4 ? `2026-03-10T09:${String(Math.floor(r() * 30)).padStart(2, "0")}:00Z` : null,
       });
     });
@@ -441,7 +441,7 @@ describe("propose properties", () => {
             paidOn: day(0),
             payee: pick([...shops, "GatewayPay Merchant 77"]),
             payeeStandsFor: r() < 0.3 ? [pick(shops)] : [],
-            reference: pick(["611111111111", "633333333333", null]),
+            upiRef: pick(["611111111111", "633333333333", null]),
             receivedAt: "2026-03-10T09:20:00Z",
           });
     return { facts, candidates, offsets };
