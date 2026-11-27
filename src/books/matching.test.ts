@@ -294,3 +294,115 @@ describe("One Payment for several invoices", () => {
     expect(propose(facts, candidates)).toEqual(expected);
   });
 });
+
+// Property tests: seeded random Claimant books, so a failure reproduces. Names are spelt one way each, so the
+// oracle below can compare them with plain equality, independent of how propose normalises names.
+describe("propose properties", () => {
+  const RUNS = 3000;
+  const rng = (seed: number) => () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const shops = ["Sample Tools", "Fizzy Hardware", "Amazon"];
+  const day = (offset: number) => new Date(Date.UTC(2026, 2, 10 + offset)).toISOString().slice(0, 10);
+
+  type World = { facts: BillFacts | PaymentFacts; candidates: CandidateExpense[]; offsets: Map<string, number> };
+  const world = (seed: number): World => {
+    const r = rng(seed);
+    const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(r() * xs.length)];
+    const amounts = [600, 900, 1180, 1500, 2100, 4870];
+    const offsets = new Map<string, number>();
+    const candidates = Array.from({ length: Math.floor(r() * 7) }, (_, i) => {
+      const id = `E-${100 + i}`;
+      const offset = Math.floor(r() * 31) - 15;
+      offsets.set(id, offset);
+      const amount = rs(pick(amounts));
+      return expense(id, {
+        kind: pick(["shop", "online", "service"] as const),
+        paidOn: day(offset),
+        payment: amount,
+        openAmount: r() < 0.2 ? rs(0) : amount,
+        vendor: pick([...shops, null]),
+        payee: pick(["GatewayPay Merchant 77", "Sample Tools", null]),
+        payeeStandsFor: r() < 0.2 ? [pick(shops)] : [],
+        orderRef: pick(["ORD-1", "ORD-2", null, null]),
+        payback: r() < 0.15,
+        invoiceOnly: r() < 0.4,
+        references: r() < 0.3 ? [pick(["611111111111", "622222222222"])] : [],
+        proofReceivedAt: r() < 0.4 ? `2026-03-10T09:${String(Math.floor(r() * 30)).padStart(2, "0")}:00Z` : null,
+      });
+    });
+    const facts =
+      r() < 0.6
+        ? bill({
+            total: rs(pick(amounts)),
+            billDate: day(0),
+            vendor: pick([...shops, null]),
+            platform: r() < 0.2 ? "Amazon" : null,
+            orderRef: pick(["ORD-1", "ORD-2", null, null]),
+            expenseId: r() < 0.1 ? pick(["E-100", "E-101", "E-999"]) : null,
+          })
+        : payment({
+            amount: r() < 0.9 ? rs(pick(amounts), pick([0, 50, -50, 101])) : null,
+            paidOn: day(0),
+            payee: pick([...shops, "GatewayPay Merchant 77"]),
+            payeeStandsFor: r() < 0.3 ? [pick(shops)] : [],
+            reference: pick(["611111111111", "633333333333", null]),
+            receivedAt: "2026-03-10T09:20:00Z",
+          });
+    return { facts, candidates, offsets };
+  };
+  const named = (p: Proposal): string[] =>
+    p.type === "newExpense" ? [] : p.type === "mergeSuggestion" ? [...p.expenseIds] : p.type === "attachWithCheck" ? [p.expenseId, ...p.others] : [p.expenseId];
+  const shuffled = <T,>(xs: readonly T[], r: () => number) => {
+    const out = [...xs];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(r() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
+
+  it("never names an Expense outside its candidates, nor one twice", () => {
+    for (let seed = 1; seed <= RUNS; seed++) {
+      const { facts, candidates } = world(seed);
+      const ids = named(propose(facts, candidates));
+      expect(ids.every((id) => candidates.some((e) => e.id === id))).toBe(true);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  });
+
+  it("is deterministic: any order of the candidates gives the same Proposal", () => {
+    for (let seed = 1; seed <= RUNS; seed++) {
+      const { facts, candidates } = world(seed);
+      const once = propose(facts, candidates);
+      expect(propose(facts, candidates)).toEqual(once);
+      expect(propose(facts, shuffled(candidates, rng(seed * 7919)))).toEqual(once);
+    }
+  });
+
+  it("attaches a bill only when the auto-attach conditions hold", () => {
+    let attaches = 0;
+    for (let seed = 1; seed <= RUNS; seed++) {
+      const { facts, candidates, offsets } = world(seed);
+      if (facts.type !== "bill") continue;
+      const p = propose(facts, candidates);
+      if (p.type !== "attach") continue;
+      attaches++;
+      const e = candidates.find((c) => c.id === p.expenseId)!;
+      if (facts.expenseId === e.id) continue;
+      const inWindow = (c: CandidateExpense) => Math.abs(offsets.get(c.id)!) <= 10;
+      const exact = (c: CandidateExpense) => c.openAmount.paise === facts.total.paise;
+      const larger = (c: CandidateExpense) => c.kind === "online" && c.openAmount.paise > facts.total.paise;
+      const order = (c: CandidateExpense) => facts.orderRef !== null && c.orderRef === facts.orderRef;
+      const shop = facts.platform ?? facts.vendor;
+      const vendor = (c: CandidateExpense) => c.payback || (shop !== null && [c.vendor, c.payee, ...c.payeeStandsFor].includes(shop));
+      const candidateCount = candidates.filter((c) => (inWindow(c) && (exact(c) || larger(c))) || order(c)).length;
+      const strong = inWindow(e) && ((exact(e) && (vendor(e) || order(e) || candidateCount === 1)) || (larger(e) && (order(e) || vendor(e))));
+      expect(strong, `seed ${seed}`).toBe(true);
+    }
+    expect(attaches).toBeGreaterThan(50); // the generator does reach the rule
+  });
+});
