@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, pool } from "@/src/db/index";
-import { auditLog } from "@/src/db/schema";
+import { auditLog, funds } from "@/src/db/schema";
 import { createBooks, type Result } from "./books";
 import type { Actor } from "./core";
 import { type CreateFund, MAKERSPACE } from "./funds";
@@ -43,6 +43,12 @@ const listed = async (actor: Actor) => {
   return read.funds;
 };
 const only = (ids: string[], list: { id: string }[]) => list.map((f) => f.id).filter((id) => ids.includes(id));
+/** Puts Makerspace back as 0007 seeds it, after a test that edits or archives the one Fund every test shares. */
+const resetMakerspace = () =>
+  db
+    .update(funds)
+    .set({ name: "Makerspace", mail: null, notes: null, formTemplate: null, fileNamePattern: "{purpose} - {what} {kind}", claimNamePattern: "{Month}{n}", whatForHint: null, team: true, archived: false })
+    .where(eq(funds.id, MAKERSPACE));
 const auditOf = (fundId: string) => db.select().from(auditLog).where(eq(auditLog.entityId, fundId)).orderBy(auditLog.id);
 
 beforeAll(() => {
@@ -401,61 +407,75 @@ describe("Funds on the upload prompt", () => {
 
 describe("Fund access, Actor by Fund state", () => {
   type Who = "creator" | "other" | "admin";
-  type State = "private" | "team" | "archived";
+  type State = "private" | "team" | "archived" | "makerspace";
   const N = { ok: true } as const;
   const nf = { ok: false, reason: "not_found" } as const;
   const no = { ok: false, reason: "forbidden" } as const;
   const iv = { ok: false, reason: "invalid_transition" } as const;
   type Outcome = typeof N | typeof nf | typeof no | typeof iv;
   // Hand-typed from identity-access "Fund sharing and edit rights" and design D6. Reset runs after the Actor's own
-  // SetPersonalVersion, so it resets that. "archived" is a team Fund, archived.
-  const expected: Record<string, Record<State, Record<Who, Outcome>>> = {
-    EditFund: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: no, admin: N }, archived: { creator: N, other: no, admin: N } },
-    ShareFund: { private: { creator: N, other: nf, admin: N }, team: { creator: iv, other: no, admin: iv }, archived: { creator: iv, other: no, admin: iv } },
-    ArchiveFund: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: no, admin: N }, archived: { creator: iv, other: no, admin: iv } },
-    SetPersonalVersion: { private: { creator: iv, other: nf, admin: iv }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
-    ResetToTeamVersion: { private: { creator: iv, other: nf, admin: iv }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
-    HideFund: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
-    OrderFunds: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
-    fundTemplates: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
+  // SetPersonalVersion, so it resets that. "archived" is a team Fund, archived. Makerspace is the seeded team Fund with
+  // no creator: only an admin edits or archives it.
+  const expected: Record<string, Record<State, Partial<Record<Who, Outcome>>>> = {
+    EditFund: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: no, admin: N }, archived: { creator: N, other: no, admin: N }, makerspace: { other: no, admin: N } },
+    ShareFund: { private: { creator: N, other: nf, admin: N }, team: { creator: iv, other: no, admin: iv }, archived: { creator: iv, other: no, admin: iv }, makerspace: { other: no, admin: iv } },
+    ArchiveFund: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: no, admin: N }, archived: { creator: iv, other: no, admin: iv }, makerspace: { other: no, admin: N } },
+    SetPersonalVersion: { private: { creator: iv, other: nf, admin: iv }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N }, makerspace: { other: N, admin: N } },
+    ResetToTeamVersion: { private: { creator: iv, other: nf, admin: iv }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N }, makerspace: { other: N, admin: N } },
+    HideFund: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N }, makerspace: { other: N, admin: N } },
+    OrderFunds: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N }, makerspace: { other: N, admin: N } },
+    fundTemplates: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N }, makerspace: { other: N, admin: N } },
   };
   const PER_CLAIMANT = ["SetPersonalVersion", "ResetToTeamVersion", "HideFund", "OrderFunds", "fundTemplates"];
 
-  it("table: what creator, another Claimant and an admin may do to a private, team and archived Fund; a refusal or a per-Claimant command never changes what a bystander sees", async () => {
-    const cells = Object.entries(expected).flatMap(([op, byState]) =>
-      (Object.keys(byState) as State[]).flatMap((state) => (["creator", "other", "admin"] as Who[]).map((who) => ({ op, state, who }))),
-    );
-    await Promise.all(
-      cells.map(async ({ op, state, who }) => {
-        const [creator, other, minnie, courage] = [claimant(), claimant(), admin(), claimant()];
-        const fundId = await created(creator);
-        if (state !== "private") ok(await books.execute(creator, { type: "ShareFund", fundId }));
-        if (state === "archived") ok(await books.execute(creator, { type: "ArchiveFund", fundId }));
-        const actor = { creator, other, admin: minnie }[who];
-        if (op === "ResetToTeamVersion" && state !== "private") ok(await books.execute(actor, { type: "SetPersonalVersion", fundId, fileNamePattern: "{n}" }));
-        const bystander = async () => [(await listed(courage)).find((f) => f.id === fundId), await books.fundTemplates(courage, fundId)];
-        const [seen, rows] = [await bystander(), (await auditOf(fundId)).length];
+  const cell = async ({ op, state, who }: { op: string; state: State; who: Who }) => {
+    const [creator, other, minnie, courage] = [claimant(), claimant(), admin(), claimant()];
+    const fundId = state === "makerspace" ? MAKERSPACE : await created(creator);
+    if (state === "team" || state === "archived") ok(await books.execute(creator, { type: "ShareFund", fundId }));
+    if (state === "archived") ok(await books.execute(creator, { type: "ArchiveFund", fundId }));
+    const actor = { creator, other, admin: minnie }[who];
+    // Who owns a change to the Fund: its creator, or the acting admin for Makerspace, which has none.
+    const owner = state === "makerspace" ? actor : creator;
+    if (op === "ResetToTeamVersion" && state !== "private") ok(await books.execute(actor, { type: "SetPersonalVersion", fundId, fileNamePattern: "{n}" }));
+    const bystander = async () => [(await listed(courage)).find((f) => f.id === fundId), await books.fundTemplates(courage, fundId)];
+    const [seen, rows] = [await bystander(), (await auditOf(fundId)).length];
 
-        const result =
-          op === "fundTemplates"
-            ? await books.fundTemplates(actor, fundId)
-            : await books.execute(
-                actor,
-                op === "EditFund" ? { type: op, fundId, name: "Renamed" }
-                : op === "SetPersonalVersion" ? { type: op, fundId, whatForHint: "e.g. mine" }
-                : op === "HideFund" ? { type: op, fundId, hidden: true }
-                : op === "OrderFunds" ? { type: op, fundIds: [fundId] }
-                : { type: op as "ShareFund" | "ArchiveFund" | "ResetToTeamVersion", fundId },
-              );
-        const want = expected[op]![state][who];
-        const label = `${op} on a ${state} Fund by ${who}`;
-        expect(want.ok ? { ok: result.ok } : result, label).toEqual(want);
-        if (!want.ok || PER_CLAIMANT.includes(op)) expect(await bystander(), label).toEqual(seen);
-        if (!want.ok) expect((await auditOf(fundId)).length, label).toBe(rows);
-        if (result.ok && ["EditFund", "ShareFund", "ArchiveFund"].includes(op))
-          expect((await auditOf(fundId)).at(-1), label).toMatchObject({ actorId: actor.claimantId, ownerId: creator.claimantId, command: op });
-      }),
+    const result =
+      op === "fundTemplates"
+        ? await books.fundTemplates(actor, fundId)
+        : await books.execute(
+            actor,
+            op === "EditFund" ? { type: op, fundId, name: "Renamed" }
+            : op === "SetPersonalVersion" ? { type: op, fundId, whatForHint: "e.g. mine" }
+            : op === "HideFund" ? { type: op, fundId, hidden: true }
+            : op === "OrderFunds" ? { type: op, fundIds: [fundId] }
+            : { type: op as "ShareFund" | "ArchiveFund" | "ResetToTeamVersion", fundId },
+          );
+    const want = expected[op]![state][who]!;
+    const label = `${op} on a ${state} Fund by ${who}`;
+    expect(want.ok ? { ok: result.ok } : result, label).toEqual(want);
+    if (!want.ok || PER_CLAIMANT.includes(op)) expect(await bystander(), label).toEqual(seen);
+    if (!want.ok) expect((await auditOf(fundId)).length, label).toBe(rows);
+    if (result.ok && ["EditFund", "ShareFund", "ArchiveFund"].includes(op))
+      expect((await auditOf(fundId)).at(-1), label).toMatchObject({ actorId: actor.claimantId, ownerId: owner.claimantId, command: op });
+  };
+  const cellsOf = (states: State[]) =>
+    Object.entries(expected).flatMap(([op, byState]) =>
+      states.flatMap((state) => (Object.keys(byState[state]) as Who[]).map((who) => ({ op, state, who }))),
     );
+
+  it("table: what creator, another Claimant and an admin may do to a private, team and archived Fund; a refusal or a per-Claimant command never changes what a bystander sees", async () => {
+    await Promise.all(cellsOf(["private", "team", "archived"]).map(cell));
+  }, 60_000);
+
+  it("table: Makerspace, which has no creator: a non-admin may not edit or archive it; an admin's change is audited with the admin as actor and owner", async () => {
+    // One at a time: every cell acts on the one Makerspace row, put back after each.
+    for (const c of cellsOf(["makerspace"]))
+      try {
+        await cell(c);
+      } finally {
+        await resetMakerspace();
+      }
   }, 60_000);
 });
 
@@ -490,5 +510,24 @@ describe("Fund commands in Books' shell", () => {
     const edits = (await auditOf(fundId)).filter((e) => e.event === "FundEdited").map((e) => (e.payload as { teamVersion: number }).teamVersion);
     expect(edits.sort()).toEqual([2, 3]);
     expect((await listed(mickey)).find((f) => f.id === fundId)?.teamVersion).toMatchObject({ fileNamePattern: "{n} a", whatForHint: "e.g. b" });
+  });
+
+  it("two admins editing Makerspace at once queue up: both edits land and the team version counts both", async () => {
+    const [minnie, daisy] = [admin(), admin()];
+    try {
+      await Promise.all([
+        books.execute(minnie, { type: "EditFund", fundId: MAKERSPACE, fileNamePattern: "{n} a" }),
+        books.execute(daisy, { type: "EditFund", fundId: MAKERSPACE, whatForHint: "e.g. b" }),
+      ]);
+      const edits = (await auditOf(MAKERSPACE))
+        .filter((e) => e.event === "FundEdited" && [minnie.claimantId, daisy.claimantId].includes(e.actorId))
+        .map((e) => (e.payload as { teamVersion: number }).teamVersion)
+        .sort((a, b) => a - b);
+      expect(edits).toHaveLength(2);
+      expect(edits[1]).toBe(edits[0]! + 1);
+      expect((await listed(minnie)).find((f) => f.id === MAKERSPACE)?.teamVersion).toMatchObject({ fileNamePattern: "{n} a", whatForHint: "e.g. b" });
+    } finally {
+      await resetMakerspace();
+    }
   });
 });
