@@ -300,7 +300,7 @@ const payment = (over: Partial<PaymentFacts> = {}): PaymentFacts => ({
 const invoiceOnly = (id: string, over: Partial<CandidateExpense> = {}) =>
   expense(id, { paidOn: "2026-03-04", vendor: "Sample Tools", openAmount: rs(0), invoiceOnly: true, ...over });
 
-describe("Same reference means same Payment", () => {
+describe("Same UPI ref means same Payment", () => {
   it("a second confirmation with the same UPI reference attaches as Payment proof, whatever it reads", () => {
     const candidates = [expense("E-801", { upiRefs: ["612345678901"], payee: "Fizzy Hardware" })];
     expect(propose(payment({ amount: null, payee: null }), candidates)).toEqual({ type: "attachProof", expenseId: "E-801" });
@@ -342,7 +342,7 @@ describe("Late payment confirmation attaches to the Expense", () => {
   });
 });
 
-describe("\"Same payment as E-x?\" without a reference", () => {
+describe("\"Same payment as E-x?\" without a UPI ref", () => {
   const unreadable = (id: string, receivedAt: string) => expense(id, { upiRefs: [], proofReceivedAt: receivedAt, payee: "Fizzy Hardware" });
   const second = payment({ upiRef: null, amount: null, payee: null, receivedAt: "2026-03-06T09:14:10Z" });
 
@@ -359,7 +359,7 @@ describe("\"Same payment as E-x?\" without a reference", () => {
     expect(propose(second, candidates)).toEqual(expected);
   });
 
-  it("a blank UPI reference is no reference: offered", () => {
+  it("a blank UPI ref is no UPI ref: offered", () => {
     expect(propose({ ...second, upiRef: " " }, [unreadable("E-901", "2026-03-06T09:08:10Z")])).toEqual({ type: "samePaymentSuggestion", expenseId: "E-901" });
   });
 
@@ -426,7 +426,7 @@ describe("Review probe rows", () => {
     ["7 a confirmation fitting two identical invoice-only Expenses", confirmation({ amount: rs(1180), payee: "Sample Tools" }), [expense("E-2", invoice), expense("E-1", invoice)], NEW_EXPENSE],
     ["8 a blank vendor with no candidate", bill({ vendor: "" }), [], { type: "newExpense", askVendor: true }],
     ["9 an order number match for a larger bill outside the window", bill({ total: rs(9000), orderRef: "O1", billDate: "2026-06-01" }), [expense("E-1", { orderRef: "O1" })], { type: "attachWithCheck", expenseId: "E-1", others: [] }],
-    ["10 a blank reference two minutes after another", confirmation({ upiRef: "", amount: null }), [expense("E-1", { proofReceivedAt: "2026-03-06T08:58:00Z" })], { type: "samePaymentSuggestion", expenseId: "E-1" }],
+    ["10 a blank UPI ref two minutes after another", confirmation({ upiRef: "", amount: null }), [expense("E-1", { proofReceivedAt: "2026-03-06T08:58:00Z" })], { type: "samePaymentSuggestion", expenseId: "E-1" }],
   ])("%s", (_, facts, candidates, expected) => {
     expect(propose(facts, candidates)).toEqual(expected);
   });
