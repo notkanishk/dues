@@ -348,12 +348,12 @@ export type Links = {
   /** The Purposes the command names that are the Expense's Claimant's own. */
   readonly purposes: Readonly<Record<string, { readonly fundId: string }>>;
   /** The Payment method the command names, if it is the Expense's Claimant's own. */
-  readonly paymentMethods?: Readonly<Record<string, { readonly archived: boolean }>>;
+  readonly paymentMethods: Readonly<Record<string, { readonly archived: boolean }>>;
   /** Where a new payment goes when the command names neither Fund nor Purpose. */
   readonly fallback: { readonly fundId: string; readonly purposeId: string | null };
 };
 /** Nothing named is had; a new payment goes into Makerspace with no Purpose. */
-export const NO_LINKS: Links = { funds: {}, purposes: {}, fallback: { fundId: MAKERSPACE, purposeId: null } };
+export const NO_LINKS: Links = { funds: {}, purposes: {}, paymentMethods: {}, fallback: { fundId: MAKERSPACE, purposeId: null } };
 
 /**
  * The one rule for an Expense's Fund and Purpose, on every path that sets them. Absent from links is not_found, so
@@ -375,7 +375,7 @@ function linkOf(links: Links, base: { fundId: string; purposeId: string | null }
  */
 function methodOf(links: Links, current: string | null, named: string | null | undefined) {
   if (named === undefined || named === null || named === current) return { ok: true as const, paymentMethodId: named === undefined ? current : named };
-  const method = typeof named === "string" ? own(links.paymentMethods ?? {}, named) : undefined;
+  const method = typeof named === "string" ? own(links.paymentMethods, named) : undefined;
   if (!method) return reject("not_found");
   if (method.archived) return rejectField("paymentMethodId");
   return { ok: true as const, paymentMethodId: named };
