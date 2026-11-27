@@ -1,6 +1,6 @@
 // Matching (design §2): which Expense a document belongs to. Pure: no database, no clock, no I/O.
 // Only caller: Books, inside LogDocument, under the Claimant's lock (D5). Candidates are the Claimant's own.
-import { type Money, minus } from "../money/money";
+import { type Money, minus, sum } from "../money/money";
 
 /** Matching thresholds, named in one place (design §1 Config). */
 export const MATCHING = {
@@ -12,6 +12,10 @@ export const MATCHING = {
   proofWindowDays: 10,
   /** Two reference-less confirmations this many minutes apart are offered as the same payment. */
   samePaymentMinutes: 10,
+  /** One Payment for several invoices: 2 up to this many invoice-only Expenses from one vendor… */
+  mergeMaxInvoices: 3,
+  /** …each within this many days of the payment. */
+  mergeWindowDays: 10,
 } as const;
 
 export type MatchingConfig = { readonly [K in keyof typeof MATCHING]: number };
@@ -62,6 +66,7 @@ export type Proposal =
   | { readonly type: "attachWithCheck"; readonly expenseId: string; readonly others: readonly string[] }
   | { readonly type: "attachProof"; readonly expenseId: string }
   | { readonly type: "samePaymentSuggestion"; readonly expenseId: string }
+  | { readonly type: "mergeSuggestion"; readonly expenseIds: readonly string[] }
   | { readonly type: "newExpense"; readonly askVendor: boolean };
 
 const DAY_MS = 86_400_000;
@@ -122,6 +127,9 @@ function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateEx
       .filter((e) => e.invoiceOnly && e.payment && off(e) <= config.proofTolerancePaise && daysApart(e.paidOn, paidOn) <= config.proofWindowDays && payeeMatches(facts, e))
       .sort((a, b) => off(a) - off(b) || daysApart(a.paidOn, paidOn) - daysApart(b.paidOn, paidOn));
     if (proof.length > 0) return { type: "attachProof", expenseId: proof[0].id };
+
+    const merge = mergeFor(amount, paidOn, sorted, config);
+    if (merge) return { type: "mergeSuggestion", expenseIds: merge };
   }
 
   // Neither of two confirmations carries a reference: offer the nearer one in time, never merge.
@@ -133,6 +141,36 @@ function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateEx
     if (twin.length > 0) return { type: "samePaymentSuggestion", expenseId: twin[0].id };
   }
   return NEW_EXPENSE;
+}
+
+// ponytail: the sum search tries every 2..mergeMaxInvoices subset of each vendor's invoice-only Expenses, capped at the
+// MERGE_SEARCH_CEILING nearest in date (C(24,3) = 2,024 triples). Prune by sorted amounts if a vendor ever has more.
+const MERGE_SEARCH_CEILING = 24;
+
+/** The invoice-only Expenses from one vendor, within the window, whose Payments sum to the payment ±₹1; fewest, then nearest sum. */
+function mergeFor(amount: Money, paidOn: string, sorted: readonly CandidateExpense[], config: MatchingConfig): string[] | null {
+  const byVendor = new Map<string, CandidateExpense[]>();
+  for (const e of sorted) {
+    if (!e.invoiceOnly || !e.payment || e.vendor === null || words(e.vendor) === "" || daysApart(e.paidOn, paidOn) > config.mergeWindowDays) continue;
+    byVendor.set(words(e.vendor), [...(byVendor.get(words(e.vendor)) ?? []), e]);
+  }
+  type Pick = { ids: string[]; off: number };
+  const picks: Pick[] = [];
+  const consider = (picked: CandidateExpense[]) => {
+    const off = Math.abs(minus(amount, sum(picked.map((e) => e.payment!))).paise);
+    if (off <= config.proofTolerancePaise) picks.push({ ids: picked.map((e) => e.id).sort((a, b) => byId({ id: a }, { id: b })), off });
+  };
+  for (const group of byVendor.values()) {
+    const pool = [...group].sort((a, b) => daysApart(a.paidOn, paidOn) - daysApart(b.paidOn, paidOn) || byId(a, b)).slice(0, MERGE_SEARCH_CEILING);
+    const walk = (from: number, picked: CandidateExpense[]) => {
+      if (picked.length >= 2) consider(picked);
+      if (picked.length === config.mergeMaxInvoices) return;
+      for (let i = from; i < pool.length; i++) walk(i + 1, [...picked, pool[i]]);
+    };
+    walk(0, []);
+  }
+  const fewestThenNearest = (a: Pick, b: Pick) => a.ids.length - b.ids.length || a.off - b.off || a.ids.join().localeCompare(b.ids.join(), "en", { numeric: true });
+  return picks.sort(fewestThenNearest)[0]?.ids ?? null;
 }
 
 function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[], config: MatchingConfig): Proposal {
