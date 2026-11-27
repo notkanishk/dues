@@ -205,7 +205,16 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
     })
     .filter((f): f is Fit => f !== null)
     .sort(betterFit);
-  if (fits.length === 0) return newExpense;
+  if (fits.length === 0) {
+    // W4: "matching prevents the same purchase becoming two Expenses", and a smaller bill "Otherwise … MUST attach to the
+    // best candidate with a Check". ponytail: no day limit; the outer limit is the Order's Open amount, so an Order stops
+    // drawing bills once billed in full. Add a day cap if stale Orders draw Checks.
+    const days = (e: CandidateExpense) => daysApart(e.paidOn, facts.billDate);
+    const [best, ...rest] = candidates
+      .filter((e) => e.kind === "online" && e.openAmount.paise > facts.total.paise && shopMatches(shop, e))
+      .sort((a, b) => days(a) - days(b) || byId(a, b));
+    return best ? { type: "attachWithCheck", expenseId: best.id, others: rest.map((e) => e.id) } : newExpense;
+  }
 
   // "Exactly one candidate" counts every candidate, larger Orders included. An exact-amount candidate anywhere means
   // no other Expense is split: the bill may be that one, so a Check decides.
