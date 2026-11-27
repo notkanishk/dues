@@ -73,14 +73,15 @@ const DAY_MS = 86_400_000;
 /** Whole days between two business dates; Date.UTC of a date is a whole number of days in ms, so this is exact. */
 const daysApart = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / DAY_MS;
 
-// Legal-form words that never tell two shops apart.
-const NOISE = new Set(["pvt", "private", "ltd", "limited", "llp", "inc", "co", "the"]);
-const words = (name: string) =>
-  name
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w && !NOISE.has(w))
-    .join(" ");
+// Legal-form words that never tell two shops apart, but only at the end of a name ("Private Label Tools" keeps its
+// "Private"). "Co" is not one: "Hardware Co" and "Hardware Ltd" may be two shops.
+const LEGAL = new Set(["pvt", "private", "ltd", "limited", "llp", "inc"]);
+const words = (name: string) => {
+  const w = name.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (w[0] === "the") w.shift();
+  while (w.length > 0 && LEGAL.has(w[w.length - 1])) w.pop();
+  return w.join(" ");
+};
 
 // ponytail: names match only when equal after case, punctuation and legal suffixes; learned aliases cover gateways.
 // Add fuzzy matching only if confirmed matches show aliases are not enough.
