@@ -112,6 +112,16 @@ describe("Claimant-defined Payment methods", () => {
     expect(await books.execute(mickey, { type: "EditPaymentMethod", paymentMethodId: id, hints: { cardLast4: "99" } })).toEqual({ ok: false, reason: "validation", field: "hints" });
     expect(await auditOf(id)).toHaveLength(1);
   });
+
+  it("takes blank or whitespace-only hints as none, on create and on edit", async () => {
+    const mickey = claimant();
+    const blank = { bank: "", cardLast4: "  ", upiHandle: " " };
+    const created = ok(await books.execute(mickey, { type: "CreatePaymentMethod", label: "Cash", hints: blank })).events[0];
+    expect(created).toMatchObject({ type: "PaymentMethodCreated", hints: NO_HINTS });
+    const id = await method(mickey, "Travel card", { cardLast4: "1234" });
+    ok(await books.execute(mickey, { type: "EditPaymentMethod", paymentMethodId: id, hints: blank }));
+    expect((await methodsOf(mickey)).map((m) => m.hints)).toEqual([NO_HINTS, NO_HINTS]);
+  });
 });
 
 describe("Payment method access", () => {
