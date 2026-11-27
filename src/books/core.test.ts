@@ -185,22 +185,8 @@ describe("decide LogNoBillEntry", () => {
           { type: "BillCorrected", billId: "b-1", expenseId: "e-1", changes: { amount: { from: rupees(6000), to: rupees(7000) } }, differs: false },
         ],
       });
-      expect(deriveExpense(after.expenses["e-1"]!)).toMatchObject({ openAmount: rupees(0), reason: null });
+      expect(deriveExpense(after.expenses["e-1"]!)).toMatchObject({ openAmount: rupees(0), reason: claim ? { code: "in_claim" } : null });
     }
-  });
-
-  it("the No bill's own amount corrected ₹60.00 → ₹70.00 moves the Payment with it, so the entry stays one amount", () => {
-    const { decision, slice } = run(entry(), { type: "CorrectBill", billId: "b-1", amount: rupees(7000) });
-    expect(decision).toEqual({
-      ok: true,
-      jobs: [],
-      events: [
-        { type: "BillCorrected", billId: "b-1", expenseId: "e-1", changes: { amount: { from: rupees(6000), to: rupees(7000) } }, differs: false },
-        { type: "ExpenseCorrected", expenseId: "e-1", changes: { amount: { from: rupees(6000), to: rupees(7000) } } },
-      ],
-    });
-    expect(slice.expenses["e-1"]!.amount).toEqual(rupees(7000));
-    expect(deriveExpense(slice.expenses["e-1"]!).openAmount).toEqual(rupees(0));
   });
 
   it("Edit blocked after submission: on a submitted Claim its amount, date, payee, Payment method and remarks are locked", () => {
@@ -212,10 +198,10 @@ describe("decide LogNoBillEntry", () => {
       expect(run(slice, { type: "CorrectBill", billId: "b-1", ...change }).decision, JSON.stringify(change)).toEqual({ ok: false, reason: "locked" });
   });
 
-  it("an Order's leftover No bill moves no Payment: only an entry's own No bill, the whole of its Payment, does", () => {
+  it("an Order's leftover No bill does not follow its Payment: only an entry's own No bill, the whole of its Payment, does", () => {
     const leftover = run(order(100000), { type: "CloseOrder", billId: "b-1", choice: "claim_without_bill" }, ["b-2"]).slice;
-    const { decision } = run(leftover, { type: "CorrectBill", billId: "b-2", amount: rupees(90000) });
-    expect(decision).toMatchObject({ ok: true, events: [{ type: "BillCorrected" }] });
+    const { decision } = run(leftover, correct({ amount: rupees(110000) }));
+    expect(decision).toMatchObject({ ok: true, events: [{ type: "ExpenseCorrected" }] });
     expect(decision.ok && decision.events).toHaveLength(1);
   });
 });
