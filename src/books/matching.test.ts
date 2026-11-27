@@ -54,6 +54,15 @@ describe("No match logs a new Expense", () => {
   it("an unreadable vendor makes review ask for it once", () => {
     expect(propose(bill({ total: rs(640), vendor: null }), [])).toEqual({ type: "newExpense", askVendor: true });
   });
+
+  it("a blank vendor is an unreadable one", () => {
+    expect(propose(bill({ total: rs(640), vendor: "  " }), [])).toEqual({ type: "newExpense", askVendor: true });
+  });
+
+  it("a ₹0.00 bill has no candidates, not even a settled Expense or a larger Order", () => {
+    const candidates = [expense("E-110", { openAmount: rs(0) }), expense("E-111", { kind: "online", vendor: "Sample Tools", openAmount: rs(4870) })];
+    expect(propose(bill({ total: rs(0) }), candidates)).toEqual({ type: "newExpense", askVendor: false });
+  });
 });
 
 describe("Auto-attach only on a strong match, anything else raises a Check", () => {
@@ -306,6 +315,10 @@ describe("\"Same payment as E-x?\" without a reference", () => {
     ],
   ])("%s", (_, candidates, expected) => {
     expect(propose(second, candidates)).toEqual(expected);
+  });
+
+  it("a blank reference is no reference: offered", () => {
+    expect(propose({ ...second, reference: " " }, [unreadable("E-901", "2026-03-06T09:08:10Z")])).toEqual({ type: "samePaymentSuggestion", expenseId: "E-901" });
   });
 
   it("a confirmation with a readable reference gets no offer", () => {
