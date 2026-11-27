@@ -252,6 +252,8 @@ export type Event =
         readonly billNo?: Change<string | null>;
         readonly billDate?: Change<string | null>;
         readonly remarks?: Change<string | null>;
+        /** Only as an entry's No bill follows its corrected date. */
+        readonly fulfilledOn?: Change<string | null>;
       };
       /** "differs from the document" after this edit: set by an edit to a Bill with a document, kept until confirmed. */
       readonly differs: boolean;
@@ -552,11 +554,14 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (!Object.keys(changes).length) return ok([]);
       const { from, to } = changes.amount ?? {};
       const entry = entryBill(expense);
-      const moved: Event[] | Rejected =
-        from && to
-          ? entry
-            ? [{ type: "BillCorrected", billId: entry.id, expenseId: expense.id, changes: { amount: { from, to } }, differs: entry.differs }]
-            : moveExpected(expense, to.paise - from.paise)
+      // An entry's No bill carries its Payment's amount and date (Fulfilled on the day paid).
+      const carried = { ...(changes.amount && { amount: changes.amount }), ...(changes.paidOn && { fulfilledOn: changes.paidOn }) };
+      const moved: Event[] | Rejected = entry
+        ? Object.keys(carried).length
+          ? [{ type: "BillCorrected", billId: entry.id, expenseId: expense.id, changes: carried, differs: entry.differs }]
+          : []
+        : from && to
+          ? moveExpected(expense, to.paise - from.paise)
           : [];
       if (!Array.isArray(moved)) return moved;
       return ok([{ type: "ExpenseCorrected", expenseId: expense.id, changes }, ...moved]);

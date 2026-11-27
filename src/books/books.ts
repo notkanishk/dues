@@ -359,7 +359,7 @@ async function write(tx: Tx, event: Event, at: Date) {
       await tx.update(refunds).set({ refundedOn: event.refundedOn }).where(eq(refunds.id, event.refundId));
       return;
     case "BillCorrected": {
-      const { amount, billNo, billDate, remarks } = event.changes;
+      const { amount, billNo, billDate, remarks, fulfilledOn } = event.changes;
       await tx
         .update(bills)
         .set({
@@ -367,6 +367,7 @@ async function write(tx: Tx, event: Event, at: Date) {
           ...(billNo && { billNo: billNo.to }),
           ...(billDate && { billDate: billDate.to }),
           ...(remarks && { remarks: remarks.to }),
+          ...(fulfilledOn && { fulfilledOn: fulfilledOn.to }),
           differsFromDocument: event.differs,
         })
         .where(eq(bills.id, event.billId));
