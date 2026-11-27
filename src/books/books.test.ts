@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
 import { auditLog, bills, expenses, refunds, writeOffs } from "@/src/db/schema";
 import { createBooks, lockClaimant, type Result } from "./books";
-import type { Actor, Command, LogExpense } from "./core";
+import { type Actor, type Command, type LogExpense, MAKERSPACE } from "./core";
 
 // Scenario tests through Books' Interface against a real Postgres (DATABASE_URL), design §1.
 // Every test uses fresh Claimants, so counts are exact while other test files share the database.
@@ -945,7 +945,10 @@ describe("Authorization at the Actor Seam", () => {
     const expected = ok(await books.execute(actor, { type: "ExpectRefund", billId: placed.expectedBillId, amount: rupees(50000) }));
     const refund = expected.events.find((e) => e.type === "RefundExpected");
     if (refund?.type !== "RefundExpected") throw new Error("expected RefundExpected");
-    return { ...placed, deliveredBillId: added.billId, refundId: refund.refundId };
+    // The owner's own Purpose in Makerspace, made after the Order so the Order is in none: CorrectExpense links to it.
+    const made = ok(await books.execute(actor, { type: "CreatePurpose", name: "Robotics trip", fundId: MAKERSPACE })).events[0];
+    if (made?.type !== "PurposeCreated") throw new Error("expected PurposeCreated");
+    return { ...placed, deliveredBillId: added.billId, refundId: refund.refundId, purposeId: made.purposeId };
   };
   type Target = Awaited<ReturnType<typeof books3000>>;
 
@@ -957,7 +960,7 @@ describe("Authorization at the Actor Seam", () => {
     CancelBill: { type: "CancelBill", billId: t.expectedBillId },
     ReturnBill: { type: "ReturnBill", billId: t.deliveredBillId },
     MarkRefundReceived: { type: "MarkRefundReceived", refundId: t.refundId, refundedOn: "2026-11-25" },
-    CorrectExpense: { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000) },
+    CorrectExpense: { type: "CorrectExpense", expenseId: t.expenseId, amount: rupees(310000), purposeId: t.purposeId, whatFor: "PLA filament" },
     CorrectBill: { type: "CorrectBill", billId: t.deliveredBillId, remarks: "Edited" },
     ConfirmDiffers: { type: "ConfirmDiffers", billId: t.deliveredBillId },
     CloseExpense: { type: "CloseExpense", expenseId: t.expenseId, reason: "personal", refunds: { [t.refundId]: "expected" } },
@@ -1213,7 +1216,7 @@ describe("Authorization at the Actor Seam", () => {
   // and a role-less Actor, trying the same command and reads on Mickey's books before each step, get not_found or
   // forbidden and change nothing: no entry is written with Mickey as owner, and the two worlds never drift apart.
   it("property: an admin acts as the owner would; another Claimant and a role-less Actor never see or change the owner's data", async () => {
-    const names = Object.keys(everyCommand({ expenseId: "x", expectedBillId: "x", deliveredBillId: "x", refundId: "x" })) as Command["type"][];
+    const names = Object.keys(everyCommand({ expenseId: "x", expectedBillId: "x", deliveredBillId: "x", refundId: "x", purposeId: "x" })) as Command["type"][];
     const ids = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\b[EBRO]-\d+\b/gi;
     const same = (x: unknown) => JSON.stringify(x).replace(ids, "#");
     const ownerRows = async (owner: Actor) => (await db.select({ n: count() }).from(auditLog).where(eq(auditLog.ownerId, owner.claimantId)))[0]!.n;
@@ -1222,7 +1225,11 @@ describe("Authorization at the Actor Seam", () => {
       names.map(async (_, start) => {
         const [mickey, dexter, minnie, courage] = [claimant(), claimant(), admin(), claimant()];
         const roleless: Actor = { ...mickey, roles: [] };
-        const world = async (actor: Actor, owner: Actor) => ({ actor, owner, t: await books3000(owner), other: (await order(owner, 500000)).expenseId });
+        const world = async (actor: Actor, owner: Actor) => {
+          // An admin's LogExpense is the admin's own, so it goes into the admin's own one active Purpose, as the owner's goes into theirs.
+          if (actor !== owner) ok(await books.execute(actor, { type: "CreatePurpose", name: "Robotics trip", fundId: MAKERSPACE }));
+          return { actor, owner, t: await books3000(owner), other: (await order(owner, 500000)).expenseId };
+        };
         const worlds = await Promise.all([world(mickey, mickey), world(minnie, dexter)]);
         const [own, admins] = worlds as [(typeof worlds)[number], (typeof worlds)[number]];
         const view = (reader: Actor, w: typeof own) =>
@@ -1248,8 +1255,8 @@ describe("Authorization at the Actor Seam", () => {
           expect(same(theirs)).toBe(same(mine));
         }
         expect(await view(dexter, admins)).toEqual(await view(minnie, admins));
-        // Every entry the admin wrote names the admin as actor and Dexter as owner, but the admin's own LogExpense.
-        for (const row of await auditRowsOf(minnie)) expect(row.ownerId).toBe(row.command === "LogExpense" ? minnie.claimantId : dexter.claimantId);
+        // Every entry the admin wrote names the admin as actor and Dexter as owner, but the admin's own LogExpense and Purpose.
+        for (const row of await auditRowsOf(minnie)) expect(row.ownerId).toBe(["LogExpense", "CreatePurpose"].includes(row.command) ? minnie.claimantId : dexter.claimantId);
       }),
     );
     // Every command is accepted somewhere, so the comparison is never only of refusals; but CorrectBill and
