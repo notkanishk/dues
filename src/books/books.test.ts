@@ -932,7 +932,7 @@ describe("The Order page", () => {
 // identity-access "Role gate" and "Admin sees everything", design D5 and D6: the Actor is the only input that decides
 // identity, and every command and query goes through the one Seam.
 describe("Authorization at the Actor Seam", () => {
-  const admin = (): Actor => ({ claimantId: randomUUID(), roles: ["admin"], via: "session" });
+  const admin = (): Actor => ({ claimantId: randomUUID(), roles: ["claimant", "admin"], via: "session" });
 
   // One Claimant's Order with a delivered Bill, its expected remainder and an expected Refund, so every command has a target.
   const books3000 = async (actor: Actor) => {
@@ -973,11 +973,11 @@ describe("Authorization at the Actor Seam", () => {
     expenses: await expensesOf(owner),
   });
 
-  it("Missing role and Role removed: an Actor without claimant or admin is forbidden from every command and query, its own data included", async () => {
+  it("Missing role and Role removed: an Actor without claimant, an admin-only one included, is forbidden from every command and query, its own data included", async () => {
     const mickey = claimant();
     const t = await books3000(mickey);
     const before = await snapshot(mickey, t);
-    for (const roles of [[], ["approver"]]) {
+    for (const roles of [[], ["approver"], ["admin"]]) {
       const removed: Actor = { ...mickey, roles };
       for (const command of Object.values(everyCommand(t))) {
         expect(await books.execute(removed, command), command.type).toEqual({ ok: false, reason: "forbidden" });

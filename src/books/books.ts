@@ -44,10 +44,10 @@ export const lockClaimant = (tx: Tx, claimantId: string) =>
 const notFound: Rejected = { ok: false, reason: "not_found" };
 const forbidden: Rejected = { ok: false, reason: "forbidden" };
 /**
- * The role gate (identity-access): `claimant` opens the Actor's own books, `admin` everyone's (D6). Anything else is
- * forbidden from every command and query before a row is read, so not even existence leaks.
+ * The role gate (identity-access): only `claimant` opens Books; `admin` never opens it alone, it only widens the scope (D6).
+ * Anything else is forbidden from every command and query before a row is read, so not even existence leaks.
  */
-const mayEnter = (actor: Actor) => actor.roles.includes("claimant") || actor.roles.includes("admin");
+const mayEnter = (actor: Actor) => actor.roles.includes("claimant");
 /** The ownership filter: an admin passes it (D6); anyone else sees only their own Expenses. */
 const scope = (actor: Actor) => (actor.roles.includes("admin") ? undefined : eq(expenses.claimantId, actor.claimantId));
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
