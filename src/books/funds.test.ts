@@ -367,3 +367,97 @@ describe("Funds on the upload prompt", () => {
     expect(await hint(dexter)).toEqual({ id: travel, name: "Travel grant", whatForHint: "e.g. bus fare" });
   });
 });
+
+describe("Fund access, Actor by Fund state", () => {
+  type Who = "creator" | "other" | "admin";
+  type State = "private" | "team" | "archived";
+  const N = { ok: true } as const;
+  const nf = { ok: false, reason: "not_found" } as const;
+  const no = { ok: false, reason: "forbidden" } as const;
+  const iv = { ok: false, reason: "invalid_transition" } as const;
+  type Outcome = typeof N | typeof nf | typeof no | typeof iv;
+  // Hand-typed from identity-access "Fund sharing and edit rights" and design D6. Reset runs after the Actor's own
+  // SetPersonalVersion, so it resets that. "archived" is a team Fund, archived.
+  const expected: Record<string, Record<State, Record<Who, Outcome>>> = {
+    EditFund: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: no, admin: N }, archived: { creator: N, other: no, admin: N } },
+    ShareFund: { private: { creator: N, other: nf, admin: N }, team: { creator: iv, other: no, admin: iv }, archived: { creator: iv, other: no, admin: iv } },
+    ArchiveFund: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: no, admin: N }, archived: { creator: iv, other: no, admin: iv } },
+    SetPersonalVersion: { private: { creator: iv, other: nf, admin: iv }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
+    ResetToTeamVersion: { private: { creator: iv, other: nf, admin: iv }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
+    HideFund: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
+    OrderFunds: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
+    fundTemplates: { private: { creator: N, other: nf, admin: N }, team: { creator: N, other: N, admin: N }, archived: { creator: N, other: N, admin: N } },
+  };
+  const PER_CLAIMANT = ["SetPersonalVersion", "ResetToTeamVersion", "HideFund", "OrderFunds", "fundTemplates"];
+
+  it("table: what creator, another Claimant and an admin may do to a private, team and archived Fund; a refusal or a per-Claimant command never changes what a bystander sees", async () => {
+    const cells = Object.entries(expected).flatMap(([op, byState]) =>
+      (Object.keys(byState) as State[]).flatMap((state) => (["creator", "other", "admin"] as Who[]).map((who) => ({ op, state, who }))),
+    );
+    await Promise.all(
+      cells.map(async ({ op, state, who }) => {
+        const [creator, other, minnie, courage] = [claimant(), claimant(), admin(), claimant()];
+        const fundId = await created(creator);
+        if (state !== "private") ok(await books.execute(creator, { type: "ShareFund", fundId }));
+        if (state === "archived") ok(await books.execute(creator, { type: "ArchiveFund", fundId }));
+        const actor = { creator, other, admin: minnie }[who];
+        if (op === "ResetToTeamVersion" && state !== "private") ok(await books.execute(actor, { type: "SetPersonalVersion", fundId, fileNamePattern: "{n}" }));
+        const bystander = async () => [(await listed(courage)).find((f) => f.id === fundId), await books.fundTemplates(courage, fundId)];
+        const [seen, rows] = [await bystander(), (await auditOf(fundId)).length];
+
+        const result =
+          op === "fundTemplates"
+            ? await books.fundTemplates(actor, fundId)
+            : await books.execute(
+                actor,
+                op === "EditFund" ? { type: op, fundId, name: "Renamed" }
+                : op === "SetPersonalVersion" ? { type: op, fundId, whatForHint: "e.g. mine" }
+                : op === "HideFund" ? { type: op, fundId, hidden: true }
+                : op === "OrderFunds" ? { type: op, fundIds: [fundId] }
+                : { type: op as "ShareFund" | "ArchiveFund" | "ResetToTeamVersion", fundId },
+              );
+        const want = expected[op]![state][who];
+        const label = `${op} on a ${state} Fund by ${who}`;
+        expect(want.ok ? { ok: result.ok } : result, label).toEqual(want);
+        if (!want.ok || PER_CLAIMANT.includes(op)) expect(await bystander(), label).toEqual(seen);
+        if (!want.ok) expect((await auditOf(fundId)).length, label).toBe(rows);
+        if (result.ok && ["EditFund", "ShareFund", "ArchiveFund"].includes(op))
+          expect((await auditOf(fundId)).at(-1), label).toMatchObject({ actorId: actor.claimantId, ownerId: creator.claimantId, command: op });
+      }),
+    );
+  }, 60_000);
+});
+
+describe("Fund commands in Books' shell", () => {
+  it("a role-less Actor is forbidden from every Fund command and query", async () => {
+    const roleless: Actor = { claimantId: randomUUID(), roles: ["admin"], via: "session" };
+    expect(await books.execute(roleless, travelGrant())).toEqual({ ok: false, reason: "forbidden" });
+    expect(await books.execute(roleless, { type: "EditFund", fundId: MAKERSPACE, name: "x" })).toEqual({ ok: false, reason: "forbidden" });
+    expect(await books.funds(roleless)).toEqual({ ok: false, reason: "forbidden" });
+    expect(await books.promptFunds(roleless)).toEqual({ ok: false, reason: "forbidden" });
+    expect(await books.fundTemplates(roleless, MAKERSPACE)).toEqual({ ok: false, reason: "forbidden" });
+  });
+
+  it("a repeated idempotency key returns the first result and creates one Fund", async () => {
+    const mickey = claimant();
+    const key = `fund-${randomUUID()}`;
+    const [first, again] = [await books.execute(mickey, travelGrant(), { idempotencyKey: key }), await books.execute(mickey, travelGrant(), { idempotencyKey: key })];
+    expect(again).toEqual(first);
+    const made = await db.select().from(auditLog).where(eq(auditLog.actorId, mickey.claimantId));
+    expect(made.map((e) => e.event)).toEqual(["FundCreated"]);
+    expect(await books.execute(mickey, travelGrant({ name: "Other" }), { idempotencyKey: key })).toEqual({ ok: false, reason: "idempotency_conflict" });
+  });
+
+  it("the creator's and an admin's edits at once queue on the creator's lock: both land and the team version counts both", async () => {
+    const [mickey, minnie] = [claimant(), admin()];
+    const fundId = await created(mickey);
+    ok(await books.execute(mickey, { type: "ShareFund", fundId }));
+    await Promise.all([
+      books.execute(mickey, { type: "EditFund", fundId, fileNamePattern: "{n} a" }),
+      books.execute(minnie, { type: "EditFund", fundId, whatForHint: "e.g. b" }),
+    ]);
+    const edits = (await auditOf(fundId)).filter((e) => e.event === "FundEdited").map((e) => (e.payload as { teamVersion: number }).teamVersion);
+    expect(edits.sort()).toEqual([2, 3]);
+    expect((await listed(mickey)).find((f) => f.id === fundId)?.teamVersion).toMatchObject({ fileNamePattern: "{n} a", whatForHint: "e.g. b" });
+  });
+});
