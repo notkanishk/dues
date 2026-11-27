@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import { eq, TransactionRollbackError } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "./index";
@@ -270,5 +271,14 @@ describe("Audit log", () => {
     await refusedWith(APPEND_ONLY, db.delete(auditLog).where(eq(auditLog.id, entry!.id)));
     const [found] = await db.select().from(auditLog).where(eq(auditLog.id, entry!.id));
     expect(found?.toState).toBe("open");
+  });
+
+  // "MUST NOT be edited", with no migration exception: no migration lifts the trigger or edits an entry.
+  it("is never edited or deleted by a migration either", () => {
+    const dir = new URL("../../drizzle/", import.meta.url);
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql"))) {
+      const statements = readFileSync(new URL(file, dir), "utf8").replace(/--.*$/gm, "");
+      expect(statements, file).not.toMatch(/DISABLE\s+TRIGGER|(UPDATE|DELETE\s+FROM)\s+"?audit_log"?/i);
+    }
   });
 });
