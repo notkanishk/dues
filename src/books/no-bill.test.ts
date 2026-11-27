@@ -106,6 +106,15 @@ describe("Entry without a bill", () => {
     expect(await read(mickey, expenseId)).toMatchObject({ bills: [{ remarks: "No bill (auto fare)" }] });
   });
 
+  it("Editable until submitted: the date moved to 20 Nov moves its No bill's Fulfilled date too, audited", async () => {
+    const mickey = claimant();
+    const { expenseId, billId } = await added(mickey);
+    ok(await books.execute(mickey, { type: "CorrectExpense", expenseId, paidOn: "2026-11-20" }));
+    expect(await read(mickey, expenseId)).toMatchObject({ paidOn: "2026-11-20", bills: [{ fulfilledOn: "2026-11-20", status: "ready" }] });
+    const audit = await db.select().from(auditLog).where(eq(auditLog.entityId, billId)).orderBy(auditLog.id);
+    expect(audit.at(-1)).toMatchObject({ command: "CorrectExpense", event: "BillCorrected", payload: { changes: { fulfilledOn: { from: "2026-11-27", to: "2026-11-20" } } } });
+  });
+
   it("Counts against the Advance: a ₹60.00 entry in Makerspace with ₹10,000.00 on leaves ₹9,940.00", async () => {
     const mickey = claimant();
     ok(await books.execute(mickey, { type: "SetAdvance", fundId: MAKERSPACE, total: rupees(1_000_000) }));

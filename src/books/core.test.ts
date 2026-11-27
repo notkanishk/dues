@@ -195,6 +195,23 @@ describe("decide LogNoBillEntry", () => {
     }
   });
 
+  it("Editable until submitted: the date 20 → 19 Nov moves its No bill's Fulfilled date too; with the amount, in one Bill correction", () => {
+    const { decision, slice } = run(entry(), correct({ paidOn: "2026-11-19" }));
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [
+        { type: "ExpenseCorrected", expenseId: "e-1", changes: { paidOn: { from: "2026-11-20", to: "2026-11-19" } } },
+        { type: "BillCorrected", billId: "b-1", expenseId: "e-1", changes: { fulfilledOn: { from: "2026-11-20", to: "2026-11-19" } }, differs: false },
+      ],
+    });
+    expect(slice.expenses["e-1"]!.bills[0]).toMatchObject({ fulfilledOn: "2026-11-19" });
+    expect(run(entry(), correct({ amount: rupees(7000), paidOn: "2026-11-19" })).decision).toMatchObject({
+      ok: true,
+      events: [{}, { type: "BillCorrected", changes: { amount: { from: rupees(6000), to: rupees(7000) }, fulfilledOn: { from: "2026-11-20", to: "2026-11-19" } } }],
+    });
+  });
+
   it("Edit blocked after submission: on a submitted Claim its amount, date, payee, Payment method and remarks are locked", () => {
     const slice = entry();
     slice.expenses["e-1"]!.bills[0]!.claim = "submitted";
