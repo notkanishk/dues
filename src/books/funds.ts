@@ -441,7 +441,16 @@ export async function advancesOf(q: Q, actor: Actor) {
           .from(expenses)
           // A duplicate is the same payment logged twice (FUNCTIONAL §7), so it is no Payment; personal and written off
           // stay spent (W2.9).
-          .where(and(eq(expenses.claimantId, actor.claimantId), inArray(expenses.fundId, on), sql`${expenses.closedReason} is distinct from 'duplicate'`))
+          // ponytail: drafts are held out too; the spec is silent. Owner question: does an unconfirmed draft Expense
+          // lower Advance left? If yes, drop the draft condition.
+          .where(
+            and(
+              eq(expenses.claimantId, actor.claimantId),
+              inArray(expenses.fundId, on),
+              eq(expenses.draft, false),
+              sql`${expenses.closedReason} is distinct from 'duplicate'`,
+            ),
+          )
           .groupBy(expenses.fundId),
         q
           .select({ fundId: expenses.fundId, paise: sql<string | null>`sum(${refunds.amountPaise})` })
