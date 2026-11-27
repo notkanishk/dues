@@ -124,10 +124,12 @@ function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateEx
   const { amount, paidOn } = facts;
   if (amount && paidOn) {
     const off = (e: CandidateExpense) => Math.abs(minus(amount, e.payment ?? amount).paise);
+    const fit = (a: CandidateExpense, b: CandidateExpense) => off(a) - off(b) || daysApart(a.paidOn, paidOn) - daysApart(b.paidOn, paidOn);
     const proof = sorted
       .filter((e) => e.invoiceOnly && e.payment && off(e) <= config.proofTolerancePaise && daysApart(e.paidOn, paidOn) <= config.proofWindowDays && payeeMatches(facts, e))
-      .sort((a, b) => off(a) - off(b) || daysApart(a.paidOn, paidOn) - daysApart(b.paidOn, paidOn));
-    if (proof.length > 0) return { type: "attachProof", expenseId: proof[0].id };
+      .sort(fit);
+    // Two that fit equally well: attaching to either would be a guess, so fall through to the suggestions below.
+    if (proof.length > 0 && (proof.length === 1 || fit(proof[0], proof[1]) < 0)) return { type: "attachProof", expenseId: proof[0].id };
 
     const merge = mergeFor(amount, paidOn, sorted, config);
     if (merge) return { type: "mergeSuggestion", expenseIds: merge };
