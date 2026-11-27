@@ -1,5 +1,6 @@
 // Funds inside Books (design §1 lists the Fund command family there): pure rules first, then the shell's loads, writes
 // and reads. Claims, Purposes and the Advance read Funds in Books' transaction, so they live under the same Actor Seam.
+import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { funds, fundSettings, fundVersions } from "@/src/db/schema";
@@ -148,15 +149,17 @@ const invalidField = (command: Partial<TeamFields>, keys: readonly (keyof TeamFi
   keys.find((k) => (k === "mail" ? !validMail(command.mail) : k === "name" ? command.name !== undefined && !command.name?.trim() : !isText(command[k])));
 const TEAM_FIELDS = ["name", "notes", "claimNamePattern", ...OVERRIDABLE] as const satisfies readonly (keyof TeamFields)[];
 
-/** Only the fields given, and only those whose value changes. */
+/** Only the fields given, and only those whose value changes (compared as values: jsonb does not keep key order). */
 function changesOf<T extends object>(from: T, command: Partial<T>, keys: readonly (keyof T)[]): Changes<T> {
   const out: Record<string, Change<unknown>> = {};
   for (const k of keys) {
     const to = command[k];
-    if (to !== undefined && JSON.stringify(to) !== JSON.stringify(from[k])) out[k as string] = { from: from[k], to };
+    if (to !== undefined && !isDeepStrictEqual(to, from[k])) out[k as string] = { from: from[k], to };
   }
   return out as Changes<T>;
 }
+
+const valuesOf = <T>(changes: Changes<T>) => Object.fromEntries(Object.entries(changes).map(([k, c]) => [k, (c as Change<unknown>).to]));
 
 /** Pure: what a Fund command does, given the Funds it names as the Actor can reach them (absent = not_found). */
 export function decideFund(slice: FundSlice, command: FundCommand, actor: Actor): FundDecision {
@@ -207,7 +210,12 @@ export function decideFund(slice: FundSlice, command: FundCommand, actor: Actor)
       if (bad) return reject("validation", bad);
       const mine: Overridable = fund.mine ?? { mail: null, formTemplate: null, fileNamePattern: null, whatForHint: null };
       const changes = changesOf(mine, command, OVERRIDABLE);
-      if (Object.keys(changes).length === 0 && fund.mine) return ok();
+      const after = { ...mine, ...valuesOf(changes) };
+      // A version that overrides nothing is no version: the Claimant is on the team version.
+      if (OVERRIDABLE.every((k) => after[k] === null))
+        return fund.mine ? ok({ type: "PersonalVersionReset", fundId: fund.id, claimantId: actor.claimantId }) : ok();
+      // Saved unchanged ("Keep mine") it still moves to the current team version, so Team version updated is acknowledged.
+      if (Object.keys(changes).length === 0 && fund.mine?.basedOn === fund.teamVersion) return ok();
       return ok({ type: "PersonalVersionSet", fundId: fund.id, claimantId: actor.claimantId, changes, basedOn: fund.teamVersion });
     }
     case "ResetToTeamVersion":
@@ -283,8 +291,6 @@ export function fundEntries(slice: FundSlice, events: readonly FundEvent[], acto
     };
   });
 }
-
-const valuesOf = <T>(changes: Changes<T>) => Object.fromEntries(Object.entries(changes).map(([k, c]) => [k, (c as Change<unknown>).to]));
 
 export async function writeFund(tx: Tx, event: FundEvent, at: Date) {
   switch (event.type) {
