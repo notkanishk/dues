@@ -69,19 +69,38 @@ const sameRef = (a: string | null, b: string | null) => a !== null && b !== null
 
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id, "en", { numeric: true });
 
-type Fit = { e: CandidateExpense; order: boolean; vendor: boolean; days: number };
+type Fit = { e: CandidateExpense; order: boolean; vendor: boolean; exact: boolean; days: number; auto: boolean };
 
-/** Better fit first: order number, then vendor, then the nearer date, then the lower Expense ID. */
-const betterFit = (a: Fit, b: Fit) => Number(b.order) - Number(a.order) || Number(b.vendor) - Number(a.vendor) || a.days - b.days || byId(a.e, b.e);
+/** Better fit first: order number, then vendor, then the exact amount, then the nearer date, then the lower Expense ID. */
+const betterFit = (a: Fit, b: Fit) =>
+  Number(b.order) - Number(a.order) || Number(b.vendor) - Number(a.vendor) || Number(b.exact) - Number(a.exact) || a.days - b.days || byId(a.e, b.e);
 
 export function propose(facts: DocumentFacts, candidates: readonly CandidateExpense[], config: MatchingConfig = MATCHING): Proposal {
-  const fits: Fit[] = candidates
-    .map((e) => ({ e, order: sameRef(facts.orderRef, e.orderRef), vendor: shopMatches(facts.vendor, e), days: daysApart(e.paidOn, facts.billDate) }))
-    .filter((f) => f.e.openAmount.paise === facts.total.paise && f.days <= config.billWindowDays)
+  // An exact Expense ID needs no matching (FUNCTIONAL W2.4).
+  const named = candidates.find((e) => sameRef(facts.expenseId, e.id));
+  if (named) return { type: "attach", expenseId: named.id };
+
+  const shop = facts.platform ?? facts.vendor; // a marketplace's seller is detail
+  const fits = candidates
+    .map((e) => {
+      const days = daysApart(e.paidOn, facts.billDate);
+      const inWindow = days <= config.billWindowDays;
+      const exact = e.openAmount.paise === facts.total.paise;
+      const smaller = e.kind === "online" && e.openAmount.paise > facts.total.paise;
+      const order = sameRef(facts.orderRef, e.orderRef);
+      const fit = { e, order, vendor: shopMatches(shop, e), exact, days, auto: false };
+      // A candidate: exact amount in the window, a larger online Order in the window, or the same order number.
+      return (inWindow && (exact || smaller)) || order ? { ...fit, auto: inWindow && (exact || smaller) && (order || fit.vendor) } : null;
+    })
+    .filter((f): f is Fit => f !== null)
     .sort(betterFit);
   if (fits.length === 0) return { type: "newExpense", askVendor: facts.vendor === null };
-  const strong = fits.filter((f) => f.order || f.vendor);
-  if (fits.length === 1 || strong.length === 1) return { type: "attach", expenseId: (strong[0] ?? fits[0]).e.id };
+
+  // "Exactly one candidate" counts every candidate, larger Orders included.
+  const auto = fits.filter((f) => f.auto || (fits.length === 1 && f.exact && f.days <= config.billWindowDays));
+  const byOrder = auto.filter((f) => f.order);
+  const chosen = byOrder.length === 1 ? byOrder[0] : auto.length === 1 ? auto[0] : null;
+  if (chosen) return { type: "attach", expenseId: chosen.e.id };
   const [best, ...rest] = fits;
   return { type: "attachWithCheck", expenseId: best.e.id, others: rest.map((f) => f.e.id) };
 }
