@@ -1,11 +1,17 @@
 // Matching (design §2): which Expense a document belongs to. Pure: no database, no clock, no I/O.
 // Only caller: Books, inside LogDocument, under the Claimant's lock (D5). Candidates are the Claimant's own.
-import type { Money } from "../money/money";
+import { type Money, minus } from "../money/money";
 
 /** Matching thresholds, named in one place (design §1 Config). */
 export const MATCHING = {
   /** A bill's date may be this many days either side of the Expense's paid-on date. */
   billWindowDays: 10,
+  /** A late payment confirmation's amount may differ from the invoice-only Expense's Payment by this many paise (±₹1). */
+  proofTolerancePaise: 100,
+  /** …and its date from the Expense's paid-on date by this many days. */
+  proofWindowDays: 10,
+  /** Two reference-less confirmations this many minutes apart are offered as the same payment. */
+  samePaymentMinutes: 10,
 } as const;
 
 export type MatchingConfig = { readonly [K in keyof typeof MATCHING]: number };
@@ -21,7 +27,18 @@ export type BillFacts = {
   readonly expenseId: string | null; // set on uploads that already know their Expense
 };
 
-export type DocumentFacts = BillFacts;
+/** What was read from a payment confirmation. */
+export type PaymentFacts = {
+  readonly type: "payment";
+  readonly amount: Money | null; // null: couldn't read
+  readonly paidOn: string | null;
+  readonly payee: string | null;
+  readonly payeeStandsFor: readonly string[]; // learned aliases: vendors this payee has stood for
+  readonly reference: string | null; // UPI reference, UTR or transaction ID; null: none readable
+  readonly receivedAt: string; // ISO instant the confirmation arrived (the "now" of this decision)
+};
+
+export type DocumentFacts = BillFacts | PaymentFacts;
 
 /** The slice of one of the Claimant's Expenses that matching reads. */
 export type CandidateExpense = {
@@ -43,6 +60,8 @@ export type CandidateExpense = {
 export type Proposal =
   | { readonly type: "attach"; readonly expenseId: string }
   | { readonly type: "attachWithCheck"; readonly expenseId: string; readonly others: readonly string[] }
+  | { readonly type: "attachProof"; readonly expenseId: string }
+  | { readonly type: "samePaymentSuggestion"; readonly expenseId: string }
   | { readonly type: "newExpense"; readonly askVendor: boolean };
 
 const DAY_MS = 86_400_000;
@@ -65,6 +84,9 @@ const sameName = (a: string | null, b: string | null) => a !== null && b !== nul
 /** The bill's shop is one of the Expense's vendor, its payee, or a vendor its payee has stood for. */
 const shopMatches = (shop: string | null, e: CandidateExpense) => [e.vendor, e.payee, ...e.payeeStandsFor].some((name) => sameName(name, shop));
 
+/** A confirmation's payee is the Expense's vendor, or a vendor that payee has stood for. */
+const payeeMatches = (facts: PaymentFacts, e: CandidateExpense) => [facts.payee, ...facts.payeeStandsFor].some((name) => sameName(name, e.vendor));
+
 const sameRef = (a: string | null, b: string | null) => a !== null && b !== null && a.trim() !== "" && a.trim() === b.trim();
 
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id, "en", { numeric: true });
@@ -75,7 +97,45 @@ type Fit = { e: CandidateExpense; order: boolean; vendor: boolean; exact: boolea
 const betterFit = (a: Fit, b: Fit) =>
   Number(b.order) - Number(a.order) || Number(b.vendor) - Number(a.vendor) || Number(b.exact) - Number(a.exact) || a.days - b.days || byId(a.e, b.e);
 
+/**
+ * Which of the Claimant's candidate Expenses a document belongs to. Deterministic: the same facts and candidates,
+ * in any order, give the same Proposal. Never names an Expense outside `candidates`.
+ */
 export function propose(facts: DocumentFacts, candidates: readonly CandidateExpense[], config: MatchingConfig = MATCHING): Proposal {
+  return facts.type === "bill" ? proposeForBill(facts, candidates, config) : proposeForPayment(facts, candidates, config);
+}
+
+const NEW_EXPENSE = { type: "newExpense", askVendor: false } as const;
+const MINUTE_MS = 60_000;
+
+function proposeForPayment(facts: PaymentFacts, candidates: readonly CandidateExpense[], config: MatchingConfig): Proposal {
+  const sorted = [...candidates].sort(byId);
+  // The same transaction reference is the same Payment.
+  const same = sorted.find((e) => e.references.some((r) => sameRef(facts.reference, r)));
+  if (same) return { type: "attachProof", expenseId: same.id };
+
+  // Invoice before payment: a late confirmation completes an invoice-only Expense.
+  const { amount, paidOn } = facts;
+  if (amount && paidOn) {
+    const off = (e: CandidateExpense) => Math.abs(minus(amount, e.payment ?? amount).paise);
+    const proof = sorted
+      .filter((e) => e.invoiceOnly && e.payment && off(e) <= config.proofTolerancePaise && daysApart(e.paidOn, paidOn) <= config.proofWindowDays && payeeMatches(facts, e))
+      .sort((a, b) => off(a) - off(b) || daysApart(a.paidOn, paidOn) - daysApart(b.paidOn, paidOn));
+    if (proof.length > 0) return { type: "attachProof", expenseId: proof[0].id };
+  }
+
+  // Neither of two confirmations carries a reference: offer the nearer one in time, never merge.
+  if (facts.reference === null) {
+    const gap = (e: CandidateExpense) => Math.abs(Date.parse(facts.receivedAt) - Date.parse(e.proofReceivedAt!));
+    const twin = sorted
+      .filter((e) => e.references.length === 0 && e.proofReceivedAt !== null && gap(e) <= config.samePaymentMinutes * MINUTE_MS)
+      .sort((a, b) => gap(a) - gap(b));
+    if (twin.length > 0) return { type: "samePaymentSuggestion", expenseId: twin[0].id };
+  }
+  return NEW_EXPENSE;
+}
+
+function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[], config: MatchingConfig): Proposal {
   // An exact Expense ID needs no matching (FUNCTIONAL W2.4).
   const named = candidates.find((e) => sameRef(facts.expenseId, e.id));
   if (named) return { type: "attach", expenseId: named.id };
