@@ -71,6 +71,24 @@ describe("Auto-attach only on a strong match, anything else raises a Check", () 
       [expense("E-201", gateway), expense("E-202", { payee: "SAMPLE TOOLS PVT. LTD." })],
       { type: "attach", expenseId: "E-202" },
     ],
+    [
+      "a leading \"the\" and trailing legal words aside, the names are equal",
+      bill({ vendor: "The Sample Tools Private Limited" }),
+      [expense("E-203", gateway), expense("E-204", { vendor: "Sample Tools LLP" })],
+      { type: "attach", expenseId: "E-204" },
+    ],
+    [
+      "\"The Hardware Co\" is not \"Hardware Ltd\": \"Co\" is part of the name",
+      bill({ vendor: "The Hardware Co" }),
+      [expense("E-205", { vendor: "Hardware Ltd" }), expense("E-206", { ...gateway, paidOn: "2026-03-04" })],
+      { type: "attachWithCheck", expenseId: "E-206", others: ["E-205"] },
+    ],
+    [
+      "legal words mid-name are kept: \"Private Label Tools\" is not \"Label Tools Ltd\"",
+      bill({ vendor: "Private Label Tools" }),
+      [expense("E-207", { vendor: "Label Tools Ltd" }), expense("E-208", { ...gateway, paidOn: "2026-03-04" })],
+      { type: "attachWithCheck", expenseId: "E-208", others: ["E-207"] },
+    ],
     ["single candidate, vendor differs (a gateway payee)", bill(), [expense("E-201", gateway)], { type: "attach", expenseId: "E-201" }],
     [
       "order number matches one of two candidates",
