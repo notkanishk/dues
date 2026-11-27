@@ -104,10 +104,9 @@ const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id, 
 
 type Fit = { e: CandidateExpense; order: boolean; vendor: boolean; exact: boolean; inWindow: boolean; days: number; auto: boolean };
 
-/** Better fit first (amount leads, vendor soft): the exact amount in the window, then vendor or order number, then the nearer date, then the lower Expense ID. */
+/** Better fit first: an order number match (the spec prefers it), then the exact amount in the window, then the vendor, then the nearer date, then the lower Expense ID. */
 const lead = (f: Fit) => Number(f.exact && f.inWindow);
-const matched = (f: Fit) => Number(f.order || f.vendor);
-const betterFit = (a: Fit, b: Fit) => lead(b) - lead(a) || matched(b) - matched(a) || a.days - b.days || byId(a.e, b.e);
+const betterFit = (a: Fit, b: Fit) => Number(b.order) - Number(a.order) || lead(b) - lead(a) || Number(b.vendor) - Number(a.vendor) || a.days - b.days || byId(a.e, b.e);
 
 /**
  * Which of the Claimant's candidate Expenses a document belongs to. Deterministic: the same facts and candidates,
