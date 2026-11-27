@@ -178,7 +178,7 @@ describe("Fund sharing and edit rights", () => {
     const [mickey, minnie] = [claimant(), admin()];
     const fundId = await created(mickey);
     expect((await listed(minnie)).find((f) => f.id === fundId)).toMatchObject({ sharing: "private", mayEditTeam: true });
-    const prompt = await books.promptFunds(minnie);
+    const prompt = await books.prompt(minnie);
     expect(prompt.ok && prompt.funds.map((f) => f.id)).not.toContain(fundId);
     // Over MCP an admin's Settings hold only their own scope (D6).
     expect((await listed({ ...minnie, via: "mcp" })).map((f) => f.id)).not.toContain(fundId);
@@ -346,7 +346,7 @@ describe("Fund fields", () => {
 
 describe("Funds on the upload prompt", () => {
   const offered = async (actor: Actor, ids: string[]) => {
-    const read = await books.promptFunds(actor);
+    const read = await books.prompt(actor);
     if (!read.ok) throw new Error("expected prompt");
     return only(ids, read.funds);
   };
@@ -354,7 +354,7 @@ describe("Funds on the upload prompt", () => {
   it("Default order: a Claimant who has not ordered their Funds gets Makerspace first, then their Funds oldest first", async () => {
     const mickey = claimant();
     const [first, second] = [await created(mickey, { name: "Travel grant" }), await created(mickey, { name: "Robotics club" })];
-    const read = await books.promptFunds(mickey);
+    const read = await books.prompt(mickey);
     if (!read.ok) throw new Error("expected prompt");
     expect(read.funds[0]?.id).toBe(MAKERSPACE);
     expect(only([MAKERSPACE, first, second], read.funds)).toEqual([MAKERSPACE, first, second]);
@@ -408,7 +408,7 @@ describe("Funds on the upload prompt", () => {
     ok(await books.execute(mickey, { type: "ShareFund", fundId: travel }));
     ok(await books.execute(dexter, { type: "SetPersonalVersion", fundId: travel, whatForHint: "e.g. bus fare" }));
     const hint = async (actor: Actor) => {
-      const read = await books.promptFunds(actor);
+      const read = await books.prompt(actor);
       return read.ok ? read.funds.find((f) => f.id === travel) : undefined;
     };
     expect(await hint(mickey)).toEqual({ id: travel, name: "Travel grant", whatForHint: "e.g. soldering supplies" });
@@ -510,7 +510,7 @@ describe("Fund commands in Books' shell", () => {
     expect(await books.execute(roleless, travelGrant())).toEqual({ ok: false, reason: "forbidden" });
     expect(await books.execute(roleless, { type: "EditFund", fundId: MAKERSPACE, name: "x" })).toEqual({ ok: false, reason: "forbidden" });
     expect(await books.funds(roleless)).toEqual({ ok: false, reason: "forbidden" });
-    expect(await books.promptFunds(roleless)).toEqual({ ok: false, reason: "forbidden" });
+    expect(await books.prompt(roleless)).toEqual({ ok: false, reason: "forbidden" });
     expect(await books.fundTemplates(roleless, MAKERSPACE)).toEqual({ ok: false, reason: "forbidden" });
   });
 

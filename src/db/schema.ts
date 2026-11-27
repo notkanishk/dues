@@ -41,6 +41,13 @@ export const expenses = pgTable(
     payback: boolean("payback").notNull().default(false),
     orderRef: text("order_ref"),
     whatFor: text("what_for"),
+    // Every Expense is claimed from a Fund (expense-tracking "Expense ownership and fields"). No default: every write
+    // names one (Books' default is the prompt's preselection); migration 0009 back-filled older Expenses with Makerspace.
+    fundId: uuid("fund_id")
+      .notNull()
+      .references((): AnyPgColumn => funds.id),
+    // Optional; a Purpose of the same Fund and the same Claimant (expenses_purpose_fk).
+    purposeId: uuid("purpose_id"),
     upiRef: text("upi_ref"),
     source: text("source"),
     notes: text("notes"),
@@ -53,6 +60,11 @@ export const expenses = pgTable(
     check("expenses_kind", sql`${t.kind} in ('online', 'shop', 'service')`),
     check("expenses_source", sql`${t.source} in ('manual', 'document', 'amazon', 'back-fill')`),
     check("expenses_closed_reason", sql`${t.closedReason} in ('personal', 'duplicate', 'written_off')`),
+    foreignKey({
+      name: "expenses_purpose_fk",
+      columns: [t.purposeId, t.fundId, t.claimantId],
+      foreignColumns: [purposes.id, purposes.fundId, purposes.claimantId],
+    }),
   ],
 );
 
@@ -245,4 +257,20 @@ export const fundSettings = pgTable(
     hidden: boolean("hidden").notNull().default(false),
   },
   (t) => [primaryKey({ columns: [t.claimantId, t.fundId] })],
+);
+
+// Purposes (expense-tracking "Purpose"): an optional group inside a Fund, one Claimant's own. Ending one ("End trip")
+// clears active; its Expenses keep it. (id, fund_id, claimant_id) is the target of the Expense's link, so the database
+// itself refuses a Purpose of another Fund or another Claimant on an Expense.
+export const purposes = pgTable(
+  "purposes",
+  {
+    id: key(),
+    claimantId: uuid("claimant_id").notNull(),
+    fundId: uuid("fund_id").notNull().references(() => funds.id),
+    name: text("name").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [unique("purposes_link_target").on(t.id, t.fundId, t.claimantId), index("purposes_claimant_id_idx").on(t.claimantId)],
 );

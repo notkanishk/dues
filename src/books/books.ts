@@ -2,7 +2,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { auditLog, bills, expenses, idempotencyKeys, refunds, writeOffs } from "@/src/db/schema";
+import { auditLog, bills, expenses, funds as fundsTable, idempotencyKeys, purposes, refunds, writeOffs } from "@/src/db/schema";
 import { type Money, sum } from "@/src/money/money";
 import {
   type Actor,
@@ -23,15 +23,21 @@ import {
   type ExpenseState,
   type ExpenseStatus,
   type Job,
+  type Links,
+  type LogExpense,
+  type CorrectExpense,
+  NO_LINKS,
+  own,
   type RefundReason,
   type RefundStatus,
   type Rejected,
   type Slice,
 } from "./core";
-import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, templatesOf, writeFund } from "./funds";
+import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, isUuid, templatesOf, visible, writeFund } from "./funds";
+import { decidePurpose, isPurposeCommand, listPurposes, promptOf, loadPurposeSlice, type PurposeCommand, type PurposeEvent, purposeEntries, purposeOwners, writePurpose } from "./purposes";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
-export type Result = { readonly ok: true; readonly events: readonly (Event | FundEvent)[] } | Rejected;
+export type Result = { readonly ok: true; readonly events: readonly (Event | FundEvent | PurposeEvent)[] } | Rejected;
 export type Deps = {
   readonly db: NodePgDatabase;
   readonly now: () => Date;
@@ -56,7 +62,6 @@ const mayEnter = (actor: Actor) => actor.roles.includes("claimant");
  */
 const scope = (actor: Actor) => (isAdmin(actor) ? undefined : eq(expenses.claimantId, actor.claimantId));
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const money = (paise: number | null, currency: string): Money | null => (paise === null ? null : { paise, currency: currency as "INR" });
 
 /**
@@ -64,7 +69,7 @@ const money = (paise: number | null, currency: string): Money | null => (paise =
  * simply absent, so callers answer not_found and existence does not leak (design D6). An admin's scope is everyone's.
  */
 async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly string[]) {
-  const wanted = ids.filter((id) => UUID.test(id));
+  const wanted = ids.filter(isUuid);
   if (wanted.length === 0) return [];
   const rows = await q
     .select()
@@ -120,6 +125,8 @@ async function loadExpenses(q: NodePgDatabase | Tx, actor: Actor, ids: readonly 
       payee: row.payee,
       paidOn: row.paidOn,
       whatFor: row.whatFor,
+      fundId: row.fundId,
+      purposeId: row.purposeId,
       bills: ownBills,
       refunds: ownRefunds,
       writtenOff: sum(ownWriteOffs), // Σ written off (FUNCTIONAL §1), every row summed
@@ -162,7 +169,7 @@ async function touches(tx: Tx, command: Command): Promise<[number, string[]]> {
  * anything else is not_found. Read before the lock, so `attempt` checks it again under the lock.
  */
 async function ownersOf(tx: Tx, actor: Actor, command: Command): Promise<string[]> {
-  const wanted = (await touches(tx, command))[1].filter((id) => UUID.test(id));
+  const wanted = (await touches(tx, command))[1].filter(isUuid);
   const rows = wanted.length
     ? await tx.select({ id: expenses.id, owner: expenses.claimantId }).from(expenses).where(and(inArray(expenses.id, wanted), scope(actor)))
     : [];
@@ -177,12 +184,38 @@ async function loadSlice(tx: Tx, actor: Actor, command: Command): Promise<Slice>
   // Keys come from Postgres's uuidv7() (ADR 0005), fetched first so the audit rows can name them.
   const { rows } = await tx.execute<{ id: string }>(sql`select uuidv7() as id from generate_series(1, ${count})`);
   const loaded = await loadExpenses(tx, actor, expenseIds);
-  return { newIds: rows.map((r) => r.id), expenses: Object.fromEntries(loaded.map((e) => [e.state.id, e.state])) };
+  const expenses = Object.fromEntries(loaded.map((e) => [e.state.id, e.state]));
+  // What the Expense's Claimant may link it to: a new one is the Actor's, and goes where the Actor's prompt preselects
+  // when it names neither; a corrected one stays its owner's (an admin's included).
+  let links: Links | undefined;
+  if (command.type === "LogExpense") {
+    const prompt = await promptOf(tx, actor);
+    links = await linksFor(tx, actor.claimantId, command, { fundId: prompt.preselectedFundId, purposeId: prompt.preselectedPurposeId });
+  } else if (command.type === "CorrectExpense") {
+    const owner = own(expenses, command.expenseId)?.claimantId;
+    if (owner) links = await linksFor(tx, owner, command);
+  }
+  return { newIds: rows.map((r) => r.id), expenses, ...(links && { links }) };
+}
+
+/** The Fund and Purpose the command names, if the Expense's Claimant has them (else absent: not_found), and the default. */
+async function linksFor(tx: Tx, claimantId: string, command: LogExpense | CorrectExpense, fallback = NO_LINKS.fallback): Promise<Links> {
+  const [fund] = isUuid(command.fundId)
+    ? await tx.select({ id: fundsTable.id }).from(fundsTable).where(and(eq(fundsTable.id, command.fundId), visible({ claimantId })))
+    : [];
+  const [purpose] = isUuid(command.purposeId)
+    ? await tx.select().from(purposes).where(and(eq(purposes.id, command.purposeId), eq(purposes.claimantId, claimantId)))
+    : [];
+  return {
+    funds: fund ? { [fund.id]: true } : {},
+    purposes: purpose ? { [purpose.id]: { fundId: purpose.fundId } } : {},
+    fallback,
+  };
 }
 
 // Unscoped on purpose: loadExpenses applies the Actor's scope next, so another Claimant's Bill or Refund loads nothing.
 async function expenseOf(tx: Tx, table: typeof bills | typeof refunds, id: string) {
-  if (!UUID.test(id)) return [];
+  if (!isUuid(id)) return [];
   return (await tx.select({ id: table.expenseId }).from(table).where(eq(table.id, id))).map((r) => r.id);
 }
 
@@ -253,6 +286,8 @@ async function write(tx: Tx, event: Event, at: Date) {
         payback: event.payback,
         orderRef: event.orderRef,
         whatFor: event.whatFor,
+        fundId: event.fundId,
+        purposeId: event.purposeId,
         upiRef: event.upiRef,
         notes: event.notes,
         source: event.source,
@@ -354,13 +389,16 @@ async function write(tx: Tx, event: Event, at: Date) {
       await tx.update(expenses).set({ closedReason: event.reason }).where(eq(expenses.id, event.expenseId));
       return;
     case "ExpenseCorrected": {
-      const { amount, payee, paidOn } = event.changes;
+      const { amount, payee, paidOn, fundId, purposeId, whatFor } = event.changes;
       await tx
         .update(expenses)
         .set({
           ...(amount && { amountPaise: amount.to?.paise ?? null }),
           ...(payee && { payee: payee.to }),
           ...(paidOn && { paidOn: paidOn.to }),
+          ...(fundId && { fundId: fundId.to }),
+          ...(purposeId && { purposeId: purposeId.to }),
+          ...(whatFor && { whatFor: whatFor.to }),
         })
         .where(eq(expenses.id, event.expenseId));
       return;
@@ -379,7 +417,7 @@ const isKeyRace = (e: unknown) => {
 type Staged =
   | {
       readonly ok: true;
-      readonly events: readonly (Event | FundEvent)[];
+      readonly events: readonly (Event | FundEvent | PurposeEvent)[];
       readonly entries: readonly Omit<typeof auditLog.$inferInsert, "at" | "actorId" | "command" | "idempotencyKey">[];
       readonly commit: () => Promise<void>;
     }
@@ -435,10 +473,28 @@ async function stageFund(tx: Tx, actor: Actor, command: FundCommand, at: Date): 
   };
 }
 
+async function stagePurpose(tx: Tx, actor: Actor, command: PurposeCommand, at: Date): Promise<Staged> {
+  const slice = await loadPurposeSlice(tx, actor, command);
+  const decision = decidePurpose(slice, command, actor);
+  if (!decision.ok) return decision;
+  return {
+    ok: true,
+    events: decision.events,
+    entries: purposeEntries(slice, decision.events),
+    commit: async () => {
+      for (const event of decision.events) await writePurpose(tx, event, at);
+    },
+  };
+}
+
+type AnyCommand = Command | FundCommand | PurposeCommand;
+const ownersFor = (tx: Tx, actor: Actor, command: AnyCommand) =>
+  isFundCommand(command) ? fundOwners(tx, actor, command) : isPurposeCommand(command) ? purposeOwners(tx, actor, command) : ownersOf(tx, actor, command);
+
 export function createBooks({ db, now, enqueue }: Deps) {
-  async function attempt(actor: Actor, command: Command | FundCommand, key: string | undefined): Promise<Result> {
+  async function attempt(actor: Actor, command: AnyCommand, key: string | undefined): Promise<Result> {
     return db.transaction(async (tx) => {
-      const owners = isFundCommand(command) ? await fundOwners(tx, actor, command) : await ownersOf(tx, actor, command);
+      const owners = await ownersFor(tx, actor, command);
       for (const owner of owners) await lockClaimant(tx, owner);
 
       // A key is the requester's (the Actor's), not the owner's: the same key from anyone else is a conflict.
@@ -451,7 +507,11 @@ export function createBooks({ db, now, enqueue }: Deps) {
       }
 
       const at = now();
-      const staged = isFundCommand(command) ? await stageFund(tx, actor, command, at) : await stageExpense(tx, actor, command, owners, at, enqueue);
+      const staged = isFundCommand(command)
+        ? await stageFund(tx, actor, command, at)
+        : isPurposeCommand(command)
+          ? await stagePurpose(tx, actor, command, at)
+          : await stageExpense(tx, actor, command, owners, at, enqueue);
       if (!staged.ok) return staged; // a rejected command changes nothing
 
       // Audit rows first (design D2). The audit log holds a key once (schema), so the command's first entry carries it.
@@ -470,7 +530,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
      * Every write. Typed rejections; throws when the database fails, or with OwnersMoved when owners still moved under it
      * after 3 tries, and then nothing is written.
      */
-    async execute(actor: Actor, command: Command | FundCommand, opts: { idempotencyKey?: string } = {}): Promise<Result> {
+    async execute(actor: Actor, command: AnyCommand, opts: { idempotencyKey?: string } = {}): Promise<Result> {
       if (!mayEnter(actor)) return forbidden;
       for (let tries = 1; ; tries++) {
         try {
@@ -491,13 +551,19 @@ export function createBooks({ db, now, enqueue }: Deps) {
     },
 
     /**
-     * The Funds offered on the upload and payment prompt (expense-tracking, "Funds on the upload prompt"): the Actor's
-     * order, none they hid, none archived, each with the "What for?" hint in effect for them.
+     * The upload and payment prompt (expense-tracking "Funds on the upload prompt", "Purpose"): the Funds in the Actor's
+     * order, none hidden or archived, each with its "What for?" hint in effect; the Actor's active Purposes; and what is
+     * preselected, which is where LogExpense puts a payment that names neither.
      */
-    async promptFunds(actor: Actor) {
+    async prompt(actor: Actor) {
       if (!mayEnter(actor)) return forbidden;
-      const offered = (await listFunds(db, actor, "prompt")).filter((f) => !f.hidden && !f.archived);
-      return { ok: true as const, funds: offered.map((f) => ({ id: f.id, name: f.name, whatForHint: f.effective.whatForHint })) };
+      return { ok: true as const, ...(await promptOf(db, actor)) };
+    },
+
+    /** Settings → Purposes: the Actor's own Purposes, active and ended (an admin's by session: every Claimant's, D6). */
+    async purposes(actor: Actor) {
+      if (!mayEnter(actor)) return forbidden;
+      return { ok: true as const, purposes: await listPurposes(db, actor) };
     },
 
     /** The Actor's effective templates for a Claim of this Fund (design §6); never its notes. */
@@ -531,6 +597,8 @@ export function createBooks({ db, now, enqueue }: Deps) {
           payback: row.payback,
           orderRef: row.orderRef,
           whatFor: row.whatFor,
+          fundId: row.fundId,
+          purposeId: row.purposeId,
           upiRef: row.upiRef,
           notes: row.notes,
           source: row.source,

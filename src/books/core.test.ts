@@ -11,6 +11,7 @@ import {
   deriveRefund,
   type ExpenseState,
   orderPage,
+  MAKERSPACE,
   type Slice,
 } from "./core";
 
@@ -44,6 +45,8 @@ describe("decide LogExpense", () => {
           payback: false,
           orderRef: null,
           whatFor: null,
+          fundId: MAKERSPACE,
+          purposeId: null,
           upiRef: null,
           notes: null,
           source: "manual",
@@ -118,6 +121,8 @@ describe("apply and derivation", () => {
                 payee: null,
                 paidOn,
                 whatFor: null,
+                fundId: MAKERSPACE,
+                purposeId: null,
                 refunds: [],
                 writtenOff: rupees(0),
                 bills: [
@@ -163,6 +168,8 @@ describe("apply and derivation", () => {
     payee: null,
     paidOn: "2026-11-19",
     whatFor: null,
+    fundId: MAKERSPACE,
+    purposeId: null,
     bills: bills.map((b, i) => ({
       id: `b-${i}`,
       kind: "invoice",
@@ -243,6 +250,8 @@ describe("why an Expense is open", () => {
     payee: null,
     paidOn: "2026-11-19",
     whatFor: null,
+    fundId: MAKERSPACE,
+    purposeId: null,
     bills: bills.map(bill),
     refunds: [],
     writtenOff: rupees(0),
@@ -456,6 +465,8 @@ describe("Open amount and settled invariants, for any generated slice", () => {
         closedReason: pick([null, null, null, "personal"]),
         kind: "online",
         whatFor: null,
+        fundId: MAKERSPACE,
+        purposeId: null,
         amount,
         payee: null,
         paidOn: "2026-11-19",
@@ -1012,6 +1023,15 @@ describe("CorrectExpense", () => {
       expect(run(slice, correct(change)).decision).toEqual({ ok: false, reason: "locked" });
   });
 
+  it("Edit blocked after submission: Fund, Purpose and What for lock with the other corrected fields", () => {
+    const slice: Slice = { ...shop(100000), links: { funds: { "f-travel": true }, purposes: { "p-trip": { fundId: "f-travel" } }, fallback: { fundId: MAKERSPACE, purposeId: null } } };
+    slice.expenses["e-1"]!.bills[0]!.claim = "submitted";
+    for (const change of [{ fundId: "f-travel" }, { purposeId: "p-trip" }, { whatFor: "Bus fare" }])
+      expect(run(slice, correct(change)).decision, JSON.stringify(change)).toEqual({ ok: false, reason: "locked" });
+    slice.expenses["e-1"]!.bills[0]!.claim = "draft";
+    expect(run(slice, correct({ purposeId: "p-trip", whatFor: "Bus fare" })).slice.expenses["e-1"]).toMatchObject({ fundId: "f-travel", purposeId: "p-trip", whatFor: "Bus fare" });
+  });
+
   it("Unlocked by recall: the only Claim holding its Bill back in draft, the amount is editable again", () => {
     const slice = shop(100000);
     slice.expenses["e-1"]!.bills[0]!.claim = "draft";
@@ -1498,6 +1518,9 @@ describe("MoveBill and DetachBill", () => {
           payback: false,
           orderRef: null,
           whatFor: null,
+          // The Order's Fund and Purpose: detaching the Bill does not move its money to another Claim.
+          fundId: MAKERSPACE,
+          purposeId: null,
           upiRef: null,
           notes: null,
           source: "manual",
@@ -1508,6 +1531,14 @@ describe("MoveBill and DetachBill", () => {
     expect(billIds(slice, "e-3")).toEqual(["b-2:210000"]);
     expect(of(slice, "e-3")).toMatchObject({ status: "open", openAmount: rupees(0) });
     expect(of(slice, "e-1").openAmount).toEqual(rupees(0));
+  });
+
+  it("Detach keeps the Order's Fund and Purpose on the new Expense", () => {
+    const slice = twoExpenses();
+    Object.assign(slice.expenses["e-1"]!, { fundId: "f-travel", purposeId: "p-trip" });
+    const { decision, slice: after } = run(slice, detach(), ["e-3"]);
+    expect(decision.ok && decision.events[1]).toMatchObject({ type: "ExpenseLogged", fundId: "f-travel", purposeId: "p-trip" });
+    expect(after.expenses["e-3"]).toMatchObject({ fundId: "f-travel", purposeId: "p-trip" });
   });
 
   it("Detach takes the Bill's own date as the new Expense's date when it has one", () => {

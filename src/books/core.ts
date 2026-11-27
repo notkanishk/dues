@@ -11,8 +11,22 @@ export type Actor = {
 /** The one admin-scope test (design D6): an admin signed in by session reaches every Claimant's rows; by MCP or Intake, only their own. */
 export const isAdmin = (actor: Actor) => actor.via === "session" && actor.roles.includes("admin");
 
-// Fund, Purpose, Payment method and Orderer arrive with those entities (tasks 2.7, 2.19b, 2.21).
-export type LogExpense = {
+/** Seeded by migration 0007: the one Fund every Claimant has from the start, and the Fund an Expense is in by default. */
+export const MAKERSPACE = "00000000-0000-7000-8000-000000000001";
+
+/** A record's own entry under a key from input: never a built-in such as "constructor" or "__proto__". */
+export const own = <T>(record: Readonly<Record<string, T>>, key: string): T | undefined => (Object.hasOwn(record, key) ? record[key] : undefined);
+
+/** Where an Expense is claimed from (expense-tracking "Expense ownership and fields"): its Fund, and optionally a Purpose of that Fund. */
+type LinkFields = {
+  /** Omitted: the Purpose's Fund when one is named, else where the payment goes by default (LogExpense) or where it is. */
+  readonly fundId?: string;
+  /** null: no Purpose. Omitted: kept while the Fund stays, else none (LogExpense: the default). */
+  readonly purposeId?: string | null;
+};
+
+// Payment method and Orderer arrive with those entities (task 2.7).
+export type LogExpense = LinkFields & {
   readonly type: "LogExpense";
   readonly kind: "online" | "shop" | "service";
   readonly amount: Money;
@@ -45,15 +59,16 @@ export type ReturnBill = { readonly type: "ReturnBill"; readonly billId: string 
 /** The money is back (W2.4): the expected Refund is received on its refunded-on date. */
 export type MarkRefundReceived = { readonly type: "MarkRefundReceived"; readonly refundId: string; readonly refundedOn: string };
 /**
- * Corrects an Expense's amount, payee or paid-on date (expense-tracking, Expense corrections): only the fields given
- * change. Payment method arrives with that entity (task 2.21).
+ * Corrects an Expense's amount, payee, paid-on date, Fund, Purpose or What for (expense-tracking, Expense corrections):
+ * only the fields given change. Payment method arrives with that entity.
  */
-export type CorrectExpense = {
+export type CorrectExpense = LinkFields & {
   readonly type: "CorrectExpense";
   readonly expenseId: string;
   readonly amount?: Money;
   readonly payee?: string | null;
   readonly paidOn?: string;
+  readonly whatFor?: string | null;
 };
 /**
  * Corrects a Bill's amount, Bill number or date after its document is attached, or a No bill's (expense-tracking, Bill
@@ -134,6 +149,8 @@ export type Event =
       readonly payback: boolean;
       readonly orderRef: string | null;
       readonly whatFor: string | null;
+      readonly fundId: string;
+      readonly purposeId: string | null;
       readonly upiRef: string | null;
       readonly notes: string | null;
       readonly source: "manual";
@@ -172,6 +189,9 @@ export type Event =
         readonly amount?: Change<Money | null>;
         readonly payee?: Change<string | null>;
         readonly paidOn?: Change<string | null>;
+        readonly fundId?: Change<string>;
+        readonly purposeId?: Change<string | null>;
+        readonly whatFor?: Change<string | null>;
       };
     }
   | {
@@ -258,13 +278,44 @@ export type ExpenseState = {
   payee: string | null;
   paidOn: string | null;
   whatFor: string | null;
+  fundId: string;
+  purposeId: string | null;
   bills: BillState[];
   refunds: RefundState[];
   /** Σ written off: Refunds written off on closing, and remainders "Not claiming" closed out (W2.9). */
   writtenOff: Money;
 };
-/** What a command touches, loaded by the shell under the Claimant's lock. newIds are fresh UUIDv7 keys from Postgres. */
-export type Slice = { readonly newIds: readonly string[]; readonly expenses: Readonly<Record<string, ExpenseState>> };
+/**
+ * What a command touches, loaded by the shell under the Claimant's lock. newIds are fresh UUIDv7 keys from Postgres.
+ * links: for LogExpense and CorrectExpense, what the Expense's Claimant may link it to.
+ */
+export type Slice = { readonly newIds: readonly string[]; readonly expenses: Readonly<Record<string, ExpenseState>>; readonly links?: Links };
+export type Links = {
+  /** The Funds the command names that the Expense's Claimant has (their own and every team Fund). */
+  readonly funds: Readonly<Record<string, true>>;
+  /** The Purposes the command names that are the Expense's Claimant's own. */
+  readonly purposes: Readonly<Record<string, { readonly fundId: string }>>;
+  /** Where a new payment goes when the command names neither Fund nor Purpose. */
+  readonly fallback: { readonly fundId: string; readonly purposeId: string | null };
+};
+/** Nothing named is had; a new payment goes into Makerspace with no Purpose. */
+export const NO_LINKS: Links = { funds: {}, purposes: {}, fallback: { fundId: MAKERSPACE, purposeId: null } };
+
+/**
+ * The one rule for an Expense's Fund and Purpose, on every path that sets them. Absent from links is not_found, so
+ * another Claimant's Fund or Purpose does not leak; a Purpose of another Fund is validation. An ended Purpose is no
+ * longer anyone's default (the prompt), but an Expense may still be put in it by name.
+ */
+function linkOf(links: Links, base: { fundId: string; purposeId: string | null }, command: LinkFields) {
+  const named = command.purposeId == null ? undefined : own(links.purposes, command.purposeId);
+  if (command.purposeId != null && !named) return reject("not_found");
+  if (command.fundId !== undefined && !own(links.funds, command.fundId)) return reject("not_found");
+  const fundId = command.fundId ?? named?.fundId ?? base.fundId;
+  const purposeId = command.purposeId !== undefined ? command.purposeId : fundId === base.fundId ? base.purposeId : null;
+  if (named && named.fundId !== fundId) return rejectField("purposeId");
+  return { ok: true as const, fundId, purposeId };
+}
+const isText = (v: unknown) => v === undefined || v === null || typeof v === "string";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const isDate = (s: unknown) => {
@@ -281,6 +332,10 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       if (!["online", "shop", "service"].includes(command.kind)) return rejectField("kind");
       if (!isPayment(command.amount)) return rejectField("amount");
       if (!isDate(command.paidOn)) return rejectField("paidOn");
+      if (!isText(command.whatFor)) return rejectField("whatFor");
+      const links = slice.links ?? NO_LINKS;
+      const link = linkOf(links, links.fallback, command);
+      if (!link.ok) return link;
       const [expenseId, billId] = slice.newIds as [string, string];
       return ok([
         {
@@ -295,6 +350,8 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           payback: command.payback ?? false,
           orderRef: command.orderRef ?? null,
           whatFor: command.whatFor ?? null,
+          fundId: link.fundId,
+          purposeId: link.purposeId,
           upiRef: command.upiRef ?? null,
           notes: command.notes ?? null,
           source: "manual",
@@ -365,16 +422,22 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       ]);
     }
     case "CorrectExpense": {
-      const expense = slice.expenses[command.expenseId];
+      const expense = own(slice.expenses, command.expenseId);
       if (!expense) return reject("not_found");
       if (expense.closedReason) return reject("invalid_transition");
       if (onSubmittedClaim(expense)) return reject("locked");
       if (command.amount !== undefined && !isPayment(command.amount)) return rejectField("amount");
       if (command.paidOn !== undefined && !isDate(command.paidOn)) return rejectField("paidOn");
+      if (!isText(command.whatFor)) return rejectField("whatFor");
+      const link = linkOf(slice.links ?? NO_LINKS, expense, command);
+      if (!link.ok) return link;
       const changes = {
         ...changed("amount", expense.amount, command.amount),
         ...changed("payee", expense.payee, command.payee),
         ...changed("paidOn", expense.paidOn, command.paidOn),
+        ...changed("fundId", expense.fundId, link.fundId),
+        ...changed("purposeId", expense.purposeId, link.purposeId),
+        ...changed("whatFor", expense.whatFor, command.whatFor),
       };
       // Keeping a value changes nothing and writes nothing.
       if (!Object.keys(changes).length) return ok([]);
@@ -416,7 +479,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
       return ok([{ type: "DiffersConfirmed", billId: found.bill.id, expenseId: found.expense.id }]);
     }
     case "CloseExpense": {
-      const expense = slice.expenses[command.expenseId];
+      const expense = own(slice.expenses, command.expenseId);
       if (!expense) return reject("not_found");
       const { status } = deriveExpense(expense);
       if (status !== "draft" && status !== "open") return reject("invalid_transition");
@@ -538,6 +601,8 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
             payback: false,
             orderRef: null,
             whatFor: null,
+            fundId: expense.fundId,
+            purposeId: expense.purposeId,
             upiRef: null,
             notes: null,
             source: "manual",
@@ -545,7 +610,7 @@ export function decide(slice: Slice, command: Command, actor: Actor, _now: Date)
           { type: "BillMoved", billId: bill.id, fromExpenseId: expense.id, toExpenseId: expenseId },
         ]);
       }
-      const target = slice.expenses[command.toExpenseId];
+      const target = own(slice.expenses, command.toExpenseId);
       if (!target) return reject("not_found"); // the loader scoped it: another Claimant's Expense is absent
       if (target.id === expense.id || target.draft || target.closedReason) return reject("invalid_transition");
       // ponytail: a Bill never moves between two Claimants, an admin's move included; no spec allows it (D5 names only
@@ -586,7 +651,7 @@ function changed<K extends string, T>(field: K, from: T, to: T | undefined): { [
   if (to === undefined || isDeepStrictEqual(from, to)) return {};
   return { [field]: { from, to } } as { [P in K]?: Change<T> };
 }
-const reject = (reason: Rejected["reason"]): Rejected => ({ ok: false, reason });
+export const reject = (reason: Rejected["reason"]): Rejected => ({ ok: false, reason });
 
 /**
  * The Bill and its open Expense (not draft, not closed), or not_found when it is not in the Actor's slice (the loader
@@ -626,7 +691,7 @@ function moveExpected(expense: ExpenseState, by: number): Event[] | Rejected {
   return [{ type: by < 0 ? "ExpectedBillReduced" : "ExpectedBillIncreased", billId: bill.id, expenseId: expense.id, amount }];
 }
 
-const rejectField = (field: string): Rejected => ({ ok: false, reason: "validation", field });
+export const rejectField = (field: string): Rejected => ({ ok: false, reason: "validation", field });
 
 export function apply(slice: Slice, event: Event): Slice {
   switch (event.type) {
@@ -645,6 +710,8 @@ export function apply(slice: Slice, event: Event): Slice {
             payee: event.payee,
             paidOn: event.paidOn,
             whatFor: event.whatFor,
+            fundId: event.fundId,
+            purposeId: event.purposeId,
             bills: [],
             refunds: [],
             writtenOff: zero,

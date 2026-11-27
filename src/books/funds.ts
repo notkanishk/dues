@@ -5,10 +5,9 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { funds, fundSettings, fundVersions } from "@/src/db/schema";
 import type { Tx } from "./books";
-import { type Actor, isAdmin } from "./core";
+import { type Actor, isAdmin, MAKERSPACE, own } from "./core";
 
-/** Seeded by migration 0007: the one Fund every Claimant has from the start. */
-export const MAKERSPACE = "00000000-0000-7000-8000-000000000001";
+export { MAKERSPACE };
 
 export type Mail = { readonly to: readonly string[]; readonly cc: readonly string[]; readonly subject: string; readonly body: string };
 /** What "my version" may override (claims, "Personal versions and the snapshot"). */
@@ -22,7 +21,7 @@ const OVERRIDABLE = ["mail", "formTemplate", "fileNamePattern", "whatForHint"] a
 
 type Q = Pick<NodePgDatabase, "select">;
 /** The Funds a Claimant has: their own and every team Fund. */
-const visible = (actor: Actor) => or(eq(funds.team, true), eq(funds.creatorId, actor.claimantId));
+export const visible = (who: Pick<Actor, "claimantId">) => or(eq(funds.team, true), eq(funds.creatorId, who.claimantId));
 /** An admin reaches every Fund (D6); anyone else the Funds they have. */
 const reachable = (actor: Actor) => (isAdmin(actor) ? undefined : visible(actor));
 
@@ -183,10 +182,10 @@ export function decideFund(slice: FundSlice, command: FundCommand, actor: Actor)
   if (command.type === "OrderFunds") {
     const ids = command.fundIds;
     if (!Array.isArray(ids) || new Set(ids).size !== ids.length) return reject("validation", "fundIds");
-    if (ids.some((id) => !slice.funds[id])) return reject("not_found");
+    if (ids.some((id) => !own(slice.funds, id))) return reject("not_found");
     return ok({ type: "FundsOrdered", claimantId: actor.claimantId, fundIds: ids });
   }
-  const fund = slice.funds[command.fundId];
+  const fund = own(slice.funds, command.fundId);
   if (!fund) return reject("not_found");
   // identity-access: only an admin and the creator edit the team version; anyone else is offered "my version".
   const mayEditTeam = fund.creatorId === actor.claimantId || isAdmin(actor);
@@ -231,10 +230,10 @@ export function decideFund(slice: FundSlice, command: FundCommand, actor: Actor)
 // ---- Shell: whose lock, the load, the writes ----------------------------------------------------------------------
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The one key check before a lookup: anything else is never in the database, so it loads nothing (not_found). */
+export const isUuid = (id: unknown): id is string => typeof id === "string" && UUID.test(id);
 const idsOf = (command: FundCommand) =>
-  (command.type === "CreateFund" ? [] : command.type === "OrderFunds" ? (Array.isArray(command.fundIds) ? command.fundIds : []) : [command.fundId]).filter(
-    (id) => typeof id === "string" && UUID.test(id),
-  );
+  (command.type === "CreateFund" ? [] : command.type === "OrderFunds" ? (Array.isArray(command.fundIds) ? command.fundIds : []) : [command.fundId]).filter(isUuid);
 
 /**
  * Whose lock a Fund command takes (D5): the Fund's creator for a change to the Fund itself, so the creator's and an
@@ -352,7 +351,7 @@ export async function writeFund(tx: Tx, event: FundEvent, at: Date) {
  */
 export type FundTemplates = Pick<TeamFields, "mail" | "formTemplate" | "fileNamePattern" | "claimNamePattern">;
 export async function templatesOf(q: Q, actor: Actor, fundId: string): Promise<FundTemplates | null> {
-  if (!UUID.test(fundId)) return null;
+  if (!isUuid(fundId)) return null;
   const [row] = await q
     .select({
       team: { mail: funds.mail, formTemplate: funds.formTemplate, fileNamePattern: funds.fileNamePattern, claimNamePattern: funds.claimNamePattern },
