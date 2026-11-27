@@ -41,11 +41,10 @@ export const expenses = pgTable(
     payback: boolean("payback").notNull().default(false),
     orderRef: text("order_ref"),
     whatFor: text("what_for"),
-    // Every Expense is claimed from a Fund (expense-tracking "Expense ownership and fields"); Makerspace, the preselected
-    // one, by default, which is also where an Expense logged before Funds existed goes. Migration 0007 seeds it.
+    // Every Expense is claimed from a Fund (expense-tracking "Expense ownership and fields"). No default: every write
+    // names one (Books' default is the prompt's preselection); migration 0009 back-filled older Expenses with Makerspace.
     fundId: uuid("fund_id")
       .notNull()
-      .default("00000000-0000-7000-8000-000000000001")
       .references((): AnyPgColumn => funds.id),
     // Optional; a Purpose of the same Fund and the same Claimant (expenses_purpose_fk).
     purposeId: uuid("purpose_id"),
