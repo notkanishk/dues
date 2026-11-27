@@ -243,3 +243,88 @@ describe("The Expense's Fund, Purpose and What for", () => {
     expect((await auditOf(fare)).at(-1)).toMatchObject({ command: "CorrectExpense", actorId: minnie.claimantId, ownerId: mickey.claimantId });
   });
 });
+
+describe("The prompt (prompt query): Funds in the Claimant's order, and the What for? step's Purposes", () => {
+  const promptOf = async (actor: Actor) => {
+    const read = await books.prompt(actor);
+    if (!read.ok) throw new Error(`expected the prompt, got ${JSON.stringify(read)}`);
+    return read;
+  };
+
+  it("Default order: a Claimant who has not ordered their Funds gets Makerspace first and preselected, and no Purpose step", async () => {
+    const mickey = claimant();
+    const prompt = await promptOf(mickey);
+    expect(prompt.funds[0]).toEqual({ id: MAKERSPACE, name: "Makerspace", whatForHint: null });
+    expect(prompt).toMatchObject({ preselectedFundId: MAKERSPACE, purposes: [], preselectedPurposeId: null });
+  });
+
+  it("Active Purpose preselects its Fund: with \"Robotics trip\" the only one active, \"Travel grant\" is preselected and the payment goes into it; one tap puts it elsewhere", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    const trip = await purpose(mickey, travel);
+    expect(await promptOf(mickey)).toMatchObject({
+      preselectedFundId: travel,
+      purposes: [{ id: trip, name: "Robotics trip", fundId: travel }],
+      preselectedPurposeId: trip,
+    });
+    expect(await linksOf(mickey, await logged(mickey))).toMatchObject({ fundId: travel, purposeId: trip });
+    expect(await linksOf(mickey, await logged(mickey, { purposeId: null }))).toMatchObject({ fundId: travel, purposeId: null });
+    expect(await linksOf(mickey, await logged(mickey, { fundId: MAKERSPACE }))).toMatchObject({ fundId: MAKERSPACE, purposeId: null });
+  });
+
+  it("Two active Purposes: the step offers both, plus None, and preselects no Purpose; the payment goes into none", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    const trip = await purpose(mickey, travel);
+    const week = await purpose(mickey, MAKERSPACE, "O-week stall");
+    expect(await promptOf(mickey)).toMatchObject({
+      preselectedFundId: MAKERSPACE,
+      purposes: [
+        { id: trip, name: "Robotics trip", fundId: travel },
+        { id: week, name: "O-week stall", fundId: MAKERSPACE },
+      ],
+      preselectedPurposeId: null,
+    });
+    expect(await linksOf(mickey, await logged(mickey))).toMatchObject({ fundId: MAKERSPACE, purposeId: null });
+  });
+
+  it("two active Purposes in one Fund preselect that Fund", async () => {
+    const mickey = claimant();
+    const travel = await fund(mickey);
+    await purpose(mickey, travel);
+    await purpose(mickey, travel, "Science fair");
+    expect(await promptOf(mickey)).toMatchObject({ preselectedFundId: travel, preselectedPurposeId: null });
+    expect(await linksOf(mickey, await logged(mickey))).toMatchObject({ fundId: travel, purposeId: null });
+  });
+
+  it("No active Purpose: after End trip the step offers no Purpose and the payment has none", async () => {
+    const mickey = claimant();
+    const trip = await purpose(mickey, await fund(mickey));
+    ok(await books.execute(mickey, { type: "EndPurpose", purposeId: trip }));
+    expect(await promptOf(mickey)).toMatchObject({ preselectedFundId: MAKERSPACE, purposes: [], preselectedPurposeId: null });
+    expect(await linksOf(mickey, await logged(mickey))).toMatchObject({ fundId: MAKERSPACE, purposeId: null });
+  });
+
+  it("Own order: \"Travel grant\" moved above Makerspace is first on that Claimant's prompt only; the Fund's hint is in effect", async () => {
+    const [mickey, dexter] = [claimant(), claimant()];
+    const travel = await fund(mickey);
+    ok(await books.execute(mickey, { type: "EditFund", fundId: travel, whatForHint: "e.g. soldering supplies" }));
+    ok(await books.execute(mickey, { type: "ShareFund", fundId: travel }));
+    ok(await books.execute(mickey, { type: "OrderFunds", fundIds: [travel, MAKERSPACE] }));
+    const mine = await promptOf(mickey);
+    expect(mine.funds.slice(0, 2)).toEqual([
+      { id: travel, name: "Travel grant", whatForHint: "e.g. soldering supplies" },
+      { id: MAKERSPACE, name: "Makerspace", whatForHint: null },
+    ]);
+    expect(mine.preselectedFundId).toBe(MAKERSPACE);
+    expect((await promptOf(dexter)).funds[0]?.id).toBe(MAKERSPACE);
+  });
+
+  it("only the Claimant's own Purposes are on their prompt, an admin's included", async () => {
+    const [mickey, minnie] = [claimant(), admin()];
+    const trip = await purpose(mickey, await fund(mickey));
+    expect(await promptOf(minnie)).toMatchObject({ purposes: [], preselectedPurposeId: null, preselectedFundId: MAKERSPACE });
+    expect((await promptOf(mickey)).purposes.map((p) => p.id)).toEqual([trip]);
+    expect(await books.prompt({ ...mickey, roles: [] })).toEqual({ ok: false, reason: "forbidden" });
+  });
+});
