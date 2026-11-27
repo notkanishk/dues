@@ -91,6 +91,135 @@ describe("decide LogExpense", () => {
   });
 });
 
+// Entry without a bill (expense-tracking "Entry without a bill"; FUNCTIONAL W1). Figures from the spec scenarios.
+describe("decide LogNoBillEntry", () => {
+  const cashLinks: Slice = { ...fresh, links: { funds: {}, purposes: {}, paymentMethods: { "pm-cash": { archived: false } }, fallback: { fundId: MAKERSPACE, purposeId: null } } };
+  const cashRide = {
+    type: "LogNoBillEntry",
+    kind: "service",
+    amount: rupees(6000),
+    paidOn: "2026-11-20",
+    whatFor: "Auto to hardware market",
+    paymentMethodId: "pm-cash",
+  } as const;
+  const entry = () => run(cashLinks, cashRide, ["e-1", "b-1"]).slice;
+  const correct = (change: object) => ({ type: "CorrectExpense", expenseId: "e-1", ...change }) as Command;
+
+  it("Cash ride: ₹60.00 \"Auto to hardware market\" is an open Expense paid Cash, kind service, with one ready No bill of ₹60.00, remarks \"No bill (cash)\"", () => {
+    const { decision, slice } = run(cashLinks, cashRide, ["e-1", "b-1"]);
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [], // no Invoice waiting, no review, no matching: nothing follows
+      events: [
+        {
+          type: "ExpenseLogged",
+          expenseId: "e-1",
+          claimantId: mickey.claimantId,
+          kind: "service",
+          amount: rupees(6000),
+          paidOn: "2026-11-20",
+          payee: null,
+          vendor: null,
+          payback: false,
+          orderRef: null,
+          whatFor: "Auto to hardware market",
+          fundId: MAKERSPACE,
+          purposeId: null,
+          paymentMethodId: "pm-cash",
+          upiRef: null,
+          notes: null,
+          source: "manual",
+        },
+        // Fulfilled on the day paid; its line on the form is the Expense's What for (decision 47), so no copy of it here.
+        { type: "BillAdded", billId: "b-1", expenseId: "e-1", kind: "no_bill", amount: rupees(6000), fulfilledOn: "2026-11-20", description: null, remarks: "No bill (cash)", fromBillId: null },
+      ],
+    });
+    // Straight into Ready to file; never bill missing, so never in Waiting for invoice.
+    expect(deriveExpense(slice.expenses["e-1"]!)).toEqual({ status: "open", openAmount: rupees(0), reason: null, bills: ["ready"] });
+  });
+
+  it("takes the Vendor/payee, the Payback flag and its own remarks, trimmed; a blank remark is refused, none starts as \"No bill (cash)\"", () => {
+    const { decision } = run(cashLinks, { ...cashRide, payee: "Auto", payback: true, remarks: " No bill (auto fare) " }, ["e-1", "b-1"]);
+    expect(decision).toMatchObject({ ok: true, events: [{ payee: "Auto", payback: true }, { remarks: "No bill (auto fare)" }] });
+    for (const remarks of ["", "   "]) expect(run(cashLinks, { ...cashRide, remarks }, ["e-1", "b-1"]).decision).toEqual({ ok: false, reason: "validation", field: "remarks" });
+    expect(run(cashLinks, { ...cashRide, remarks: 7 } as never, ["e-1", "b-1"]).decision).toEqual({ ok: false, reason: "validation", field: "remarks" });
+  });
+
+  it("Nothing to match or review: a bill number, GSTIN, order reference, UPI reference or document sent with it is never recorded", () => {
+    const smuggled = { ...cashRide, billNo: "INV-7", gstin: "22AAAAA0000A1Z5", orderRef: "402-1", upiRef: "123456789012", paperlessId: 7 } as never;
+    const { decision, slice } = run(cashLinks, smuggled, ["e-1", "b-1"]);
+    expect(decision).toMatchObject({ ok: true, events: [{ orderRef: null, upiRef: null }, { kind: "no_bill" }] });
+    expect(slice.expenses["e-1"]!.bills[0]).toMatchObject({ billNo: null, paperlessId: null, kind: "no_bill" });
+  });
+
+  it.each([
+    ["a zero amount", { amount: rupees(0) }, "amount"],
+    ["fractional paise", { amount: rupees(10.5) }, "amount"],
+    ["an unknown kind", { kind: "barter" }, "kind"],
+    ["a date that does not exist", { paidOn: "2026-02-30" }, "paidOn"],
+    ["no date", { paidOn: undefined }, "paidOn"],
+    ["a What for that is not text", { whatFor: 7 }, "whatFor"],
+    ["a payee that is not text", { payee: 7 }, "payee"],
+    ["a Payback flag that is not true or false", { payback: "yes" }, "payback"],
+  ])("refuses %s as validation", (_, change, field) => {
+    expect(run(cashLinks, { ...cashRide, ...change } as never, ["e-1", "b-1"]).decision).toEqual({ ok: false, reason: "validation", field });
+  });
+
+  it("an archived Payment method is validation; one not the Claimant's own is not_found, a built-in name included", () => {
+    const archived: Slice = { ...cashLinks, links: { ...cashLinks.links!, paymentMethods: { "pm-cash": { archived: true } } } };
+    expect(run(archived, cashRide, ["e-1", "b-1"]).decision).toEqual({ ok: false, reason: "validation", field: "paymentMethodId" });
+    for (const paymentMethodId of ["pm-theirs", "constructor", "__proto__"])
+      expect(run(cashLinks, { ...cashRide, paymentMethodId }, ["e-1", "b-1"]).decision, paymentMethodId).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("Editable until submitted: the amount ₹60.00 → ₹70.00 changes the Payment and its No bill together, ready or on a draft Claim", () => {
+    for (const claim of [null, "draft"] as const) {
+      const slice = entry();
+      slice.expenses["e-1"]!.bills[0]!.claim = claim;
+      const { decision, slice: after } = run(slice, correct({ amount: rupees(7000) }));
+      expect(decision).toEqual({
+        ok: true,
+        jobs: [],
+        events: [
+          { type: "ExpenseCorrected", expenseId: "e-1", changes: { amount: { from: rupees(6000), to: rupees(7000) } } },
+          { type: "BillCorrected", billId: "b-1", expenseId: "e-1", changes: { amount: { from: rupees(6000), to: rupees(7000) } }, differs: false },
+        ],
+      });
+      expect(deriveExpense(after.expenses["e-1"]!)).toMatchObject({ openAmount: rupees(0), reason: null });
+    }
+  });
+
+  it("the No bill's own amount corrected ₹60.00 → ₹70.00 moves the Payment with it, so the entry stays one amount", () => {
+    const { decision, slice } = run(entry(), { type: "CorrectBill", billId: "b-1", amount: rupees(7000) });
+    expect(decision).toEqual({
+      ok: true,
+      jobs: [],
+      events: [
+        { type: "BillCorrected", billId: "b-1", expenseId: "e-1", changes: { amount: { from: rupees(6000), to: rupees(7000) } }, differs: false },
+        { type: "ExpenseCorrected", expenseId: "e-1", changes: { amount: { from: rupees(6000), to: rupees(7000) } } },
+      ],
+    });
+    expect(slice.expenses["e-1"]!.amount).toEqual(rupees(7000));
+    expect(deriveExpense(slice.expenses["e-1"]!).openAmount).toEqual(rupees(0));
+  });
+
+  it("Edit blocked after submission: on a submitted Claim its amount, date, payee, Payment method and remarks are locked", () => {
+    const slice = entry();
+    slice.expenses["e-1"]!.bills[0]!.claim = "submitted";
+    for (const change of [{ amount: rupees(7000) }, { paidOn: "2026-11-19" }, { payee: "Auto" }, { paymentMethodId: null }])
+      expect(run(slice, correct(change)).decision, JSON.stringify(change)).toEqual({ ok: false, reason: "locked" });
+    for (const change of [{ amount: rupees(7000) }, { remarks: "No bill (auto)" }])
+      expect(run(slice, { type: "CorrectBill", billId: "b-1", ...change }).decision, JSON.stringify(change)).toEqual({ ok: false, reason: "locked" });
+  });
+
+  it("an Order's leftover No bill moves no Payment: only an entry's own No bill, the whole of its Payment, does", () => {
+    const leftover = run(order(100000), { type: "CloseOrder", billId: "b-1", choice: "claim_without_bill" }, ["b-2"]).slice;
+    const { decision } = run(leftover, { type: "CorrectBill", billId: "b-2", amount: rupees(90000) });
+    expect(decision).toMatchObject({ ok: true, events: [{ type: "BillCorrected" }] });
+    expect(decision.ok && decision.events).toHaveLength(1);
+  });
+});
+
 describe("apply and derivation", () => {
   const afterLog = (kind: "online" | "shop") => {
     const result = decide(fresh, logExpense(kind, 25000), mickey, now);
