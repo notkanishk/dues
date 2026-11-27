@@ -136,6 +136,12 @@ describe("A smaller invoice splits the Order", () => {
       { type: "attach", expenseId: "E-405" },
     ],
     ["a shop Expense never splits", invoice(), [order("E-406", { kind: "shop", vendor: "Sample Tools" })], { type: "newExpense", askVendor: false }],
+    [
+      "a ₹300.00 café bill never auto-splits a ₹4,870.00 online Payback: the vendor bypass is for the exact amount only",
+      bill({ total: rs(300), vendor: "Courage Cafe" }),
+      [order("E-407", { payback: true, payee: "Dexter" })],
+      { type: "attachWithCheck", expenseId: "E-407", others: [] },
+    ],
   ])("%s", (_, facts, candidates, expected) => {
     expect(propose(facts, candidates)).toEqual(expected);
   });
