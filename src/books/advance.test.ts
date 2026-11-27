@@ -53,7 +53,10 @@ describe("Advance is a personal amount on a Fund", () => {
   it("Default off: a new Claimant's Advance is off on every Fund, and every block is hidden", async () => {
     const mickey = claimant();
     const travel = await fund(mickey);
-    expect(await blocks(mickey)).toEqual([
+    // Other tests' team Funds are in the shared database too: every block is hidden, Makerspace and Travel grant among them.
+    const all = await blocks(mickey);
+    expect(all.every((b) => b.state === "hidden" && b.total === null && b.left === null)).toBe(true);
+    expect(all.filter((b) => [MAKERSPACE, travel].includes(b.fundId))).toEqual([
       { fundId: MAKERSPACE, name: "Makerspace", total: null, left: null, state: "hidden" },
       { fundId: travel, name: "Travel grant", total: null, left: null, state: "hidden" },
     ]);
@@ -245,7 +248,7 @@ describe("Home Advance block", () => {
     ok(await books.execute(mickey, { type: "OrderFunds", fundIds: [travel, MAKERSPACE] }));
     ok(await setAdvance(mickey, MAKERSPACE, 1_000_000));
     ok(await setAdvance(mickey, travel, 500_000));
-    expect((await blocks(mickey)).map((b) => [b.name, b.state])).toEqual([
+    expect((await blocks(mickey)).filter((b) => b.state !== "hidden").map((b) => [b.name, b.state])).toEqual([
       ["Travel grant", "green"],
       ["Makerspace", "green"],
     ]);

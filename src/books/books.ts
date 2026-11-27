@@ -33,7 +33,7 @@ import {
   type Rejected,
   type Slice,
 } from "./core";
-import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, isUuid, templatesOf, visible, writeFund } from "./funds";
+import { advancesOf, decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, isUuid, templatesOf, visible, writeFund } from "./funds";
 import { decidePurpose, isPurposeCommand, listPurposes, promptOf, loadPurposeSlice, type PurposeCommand, type PurposeEvent, purposeEntries, purposeOwners, writePurpose } from "./purposes";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
@@ -558,6 +558,15 @@ export function createBooks({ db, now, enqueue }: Deps) {
     async prompt(actor: Actor) {
       if (!mayEnter(actor)) return forbidden;
       return { ok: true as const, ...(await promptOf(db, actor)) };
+    },
+
+    /**
+     * The Home Advance blocks (expense-tracking "Home lists and the Advance block"): for each Fund the Actor has, in
+     * their order, their own Advance total, Advance left (derived on read) and red / amber / green, or hidden while off.
+     */
+    async advances(actor: Actor) {
+      if (!mayEnter(actor)) return forbidden;
+      return { ok: true as const, advances: await advancesOf(db, actor) };
     },
 
     /** Settings → Purposes: the Actor's own Purposes, active and ended (an admin's by session: every Claimant's, D6). */

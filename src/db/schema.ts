@@ -247,7 +247,9 @@ export const fundVersions = pgTable(
   (t) => [primaryKey({ columns: [t.fundId, t.claimantId] })],
 );
 
-// Each Claimant's own order and hiding of Funds (expense-tracking, "Funds on the upload prompt").
+// Each Claimant's own order and hiding of Funds (expense-tracking, "Funds on the upload prompt"), and their own Advance
+// on it (identity-access "Advance is a personal amount on a Fund"): one total, null while off. Never a top-up row: an
+// edit replaces the total and the audit log keeps the history. Advance left is derived on read, never stored (D3).
 export const fundSettings = pgTable(
   "fund_settings",
   {
@@ -255,8 +257,10 @@ export const fundSettings = pgTable(
     fundId: uuid("fund_id").notNull().references(() => funds.id),
     position: integer("position"),
     hidden: boolean("hidden").notNull().default(false),
+    advancePaise: bigint("advance_paise", { mode: "number" }),
+    advanceCurrency: char("advance_currency", { length: 3 }).notNull().default("INR"),
   },
-  (t) => [primaryKey({ columns: [t.claimantId, t.fundId] })],
+  (t) => [primaryKey({ columns: [t.claimantId, t.fundId] }), check("fund_settings_advance_paise", sql`${t.advancePaise} >= 0`)],
 );
 
 // Purposes (expense-tracking "Purpose"): an optional group inside a Fund, one Claimant's own. Ending one ("End trip")
