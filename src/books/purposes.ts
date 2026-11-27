@@ -131,7 +131,8 @@ export async function promptOf(q: Q, actor: Actor) {
   ).filter((p) => fundIds.includes(p.fundId));
   const chosen = preselect(fundIds, active);
   return {
-    funds: offered.map((f) => ({ id: f.id, name: f.name, whatForHint: f.effective.whatForHint })),
+    // The chip (expense-tracking "Funds on the upload prompt"): "Makerspace", or "Makerspace · Advance" with the Actor's own Advance on.
+    funds: offered.map((f) => ({ id: f.id, name: f.name, chip: f.advance ? `${f.name} · Advance` : f.name, whatForHint: f.effective.whatForHint })),
     purposes: active,
     preselectedFundId: chosen.fundId,
     preselectedPurposeId: chosen.purposeId,

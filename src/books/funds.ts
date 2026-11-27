@@ -1,11 +1,12 @@
 // Funds inside Books (design §1 lists the Fund command family there): pure rules first, then the shell's loads, writes
 // and reads. Claims, Purposes and the Advance read Funds in Books' transaction, so they live under the same Actor Seam.
 import { isDeepStrictEqual } from "node:util";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { funds, fundSettings, fundVersions } from "@/src/db/schema";
+import { expenses, funds, fundSettings, fundVersions, refunds } from "@/src/db/schema";
+import { type Money, money, sum, zero } from "@/src/money/money";
 import type { Tx } from "./books";
-import { type Actor, isAdmin, MAKERSPACE, own } from "./core";
+import { type Actor, advanceLeft, advanceState, isAdmin, MAKERSPACE, own } from "./core";
 
 export { MAKERSPACE };
 
@@ -46,6 +47,8 @@ export async function listFunds(q: Q, actor: Actor, view: "settings" | "prompt")
       sharing: fund.team ? ("team" as const) : ("private" as const),
       archived: fund.archived,
       hidden: setting?.hidden ?? false,
+      /** The Actor's own Advance total on it, null while off; never another Claimant's. */
+      advance: money(setting?.advancePaise ?? null, "INR"),
       mayEditTeam: fund.creatorId === actor.claimantId || isAdmin(actor),
       claimNamePattern: fund.claimNamePattern,
       teamVersion,
@@ -72,7 +75,7 @@ const byOrder = (a: Ordered, b: Ordered) => {
   return x[0] - y[0] || x[1] - y[1] || (a.fund.id < b.fund.id ? -1 : 1);
 };
 
-// ---- Commands (design §1 Fund family; SetAdvance is task 2.23) --------------------------------------------------
+// ---- Commands (design §1 Fund family) ------------------------------------------------------------------------------
 
 /** The team version's fields: what the creator or an admin edits (claims, "Fund fields"). */
 export type TeamFields = Overridable & { readonly name: string; readonly notes: string | null; readonly claimNamePattern: string | null };
@@ -92,7 +95,12 @@ export type ResetToTeamVersion = { readonly type: "ResetToTeamVersion"; readonly
 export type OrderFunds = { readonly type: "OrderFunds"; readonly fundIds: readonly string[] };
 /** Hides a Fund from the Actor's own prompt, or shows it again. */
 export type HideFund = { readonly type: "HideFund"; readonly fundId: string; readonly hidden: boolean };
-export type FundCommand = CreateFund | EditFund | ShareFund | ArchiveFund | SetPersonalVersion | ResetToTeamVersion | OrderFunds | HideFund;
+/**
+ * The Actor's own Advance on a Fund they have (identity-access "Advance is a personal amount on a Fund"): a total turns
+ * it on or replaces the total (never a top-up); null turns it off. Never another Claimant's, an admin's included.
+ */
+export type SetAdvance = { readonly type: "SetAdvance"; readonly fundId: string; readonly total: Money | null };
+export type FundCommand = CreateFund | EditFund | ShareFund | ArchiveFund | SetPersonalVersion | ResetToTeamVersion | OrderFunds | HideFund | SetAdvance;
 /** Every Fund command, once: the type makes a new one fail the typecheck until it is listed here. */
 const FUND_COMMAND_TYPES: Record<FundCommand["type"], true> = {
   CreateFund: true,
@@ -103,6 +111,7 @@ const FUND_COMMAND_TYPES: Record<FundCommand["type"], true> = {
   ResetToTeamVersion: true,
   OrderFunds: true,
   HideFund: true,
+  SetAdvance: true,
 };
 const FUND_COMMANDS: readonly string[] = Object.keys(FUND_COMMAND_TYPES);
 export const isFundCommand = (command: { type: string }): command is FundCommand => FUND_COMMANDS.includes(command.type);
@@ -120,7 +129,11 @@ export type FundEvent =
   | { readonly type: "PersonalVersionSet"; readonly fundId: string; readonly claimantId: string; readonly changes: Changes<Overridable>; readonly basedOn: number }
   | { readonly type: "PersonalVersionReset"; readonly fundId: string; readonly claimantId: string }
   | { readonly type: "FundsOrdered"; readonly claimantId: string; readonly fundIds: readonly string[] }
-  | { readonly type: "FundHidden"; readonly fundId: string; readonly claimantId: string; readonly hidden: boolean };
+  | { readonly type: "FundHidden"; readonly fundId: string; readonly claimantId: string; readonly hidden: boolean }
+  | { readonly type: "AdvanceTurnedOn"; readonly fundId: string; readonly claimantId: string; readonly total: Money }
+  | { readonly type: "AdvanceTotalChanged"; readonly fundId: string; readonly claimantId: string; readonly from: Money; readonly to: Money }
+  | { readonly type: "AdvanceTurnedOff"; readonly fundId: string; readonly claimantId: string };
+const ADVANCE_EVENTS: readonly string[] = ["AdvanceTurnedOn", "AdvanceTotalChanged", "AdvanceTurnedOff"] satisfies FundEvent["type"][];
 
 export type FundState = {
   readonly id: string;
@@ -132,6 +145,8 @@ export type FundState = {
   /** The Actor's own version: null fields are the team's. */
   readonly mine: (Overridable & { readonly basedOn: number }) | null;
   readonly hidden: boolean;
+  /** The Actor's own Advance total; null while off. */
+  readonly advance: Money | null;
 };
 export type FundSlice = { readonly newId: string | null; readonly funds: Readonly<Record<string, FundState>> };
 type Rejection = { readonly ok: false; readonly reason: "not_found" | "forbidden" | "invalid_transition" | "validation"; readonly field?: string };
@@ -159,6 +174,10 @@ function changesOf<T extends object>(from: T, command: Partial<T>, keys: readonl
   }
   return out as Changes<T>;
 }
+
+/** One validator for every path that writes an Advance total: whole paise, zero or more, in rupees. */
+const isAdvanceTotal = (v: unknown): v is Money =>
+  typeof v === "object" && v !== null && Number.isSafeInteger((v as Money).paise) && (v as Money).paise >= 0 && (v as Money).currency === "INR";
 
 const valuesOf = <T>(changes: Changes<T>) => Object.fromEntries(Object.entries(changes).map(([k, c]) => [k, (c as Change<unknown>).to]));
 
@@ -224,6 +243,16 @@ export function decideFund(slice: FundSlice, command: FundCommand, actor: Actor)
     case "HideFund":
       if (typeof command.hidden !== "boolean") return reject("validation", "hidden");
       return command.hidden === fund.hidden ? ok() : ok({ type: "FundHidden", fundId: fund.id, claimantId: actor.claimantId, hidden: command.hidden });
+    case "SetAdvance": {
+      const to = command.total;
+      if (to !== null && !isAdvanceTotal(to)) return reject("validation", "total");
+      const at = { fundId: fund.id, claimantId: actor.claimantId };
+      const from = fund.advance;
+      if (to === null) return from ? ok({ type: "AdvanceTurnedOff", ...at }) : ok();
+      const total: Money = { paise: to.paise, currency: "INR" };
+      if (!from) return ok({ type: "AdvanceTurnedOn", ...at, total });
+      return from.paise === total.paise ? ok() : ok({ type: "AdvanceTotalChanged", ...at, from, to: total });
+    }
   }
 }
 
@@ -256,12 +285,14 @@ export async function loadFundSlice(tx: Tx, actor: Actor, command: FundCommand):
   const rows = await tx
     .select()
     .from(funds)
-    .where(and(inArray(funds.id, ids), reachable(actor)))
+    // An Advance is only ever on a Fund the Actor has: an admin's reach to others' private Funds does not extend to it.
+    .where(and(inArray(funds.id, ids), command.type === "SetAdvance" ? visible(actor) : reachable(actor)))
     .for(ON_THE_FUND.includes(command.type) ? "update" : "share");
   const mine = await tx.select().from(fundVersions).where(and(inArray(fundVersions.fundId, ids), eq(fundVersions.claimantId, actor.claimantId)));
   const settings = await tx.select().from(fundSettings).where(and(inArray(fundSettings.fundId, ids), eq(fundSettings.claimantId, actor.claimantId)));
   const states = rows.map((row): FundState => {
     const version = mine.find((v) => v.fundId === row.id);
+    const setting = settings.find((s) => s.fundId === row.id);
     return {
       id: row.id,
       creatorId: row.creatorId,
@@ -270,7 +301,8 @@ export async function loadFundSlice(tx: Tx, actor: Actor, command: FundCommand):
       teamVersion: row.teamVersion,
       fields: { ...pick(row), name: row.name, notes: row.notes, claimNamePattern: row.claimNamePattern },
       mine: version ? { ...pick(version), basedOn: version.basedOn } : null,
-      hidden: settings.find((s) => s.fundId === row.id)?.hidden ?? false,
+      hidden: setting?.hidden ?? false,
+      advance: money(setting?.advancePaise ?? null, "INR"),
     };
   });
   return { newId, funds: Object.fromEntries(states.map((s) => [s.id, s])) };
@@ -285,6 +317,17 @@ export function fundEntries(slice: FundSlice, events: readonly FundEvent[], acto
   return events.map((event) => {
     if (event.type === "FundsOrdered")
       return { ownerId: actor.claimantId, event: event.type, entity: "fund_order", entityId: actor.claimantId, fromState: null, toState: null, payload: event };
+    // The Advance is the Actor's own; its entry keeps every total it ever had (no top-up records).
+    if (ADVANCE_EVENTS.includes(event.type))
+      return {
+        ownerId: actor.claimantId,
+        event: event.type,
+        entity: "advance",
+        entityId: event.fundId,
+        fromState: event.type === "AdvanceTurnedOn" ? "off" : "on",
+        toState: event.type === "AdvanceTurnedOff" ? "off" : "on",
+        payload: event,
+      };
     const fund = slice.funds[event.fundId];
     const before = event.type === "FundCreated" ? undefined : fund;
     const after = event.type === "FundCreated" ? { team: false, archived: false } : event.type === "FundShared" ? { ...fund!, team: true } : event.type === "FundArchived" ? { ...fund!, archived: true } : fund;
@@ -340,6 +383,16 @@ export async function writeFund(tx: Tx, event: FundEvent, at: Date) {
         .values({ claimantId: event.claimantId, fundId: event.fundId, hidden: event.hidden })
         .onConflictDoUpdate({ target: [fundSettings.claimantId, fundSettings.fundId], set: { hidden: event.hidden } });
       return;
+    case "AdvanceTurnedOn":
+    case "AdvanceTotalChanged":
+    case "AdvanceTurnedOff": {
+      const advancePaise = event.type === "AdvanceTurnedOn" ? event.total.paise : event.type === "AdvanceTotalChanged" ? event.to.paise : null;
+      await tx
+        .insert(fundSettings)
+        .values({ claimantId: event.claimantId, fundId: event.fundId, advancePaise })
+        .onConflictDoUpdate({ target: [fundSettings.claimantId, fundSettings.fundId], set: { advancePaise } });
+      return;
+    }
   }
 }
 
@@ -367,4 +420,58 @@ export async function templatesOf(q: Q, actor: Actor, fundId: string): Promise<F
     fileNamePattern: row.mine?.fileNamePattern ?? row.team.fileNamePattern,
     claimNamePattern: row.team.claimNamePattern,
   };
+}
+
+// ---- The Advance, read (expense-tracking "Advance balance", "Home lists and the Advance block") --------------------
+
+/** Postgres's sums (numeric text) as Money, through `sum`'s safe-integer check: past the range is an error, never rounded. */
+const paise = (rows: { fundId: string; paise: string | null }[]) =>
+  new Map(rows.map((r) => [r.fundId, sum([{ paise: Number(r.paise ?? 0), currency: "INR" }])]));
+
+/**
+ * The Actor's own Advance on each Fund they have, in their order: total, Advance left and the block's state (hidden
+ * while off). Only ever the Actor's own Advance over the Actor's own Expenses: `mine` is Books' one Claimant filter on
+ * Expenses, never its admin-wide scope, so an admin by session sees no other Claimant's (identity-access "never shared", D6).
+ */
+export async function advancesOf(q: Q, actor: Actor, mine: SQL) {
+  const fundList = await listFunds(q, actor, "prompt");
+  const on = fundList.flatMap((f) => (f.advance ? [f.id] : []));
+  const [payments, received] = on.length
+    ? await Promise.all([
+        q
+          .select({ fundId: expenses.fundId, paise: sql<string | null>`sum(${expenses.amountPaise})` })
+          .from(expenses)
+          // A duplicate is the same payment logged twice (FUNCTIONAL §7), so it is no Payment; personal and written off
+          // stay spent (W2.9).
+          // ponytail: drafts are held out too; the spec is silent. Owner question: does an unconfirmed draft Expense
+          // lower Advance left? If yes, drop the draft condition.
+          .where(
+            and(
+              mine,
+              inArray(expenses.fundId, on),
+              eq(expenses.draft, false),
+              sql`${expenses.closedReason} is distinct from 'duplicate'`,
+            ),
+          )
+          .groupBy(expenses.fundId),
+        q
+          .select({ fundId: expenses.fundId, paise: sql<string | null>`sum(${refunds.amountPaise})` })
+          .from(refunds)
+          .innerJoin(expenses, eq(expenses.id, refunds.expenseId))
+          .where(and(mine, inArray(expenses.fundId, on), sql`${refunds.refundedOn} is not null`))
+          .groupBy(expenses.fundId),
+      ]).then(([p, r]) => [paise(p), paise(r)])
+    : [new Map<string, Money>(), new Map<string, Money>()];
+  return fundList.map((f) => {
+    const total = f.advance;
+    const left = total
+      ? advanceLeft({
+          total,
+          payments: payments.get(f.id) ?? zero,
+          refundsReceived: received.get(f.id) ?? zero,
+          reimbursementsReceived: zero, // ponytail: no Claims yet; Claims plug Σ Reimbursements received for this Fund in here
+        })
+      : null;
+    return { fundId: f.id, name: f.name, total, left, state: advanceState(total, left) };
+  });
 }

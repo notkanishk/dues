@@ -411,8 +411,8 @@ describe("Funds on the upload prompt", () => {
       const read = await books.prompt(actor);
       return read.ok ? read.funds.find((f) => f.id === travel) : undefined;
     };
-    expect(await hint(mickey)).toEqual({ id: travel, name: "Travel grant", whatForHint: "e.g. soldering supplies" });
-    expect(await hint(dexter)).toEqual({ id: travel, name: "Travel grant", whatForHint: "e.g. bus fare" });
+    expect(await hint(mickey)).toEqual({ id: travel, name: "Travel grant", chip: "Travel grant", whatForHint: "e.g. soldering supplies" });
+    expect(await hint(dexter)).toEqual({ id: travel, name: "Travel grant", chip: "Travel grant", whatForHint: "e.g. bus fare" });
   });
 });
 

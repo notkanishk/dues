@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { auditLog, bills, expenses, funds as fundsTable, idempotencyKeys, purposes, refunds, writeOffs } from "@/src/db/schema";
-import { type Money, sum } from "@/src/money/money";
+import { type Money, money, sum } from "@/src/money/money";
 import {
   type Actor,
   apply,
@@ -33,7 +33,7 @@ import {
   type Rejected,
   type Slice,
 } from "./core";
-import { decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, isUuid, templatesOf, visible, writeFund } from "./funds";
+import { advancesOf, decideFund, fundEntries, type FundCommand, type FundEvent, fundOwners, isFundCommand, listFunds, loadFundSlice, isUuid, templatesOf, visible, writeFund } from "./funds";
 import { decidePurpose, isPurposeCommand, listPurposes, promptOf, loadPurposeSlice, type PurposeCommand, type PurposeEvent, purposeEntries, purposeOwners, writePurpose } from "./purposes";
 
 export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
@@ -56,13 +56,14 @@ const forbidden: Rejected = { ok: false, reason: "forbidden" };
  * Anything else is forbidden from every command and query before a row is read, so not even existence leaks.
  */
 const mayEnter = (actor: Actor) => actor.roles.includes("claimant");
+/** The one Claimant filter on Expenses: the Actor's own. Alone, for what is personal to everyone, admins included (the Advance). */
+const ownExpenses = (actor: Actor) => eq(expenses.claimantId, actor.claimantId);
 /**
  * The ownership filter: an admin signed in by session passes it (D6); anyone else sees only their own Expenses. An MCP
  * token carries its issuing Claimant's scope and nothing more, and Intake acts as the document owner's Claimant.
  */
-const scope = (actor: Actor) => (isAdmin(actor) ? undefined : eq(expenses.claimantId, actor.claimantId));
+const scope = (actor: Actor) => (isAdmin(actor) ? undefined : ownExpenses(actor));
 const conflict: Rejected = { ok: false, reason: "idempotency_conflict" };
-const money = (paise: number | null, currency: string): Money | null => (paise === null ? null : { paise, currency: currency as "INR" });
 
 /**
  * The one place Books loads rows. Scoped to the Actor's Claimant: another Claimant's Expense is
@@ -558,6 +559,16 @@ export function createBooks({ db, now, enqueue }: Deps) {
     async prompt(actor: Actor) {
       if (!mayEnter(actor)) return forbidden;
       return { ok: true as const, ...(await promptOf(db, actor)) };
+    },
+
+    /**
+     * The Home Advance blocks (expense-tracking "Home lists and the Advance block"): for each Fund the Actor has, in
+     * their order, their own Advance total, Advance left (derived on read) and red / amber / green, or hidden while off.
+     */
+    async advances(actor: Actor) {
+      if (!mayEnter(actor)) return forbidden;
+      // Never another Claimant's, an admin's by session included: an Advance is personal (identity-access).
+      return { ok: true as const, advances: await advancesOf(db, actor, ownExpenses(actor)) };
     },
 
     /** Settings → Purposes: the Actor's own Purposes, active and ended (an admin's by session: every Claimant's, D6). */

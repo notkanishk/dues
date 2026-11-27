@@ -4,6 +4,9 @@ export type Money = { readonly paise: number; readonly currency: "INR" };
 
 export const zero: Money = { paise: 0, currency: "INR" };
 
+/** A stored row's paise and currency as Money; none while the amount is null. The currency is cast, not checked: Dues writes only INR. */
+export const money = (paise: number | null, currency: string): Money | null => (paise === null ? null : { paise, currency: currency as "INR" });
+
 // Indian grouping ("1,00,000"), Western ("100,000") or plain digits; mixed or short groups ("1,50") are not amounts.
 const RUPEES = /^₹?\s*(\d{1,2}(?:,\d{2})*,\d{3}|\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/;
 

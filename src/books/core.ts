@@ -114,6 +114,31 @@ export type MoveBill = { readonly type: "MoveBill"; readonly billId: string; rea
 export type DetachBill = { readonly type: "DetachBill"; readonly billId: string };
 /** A leftover under this is offered "₹1 left. Close the order?"; from it up, the three-way question (decision 55). */
 export const LEFTOVER_QUESTION_FROM: Money = { paise: 1000, currency: "INR" };
+/** The Home Advance block (expense-tracking "Home lists and the Advance block"): red below this much left… */
+export const ADVANCE_RED_BELOW: Money = { paise: 0, currency: "INR" };
+/** …amber while this percentage of the total or less is left, green above it. */
+export const ADVANCE_AMBER_AT_PERCENT = 15;
+
+/**
+ * What Advance left is made of, over one Claimant's Expenses of one Fund (expense-tracking "Advance balance"): the
+ * amounts actually received only, so a written-off Refund or remainder (Not claiming) never raises it.
+ */
+export type AdvanceInputs = {
+  readonly total: Money;
+  readonly payments: Money;
+  readonly refundsReceived: Money;
+  /** Σ Reimbursements received for Claims of that Fund. */
+  readonly reimbursementsReceived: Money;
+};
+/** Advance left = total − Σ Payments + Σ Refunds received + Σ Reimbursements received. May go below zero. */
+export const advanceLeft = (a: AdvanceInputs): Money => minus(sum([a.total, a.refundsReceived, a.reimbursementsReceived]), a.payments);
+export type AdvanceState = "red" | "amber" | "green" | "hidden";
+/** The block's colour; hidden while the Advance is off (total null). Integer paise only: left × 100 ≤ total × 15. */
+export function advanceState(total: Money | null, left: Money | null): AdvanceState {
+  if (!total || !left) return "hidden";
+  if (left.paise < ADVANCE_RED_BELOW.paise) return "red";
+  return left.paise * 100 <= total.paise * ADVANCE_AMBER_AT_PERCENT ? "amber" : "green";
+}
 /** The remark a leftover's No bill starts with (FUNCTIONAL §2 Bill, W2.9); the Claimant can edit it. */
 export const NO_INVOICE_REMARK = "No invoice from seller";
 const CLOSE_REASONS: readonly string[] = ["personal", "duplicate", "written_off"] satisfies CloseReason[];
