@@ -186,10 +186,12 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
       const exact = e.openAmount.paise === facts.total.paise;
       const smaller = e.kind === "online" && e.openAmount.paise > facts.total.paise;
       const order = sameRef(facts.orderRef, e.orderRef);
+      const shopMatched = shopMatches(shop, e);
       // A Payback expects a bill of its amount from any vendor (W9): the vendor check is skipped for that amount only.
-      const fit = { e, order, vendor: shopMatches(shop, e) || (e.payback && exact), exact, days, auto: false };
+      // Skipped is not passed: it ranks the Payback, but never auto-attaches it.
+      const fit = { e, order, vendor: shopMatched || (e.payback && exact), exact, days, auto: false };
       // A candidate: exact amount in the window, a larger online Order in the window, or the same order number.
-      return (inWindow && (exact || smaller)) || order ? { ...fit, auto: inWindow && (exact || smaller) && (order || fit.vendor) } : null;
+      return (inWindow && (exact || smaller)) || order ? { ...fit, auto: inWindow && (exact || smaller) && (order || shopMatched) } : null;
     })
     .filter((f): f is Fit => f !== null)
     .sort(betterFit);
@@ -200,7 +202,9 @@ function proposeForBill(facts: BillFacts, candidates: readonly CandidateExpense[
   const anyExact = fits.some((f) => f.exact);
   const auto = fits.filter((f) => (f.auto && (f.exact || !anyExact)) || (fits.length === 1 && f.exact && f.days <= config.billWindowDays));
   const byOrder = auto.filter((f) => f.order);
-  const chosen = byOrder.length === 1 ? byOrder[0] : auto.length === 1 ? auto[0] : null;
+  // A Payback awaiting this exact amount among several candidates is a real rival only a person can rule out.
+  const paybackWaits = fits.length > 1 && fits.some((f) => f.e.payback && f.exact);
+  const chosen = byOrder.length === 1 ? byOrder[0] : auto.length === 1 && !paybackWaits ? auto[0] : null;
   if (chosen) return { type: "attach", expenseId: chosen.e.id };
   const [best, ...rest] = fits;
   return { type: "attachWithCheck", expenseId: best.e.id, others: rest.map((f) => f.e.id) };
