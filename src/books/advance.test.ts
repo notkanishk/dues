@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, count, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/src/db/index";
-import { auditLog } from "@/src/db/schema";
+import { auditLog, expenses } from "@/src/db/schema";
 import { createBooks, type Result } from "./books";
 import { type Actor, type CloseReason, type LogExpense, MAKERSPACE } from "./core";
 
@@ -234,6 +234,18 @@ describe("Closing an Expense with the Advance on", () => {
     expect(await leftOf(mickey, MAKERSPACE)).toBe(500_000);
     ok(await books.execute(mickey, { type: "CloseExpense", expenseId, reason, refunds: {} }));
     expect(await leftOf(mickey, MAKERSPACE)).toBe(left);
+  });
+});
+
+describe("A draft Expense with the Advance on", () => {
+  // ponytail: the spec is silent on drafts; held out of Σ Payments until the owner confirms (see advancesOf).
+  it("is no Payment until confirmed: a ₹2,500.00 draft in Makerspace leaves ₹10,000.00", async () => {
+    const mickey = claimant();
+    ok(await setAdvance(mickey, MAKERSPACE, 1_000_000));
+    const { expenseId } = await pay(mickey, MAKERSPACE, 250_000);
+    // No command makes a draft yet (Intake does, later): the row is set as Intake will write it.
+    await db.update(expenses).set({ draft: true }).where(eq(expenses.id, expenseId));
+    expect(await leftOf(mickey, MAKERSPACE)).toBe(1_000_000);
   });
 });
 
