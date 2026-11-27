@@ -430,7 +430,10 @@ export function createBooks({ db, now, enqueue }: Deps) {
   }
 
   return {
-    /** Every write. Typed rejections; throws only when the database fails, and then nothing is written. */
+    /**
+     * Every write. Typed rejections; throws when the database fails, or with OwnersMoved when owners still moved under it
+     * after 3 tries, and then nothing is written.
+     */
     async execute(actor: Actor, command: Command, opts: { idempotencyKey?: string } = {}): Promise<Result> {
       if (!mayEnter(actor)) return forbidden;
       for (let tries = 1; ; tries++) {
@@ -438,6 +441,7 @@ export function createBooks({ db, now, enqueue }: Deps) {
           return await attempt(actor, command, opts.idempotencyKey);
         } catch (e) {
           // Two Actors raced on one new key, or a Bill changed owner before the lock: the transaction rolled back; rerun it.
+          // ponytail: 3 tries, then the error reaches the caller; a backoff or more tries if owners ever churn that fast.
           if (tries < 3 && (isKeyRace(e) || e instanceof OwnersMoved)) continue;
           throw e;
         }
