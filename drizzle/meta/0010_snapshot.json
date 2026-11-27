@@ -521,13 +521,6 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": false
-        },
-        "advance_currency": {
-          "name": "advance_currency",
-          "type": "char(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'INR'"
         }
       },
       "indexes": {},

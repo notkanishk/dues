@@ -258,7 +258,6 @@ export const fundSettings = pgTable(
     position: integer("position"),
     hidden: boolean("hidden").notNull().default(false),
     advancePaise: bigint("advance_paise", { mode: "number" }),
-    advanceCurrency: char("advance_currency", { length: 3 }).notNull().default("INR"),
   },
   (t) => [primaryKey({ columns: [t.claimantId, t.fundId] }), check("fund_settings_advance_paise", sql`${t.advancePaise} >= 0`)],
 );
